@@ -9,6 +9,8 @@ from typing import Optional
 from playwright.async_api import async_playwright, BrowserContext
 
 from stealth.advanced_stealth import get_stealth_script, StealthConfig
+from stealth.tls_fingerprint import get_tls_manager
+from recovery.anti_block_orchestrator import AntiBlockOrchestrator
 from behavior.human_behavior import HumanBehavior
 from behavior.orchestration import BehaviorOrchestrator
 from sessions.session_manager import SessionManager
@@ -34,6 +36,7 @@ class AgentBrowser:
         self.logger = None
         self.scraper = None
         self.ai = None
+        self.recovery = None
         self.context: Optional[BrowserContext] = None
         self.browser = None
     
@@ -45,6 +48,19 @@ class AgentBrowser:
         user_data.mkdir(parents=True, exist_ok=True)
         
         extra_headers = get_extra_http_headers()
+
+        # TLS Fingerprint spoofing (region-aware)
+        self.tls_manager = get_tls_manager("global", self.session.get("name"))
+        self.tls_manager.log_fingerprint_choice()
+        tls_args = self.tls_manager.get_launch_args()
+
+        base_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--no-sandbox",
+        ]
+        all_args = list(set(base_args + tls_args))
+
         
         self.browser = await pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data),
@@ -55,11 +71,7 @@ class AgentBrowser:
             locale="en-US",
             timezone_id="Asia/Tokyo",
             extra_http_headers=extra_headers,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--no-sandbox",
-            ],
+            args=all_args,
         )
         
         # Inject advanced stealth
@@ -105,6 +117,40 @@ class AgentBrowser:
         
         return False
     
+    async def safe_goto(self, url: str, warm_up: bool = True, platform: str = "unknown"):
+        """
+        Navigate with full anti-block recovery.
+        Uses the AntiBlockOrchestrator for intelligent detection and recovery.
+        Recommended for production / high-reliability use.
+        """
+        if not self.browser:
+            raise RuntimeError("Browser not launched. Call launch() first.")
+        
+        if not self.recovery:
+            # Fallback to normal goto if recovery not initialized
+            return await self.goto(url, warm_up=warm_up)
+
+        async def _navigate():
+            if warm_up and "linkedin.com" in url:
+                await self.browser.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                await self.human.scroll_naturally(280)
+                await self.human.think(900, 1600)
+            
+            response = await self.browser.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await self.human.think(500, 1200)
+            return response
+
+        try:
+            result = await self.recovery.execute_with_recovery(
+                func=_navigate,
+                platform=platform,
+                url=url
+            )
+            return True
+        except Exception as e:
+            self.logger.log_error("safe_goto_failed", str(e), {"url": url, "platform": platform})
+            return False
+
     async def close(self):
         if self.browser:
             await self.browser.close()
