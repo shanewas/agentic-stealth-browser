@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Optional
 from playwright.async_api import async_playwright, BrowserContext
 
-from ..stealth.advanced_stealth import get_stealth_script, StealthConfig
-from ..behavior.human_behavior import HumanBehavior
-from ..sessions.session_manager import SessionManager
+from stealth.advanced_stealth import get_stealth_script, StealthConfig
+from behavior.human_behavior import HumanBehavior
+from behavior.orchestration import BehaviorOrchestrator
+from sessions.session_manager import SessionManager
+from proxy.proxy_manager import ProxyManager
 
 
 class AgentBrowser:
@@ -22,6 +24,7 @@ class AgentBrowser:
     def __init__(self, session_name: Optional[str] = None, anonymous: bool = False):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
+        self.proxy_manager = ProxyManager()
         self.human = None
         self.context: Optional[BrowserContext] = None
         self.browser = None
@@ -51,8 +54,9 @@ class AgentBrowser:
         # Inject advanced stealth
         await self.browser.add_init_script(get_stealth_script())
         
-        # Create human behavior controller
+        # Create human behavior controller + orchestrator
         self.human = HumanBehavior(self.browser)
+        self.orchestrator = BehaviorOrchestrator(self.human)
         
         return self.browser
     

@@ -40,25 +40,35 @@ class HumanBehavior:
             
             await self.page.type(selector, char, delay=self.rng.uniform(35, 160))
     
-    async def move_mouse_naturally(self, x: int, y: int):
-        """Move mouse in a slightly curved, noisy path"""
+    async def move_mouse_naturally(self, x: int, y: int, speed: str = "normal"):
+        """Move mouse with realistic human curves and micro-corrections"""
         try:
-            box = await self.page.evaluate("() => ({x: window.scrollX || 0, y: window.scrollY || 0})")
-            current_x = box.get("x", 400)
-            current_y = box.get("y", 300)
+            pos = await self.page.evaluate("() => ({x: window.mouseX || 500, y: window.mouseY || 350})")
+            current_x = pos.get("x", 500)
+            current_y = pos.get("y", 350)
         except:
-            current_x, current_y = 400, 300
+            current_x, current_y = 500, 350
+
+        # More steps = slower, more natural movement
+        steps = self.rng.randint(18, 35) if speed == "normal" else self.rng.randint(8, 16)
         
-        steps = self.rng.randint(10, 22)
         for i in range(steps):
             progress = (i + 1) / steps
-            # Add some noise
-            noise_x = self.rng.uniform(-12, 12)
-            noise_y = self.rng.uniform(-8, 8)
-            px = current_x + (x - current_x) * progress + noise_x
-            py = current_y + (y - current_y) * progress + noise_y
+            
+            # Cubic ease + small sinusoidal wobble (very human)
+            ease = progress * progress * (3 - 2 * progress)
+            wobble = (self.rng.random() - 0.5) * 8 * (1 - abs(progress - 0.5) * 1.5)
+            
+            px = current_x + (x - current_x) * ease + wobble
+            py = current_y + (y - current_y) * ease + wobble * 0.6
+            
             await self.page.mouse.move(px, py)
-            await asyncio.sleep(self.rng.uniform(0.008, 0.035))
+            await asyncio.sleep(self.rng.uniform(0.006, 0.028))
+
+        # Final micro-correction (very human)
+        if self.rng.random() < 0.6:
+            await asyncio.sleep(self.rng.uniform(0.03, 0.08))
+            await self.page.mouse.move(x + self.rng.randint(-3, 3), y + self.rng.randint(-2, 2))
     
     async def scroll_naturally(self, total_pixels: int = 400, direction: str = "down"):
         """Scroll in small, human-like increments"""
