@@ -1,36 +1,11 @@
 # Agentic Stealth Browser
 
-Production-grade, human-mimicking browser automation framework designed for autonomous agents.
+Production-grade, human-mimicking browser automation framework for autonomous agents.
 
-## Goals
+**Repository:** https://github.com/shanewas/agentic-stealth-browser (Private)
 
-- Extremely high undetectability (LinkedIn, Upwork, general scraping)
-- Deep human behavior simulation
-- Isolated named + anonymous sessions
-- Reusable across projects
+## Current Status
 
-## Current Status (Iteration 1)
+Iteration 1 complete — foundation built.
 
-- [x] Advanced fingerprint spoofing (WebGL, Canvas, Audio, Permissions, WebRTC)
-- [x] Human behavior primitives (mouse, typing, scrolling, thinking)
-- [x] Session management (named + anonymous sessions)
-- [x] Core `AgentBrowser` class
-
-## Next Iterations
-
-- Behavioral orchestration engine
-- Automatic session warming
-- Detection evasion testing suite
-- Proxy integration layer
-- Autonomous decision making
-
-## Usage
-
-```python
-from core.agent_browser import AgentBrowser
-
-browser = AgentBrowser(session_name="my-linkedin", anonymous=False)
-await browser.launch(headless=True)
-await browser.goto("https://www.linkedin.com/in/someone")
-await browser.close()
-```
+See REVIEW.md for self-assessment and next iteration plan.
