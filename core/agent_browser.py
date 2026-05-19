@@ -14,6 +14,9 @@ from behavior.orchestration import BehaviorOrchestrator
 from sessions.session_manager import SessionManager
 from proxy.proxy_manager import ProxyManager
 from stealth.headers import get_extra_http_headers
+from audit.logger import AuditLogger
+from scraping.scraper import StealthScraper
+from ai.ai_hooks import AIHooks
 
 
 class AgentBrowser:
@@ -27,6 +30,10 @@ class AgentBrowser:
         self.session = self.session_manager.create_session(session_name, anonymous)
         self.proxy_manager = ProxyManager()
         self.human = None
+        self.orchestrator = None
+        self.logger = None
+        self.scraper = None
+        self.ai = None
         self.context: Optional[BrowserContext] = None
         self.browser = None
     
@@ -61,6 +68,15 @@ class AgentBrowser:
         # Create human behavior controller + orchestrator
         self.human = HumanBehavior(self.browser)
         self.orchestrator = BehaviorOrchestrator(self.human)
+        
+        # Initialize audit logging
+        self.logger = AuditLogger(self.session["name"])
+        
+        # Initialize scraper
+        self.scraper = StealthScraper(self.browser, self.human, self.orchestrator)
+        
+        # Initialize AI hooks (disabled by default)
+        self.ai = AIHooks(provider="none")
         
         return self.browser
     
