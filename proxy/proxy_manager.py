@@ -36,6 +36,7 @@ class ProxyManager:
     def __init__(self):
         self.current_config: Optional[ProxyConfig] = None
         self._proxy_history: list = []
+        self._rotation_count: int = 0  # #163: track for exhaustion fallback behavior
 
     def create_decodo_config(
         self,
@@ -71,6 +72,7 @@ class ProxyManager:
 
         self.current_config = config
         self._proxy_history.append({"action": "create", "config": config, "ts": __import__("time").time()})
+        self._rotation_count = getattr(self, "_rotation_count", 0) + 1
         return config
 
     def select_tier(self, desired_tier: ProxyTier, country: str = "jp", **kwargs) -> ProxyConfig:
@@ -157,13 +159,36 @@ class ProxyManager:
             "history_length": len(self._proxy_history)
         }
 
+    def _safe_extract_base_user(self, proxy_username: str) -> str:
+        """Robustly extract the base 'user' part from Decodo proxy username string.
+        Format is typically 'user-REALUSER-country-...-session-...'.
+        Never crashes; falls back to 'default'.
+        Fixes #10 brittle parsing that could crash recovery/rotate paths.
+        """
+        if not proxy_username or not isinstance(proxy_username, str):
+            return "default"
+        try:
+            parts = proxy_username.split("-")
+            if len(parts) > 1 and parts[0].lower() == "user":
+                return parts[1]
+            if proxy_username.lower().startswith("user-"):
+                after = proxy_username[5:]
+                if "-" in after:
+                    return after.split("-", 1)[0]
+                if after:
+                    return after
+        except Exception:
+            pass
+        return "default"
+
     def rotate_proxy(self, reason: str = "manual") -> Optional[ProxyConfig]:
         """Create a fresh sticky session config (for recovery use)."""
         if not self.current_config:
             return None
         cfg = self.current_config
+        base_user = self._safe_extract_base_user(getattr(cfg, 'username', None))
         new_config = self.create_decodo_config(
-            user=cfg.username.split('-')[1] if '-' in cfg.username else "default",
+            user=base_user,
             password=cfg.password,
             country=cfg.country,
             session_name=f"rotated-{__import__('uuid').uuid4().hex[:6]}",

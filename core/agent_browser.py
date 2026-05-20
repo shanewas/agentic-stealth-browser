@@ -186,6 +186,12 @@ class AgentBrowser:
         if self.recovery:
             self.recovery.set_current_session_name(self.session.get("name") if self.session else None)
 
+        # Rotation relaunch hook wiring (#38, #16): recovery can now actually change the live browser/proxy/session
+        # by calling this after deciding to rotate + sleeping. Hook is async, updates self.page etc dynamically
+        # so that the next execute_with_recovery iteration'\''s _navigate func sees fresh context. Safe, no reentrancy on recovery itself.
+        if self.recovery:
+            self.recovery._rotation_relaunch_hook = self._perform_rotation_relaunch
+
         # Store playwright instance for proper cleanup
         self._pw = pw
 
@@ -289,6 +295,12 @@ class AgentBrowser:
             self.human = HumanBehavior(self.page)
             self.orchestrator = BehaviorOrchestrator(self.human)
             self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
+
+            # Re-init mouse tracker post-rotation for position continuity (#18 related)
+            try:
+                await self.human.initialize_mouse_tracker()
+            except Exception:
+                pass
 
             # 7. Update recovery's browser ref and page_getter (lambda will pick up new self.page on next call)
             if self.recovery:

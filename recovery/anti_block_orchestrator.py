@@ -383,52 +383,71 @@ class AntiBlockOrchestrator:
                 self.logger.log_error("account_restriction_cleanup_failed", str(e), {"session": self.current_session_name})
 
         # === Actual rotation logic ===
+        # #179 fix: only rotate for real blocks (proxy/captcha/account), NOT on soft/hard rate-limit backoffs.
+        # Rate-limit 403/429 are common backoff signals; rotating proxy wastes sticky sessions and doesn't help account-side limits.
+        # Backoff + retry still happens; rotation only for block types where new identity helps.
         should_rotate_session = context.attempt >= strategy.get("rotate_session_after", 3)
         should_rotate_proxy = context.attempt >= strategy.get("rotate_proxy_after", 3)
 
-        if should_rotate_session and self.session_manager:
+        is_rate_limit_backoff = block_type in (BlockType.SOFT_RATE_LIMIT, BlockType.HARD_RATE_LIMIT)
+        effective_rotate_session = should_rotate_session and not is_rate_limit_backoff
+        effective_rotate_proxy = should_rotate_proxy and not is_rate_limit_backoff
+
+        if effective_rotate_session and self.session_manager:
             try:
                 self.logger.log_action("recovery_rotate_session", {
                     "platform": context.platform,
-                    "attempt": context.attempt
+                    "attempt": context.attempt,
+                    "block_type": block_type.value
                 })
                 # Create a fresh session
                 new_session = self.session_manager.create_session(
                     session_name=f"recovery-{context.platform}-{context.attempt}",
                     anonymous=True
                 )
-                context.metadata["new_session"] = new_session.get("name")
+                context.metadata["new_session_meta"] = new_session  # full meta for relaunch hook (#38)
+                context.metadata["new_session"] = new_session.get("name")  # keep for backward compat in logs
             except Exception as e:
                 self.logger.log_error("session_rotation_failed", str(e))
 
-        if should_rotate_proxy and self.proxy_manager:
-            try:
-                self.logger.log_action("recovery_rotate_proxy", {
+        if effective_rotate_proxy and self.proxy_manager:
+            rot_count = getattr(self.proxy_manager, "_rotation_count", 0)
+            if rot_count > 10:
+                # #163: proxy "pool" (rotation count) exhausted -> explicit fallback: skip rotates, rely on backoff/circuit
+                self.logger.log_action("proxy_rotations_exhausted_fallback", {
+                    "rotations": rot_count,
                     "platform": context.platform,
                     "attempt": context.attempt
                 })
-                # Generate new sticky session (robust, #99/#10)
-                if getattr(self.proxy_manager, 'current_config', None):
-                    cfg = self.proxy_manager.current_config
-                    base_user = self._safe_extract_base_user(getattr(cfg, 'username', None))
-                    pwd = getattr(cfg, 'password', "")
-                    ctry = getattr(cfg, 'country', "jp")
-                    new_config = self.proxy_manager.create_decodo_config(
-                        user=base_user,
-                        password=pwd,
-                        country=ctry,
-                        session_name=f"recovery-{context.attempt}",
-                        duration_minutes=30  # shorter duration for recovery
-                    )
-                    # Ensure manager state is updated for future use
-                    self.proxy_manager.current_config = new_config
-                    context.metadata["new_proxy"] = new_config.session_name
-                    context.metadata["new_proxy_config"] = {
-                        "session_name": new_config.session_name,
-                        "country": ctry
-                    }
-            except Exception as e:
-                self.logger.log_error("proxy_rotation_failed", str(e))
+            else:
+                try:
+                    self.logger.log_action("recovery_rotate_proxy", {
+                        "platform": context.platform,
+                        "attempt": context.attempt,
+                        "block_type": block_type.value
+                    })
+                    # Generate new sticky session (robust, #99/#10)
+                    if getattr(self.proxy_manager, 'current_config', None):
+                        cfg = self.proxy_manager.current_config
+                        base_user = self._safe_extract_base_user(getattr(cfg, 'username', None))
+                        pwd = getattr(cfg, 'password', "")
+                        ctry = getattr(cfg, 'country', "jp")
+                        new_config = self.proxy_manager.create_decodo_config(
+                            user=base_user,
+                            password=pwd,
+                            country=ctry,
+                            session_name=f"recovery-{context.attempt}",
+                            duration_minutes=30  # shorter duration for recovery
+                        )
+                        # Ensure manager state is updated for future use
+                        self.proxy_manager.current_config = new_config
+                        context.metadata["new_proxy"] = new_config.session_name
+                        context.metadata["new_proxy_config"] = {
+                            "session_name": new_config.session_name,
+                            "country": ctry
+                        }
+                except Exception as e:
+                    self.logger.log_error("proxy_rotation_failed", str(e))
 
         # Calculate and apply backoff
         delay = self.calculate_backoff(context)
@@ -438,6 +457,18 @@ class AntiBlockOrchestrator:
         )
 
         await asyncio.sleep(delay)
+
+        # #38/#16: if we performed a rotation, invoke the relaunch hook (if wired) so the live browser context/proxy is updated.
+        if context.metadata.get("new_session_meta") or context.metadata.get("new_proxy"):
+            hook = getattr(self, "_rotation_relaunch_hook", None)
+            if callable(hook):
+                try:
+                    await hook(
+                        new_session_meta=context.metadata.get("new_session_meta"),
+                        new_proxy_name=context.metadata.get("new_proxy")
+                    )
+                except Exception as e:
+                    self.logger.log_error("rotation_hook_failed", str(e))
 
         # Update history
         self.recovery_history[context.platform] = self.recovery_history.get(context.platform, 0) + 1
