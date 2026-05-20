@@ -7,7 +7,7 @@ from typing import Dict
 
 
 def get_realistic_headers() -> Dict[str, str]:
-    """Return headers that closely match real Chrome on Windows"""
+    """Return headers that closely match real Chrome on Windows (improved client hints for #231)"""
     return {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "en-US,en;q=0.9",
@@ -15,6 +15,8 @@ def get_realistic_headers() -> Dict[str, str]:
         "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Ch-Ua-Platform-Version": '"15.0.0"',
+        "Sec-Ch-Ua-Full-Version-List": '"Chromium";v="124.0.6367.60", "Google Chrome";v="124.0.6367.60", "Not-A.Brand";v="99.0.0.0"',
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
@@ -25,10 +27,16 @@ def get_realistic_headers() -> Dict[str, str]:
 
 
 def get_extra_http_headers() -> Dict[str, str]:
-    """Additional headers for Playwright context"""
+    """Additional headers for Playwright context.
+    
+    Improved for #231: More complete and consistent client hints.
+    These should match the User-Agent and TLS fingerprint used in the same session.
+    """
     return {
         "Accept-Language": "en-US,en;q=0.9",
         "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Ch-Ua-Platform-Version": '"15.0.0"',
+        "Sec-Ch-Ua-Full-Version-List": '"Chromium";v="124.0.6367.60", "Google Chrome";v="124.0.6367.60", "Not-A.Brand";v="99.0.0.0"',
     }

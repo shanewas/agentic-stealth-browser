@@ -48,8 +48,24 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     script = """
     // === Advanced Agentic Stealth v0.4 (canvas/Offscreen/WebGL2/font fixes #25 #27 #94 #150 #210 #262 #95 + webrtc #170) ===
     
-    // Core anti-detection
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    // Core anti-detection (improved for #138)
+    Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+        configurable: true
+    });
+    
+    // Hide webdriver from property descriptors (stronger than simple getter)
+    try {
+        delete Object.getPrototypeOf(navigator).webdriver;
+    } catch (e) {}
+    
+    // Plugins & mimeTypes (common bot detection)
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => ({ length: 5, item: () => null, namedItem: () => null })
+    });
+    Object.defineProperty(navigator, 'mimeTypes', {
+        get: () => ({ length: 2, item: () => null, namedItem: () => null })
+    });
     
     // Hardware fingerprint (consistent)
     Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
