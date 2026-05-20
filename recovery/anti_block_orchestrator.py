@@ -323,6 +323,16 @@ class AntiBlockOrchestrator:
             except Exception as e:
                 self.logger.log_error("account_restriction_cleanup_failed", str(e), {"session": self.current_session_name})
 
+        # #90 P1 enhancement: also forcibly clear cookies on the browser context itself (immediate invalidation)
+        if block_type == BlockType.ACCOUNT_RESTRICTION and self.browser:
+            try:
+                await self.browser.clear_cookies()
+                self.logger.log_action("account_restriction_cookies_cleared", {
+                    "session": self.current_session_name or "unknown"
+                })
+            except Exception as e:
+                self.logger.log_error("account_restriction_cookies_clear_failed", str(e), {"session": self.current_session_name})
+
         # === Actual rotation logic ===
         should_rotate_session = context.attempt >= strategy.get("rotate_session_after", 3)
         should_rotate_proxy = context.attempt >= strategy.get("rotate_proxy_after", 3)

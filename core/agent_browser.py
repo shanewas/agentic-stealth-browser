@@ -354,6 +354,7 @@ class AgentBrowser:
         """Ensure cookies are fresh before long operations."""
         if not self.cookie_manager:
             return {"status": "no_manager"}
+        return await self.cookie_manager.refresh_cookies_if_needed(max_age_hours)
 
     async def cleanup_compromised_session(self, remove_dir: bool = False) -> Dict[str, Any]:
         """#90 P1: Invalidate current session cookies + mark as compromised.
@@ -369,8 +370,11 @@ class AgentBrowser:
                 result = self.session_manager.cleanup_session(name, remove_dir=remove_dir)
 
         if self.cookie_manager:
-            c = await self.cookie_manager.clear_cookies()
-            result["cookie_clear"] = c
+            try:
+                c = await self.cookie_manager.clear_cookies()
+                result["cookie_clear"] = c
+            except Exception as e:
+                result["cookie_clear"] = {"status": "error", "message": str(e)}
 
         # Direct clear on context too (defense in depth)
         if self.browser:

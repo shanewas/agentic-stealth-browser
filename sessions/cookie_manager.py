@@ -114,6 +114,26 @@ class CookieManager:
             "note": "Cookie refresh typically requires re-login or token refresh flows outside this manager."
         }
 
+    async def clear_cookies(self) -> Dict[str, Any]:
+        """#90 P1: Clear all in-memory cookies and from the Playwright BrowserContext.
+        Called during compromised session invalidation to prevent reuse of tainted auth.
+        """
+        count = len(self.cookies)
+        self.cookies = []
+        cleared_context = False
+        if self.browser_context:
+            try:
+                await self.browser_context.clear_cookies()
+                cleared_context = True
+            except Exception as e:
+                return {"status": "partial", "cleared_memory": count, "error": str(e)}
+        self.last_refresh = datetime.now(timezone.utc)
+        return {
+            "status": "success",
+            "cleared_memory": count,
+            "cleared_context": cleared_context,
+        }
+
     async def get_cookie_health(self) -> Dict[str, Any]:
         """Return detailed health snapshot of current cookies."""
         if not self.cookies:
