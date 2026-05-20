@@ -90,7 +90,7 @@ class AntiBlockOrchestrator:
         }
     }
 
-    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None):
+    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None, rng: Optional[random.Random] = None):
         self.browser = browser          # usually the BrowserContext (for future use)
         self.session_manager = session_manager
         self.proxy_manager = proxy_manager
@@ -116,6 +116,9 @@ class AntiBlockOrchestrator:
         self.failure_counts: Dict[str, int] = {}
         self.circuit_open_until: Dict[str, float] = {}
         self.cost_tracker: Dict[str, float] = {}  # stub for #252 cost awareness
+
+        # rng support for #222: use per-AgentBrowser rng instance (falls back to own for direct use/tests; eliminates global random in jitter)
+        self.rng = rng or random.Random()
 
         # #90 P1 cookie cleanup support
         self.current_session_name: Optional[str] = None
@@ -297,7 +300,7 @@ class AntiBlockOrchestrator:
         jitter = strategy["jitter"]
 
         backoff = min(base * (2 ** (context.attempt - 1)), max_backoff)
-        jitter_amount = backoff * jitter * random.uniform(-1, 1)
+        jitter_amount = backoff * jitter * self.rng.uniform(-1, 1)
         return max(5.0, backoff + jitter_amount)
 
     def _safe_extract_base_user(self, proxy_username: str) -> str:
@@ -499,10 +502,10 @@ class AntiBlockOrchestrator:
 
 
 # Convenience function
-def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None):
+def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None, rng: Optional[random.Random] = None):
     # Support light_mode for callers (final light_mode path improvement for perf P1s)
     if light_mode is not None:
         light_detection = bool(light_mode)
     return AntiBlockOrchestrator(
-        browser, session_manager, proxy_manager, page_getter=page_getter, light_detection=light_detection
+        browser, session_manager, proxy_manager, page_getter=page_getter, light_detection=light_detection, rng=rng
     )

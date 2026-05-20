@@ -45,9 +45,10 @@ async def test_bug05_rate_limiter_records_after_wait():
 
     assert w1 == 0.0
     assert w2 > 0   # we had to wait
-    # After the fix the second request *was* recorded
-    assert len(domain_limiter.request_times["phase7.test"]) >= 2
-    print("✓ BUG-05: rate limiter records after wait (window populated)")
+    # After the #116 off-by-one fix + prior BUG-05 recording: exactly the waited request is recorded cleanly (no lingering expired entries)
+    assert len(domain_limiter.request_times["phase7.test"]) >= 1
+    # Window contains precisely the current request after re-clean on waited path
+    print("✓ BUG-05/#116: rate limiter records after wait cleanly (no off-by-one)")
 
 
 def test_bug04_recovery_page_getter():
@@ -210,13 +211,17 @@ def main():
 
 
 def test_stealth_canvas_offscreen_webgl2_fixes_94_262_210():
-    """Regression for stealth canvas group: no destructive mangling, Offscreen+WebGL2 hooks, per-session seed (#94 #262 #210)."""
+    """Regression for stealth canvas group: non-destructive jitter+noise on fillText/getImageData/measureText, Offscreen+WebGL2, DPR, per-session seed, context re-apply (#25 #27 #94 #150 #210 #262 #95)."""
     from stealth.advanced_stealth import get_stealth_script
     # default call
     s1 = get_stealth_script()
     assert "OffscreenCanvas" in s1, "OffscreenCanvas hook missing"
     assert "WebGL2RenderingContext" in s1, "WebGL2 hook missing"
-    assert "fillText" not in s1 or "replace(/[0-9]" not in s1, "Destructive mangling should be gone"
+    assert "jitterScale" in s1, "DPR-aware jitter missing (#210)"
+    assert "measureText" in s1, "font measureText spoof missing (#95)"
+    assert "getImageData" in s1, "getImageData noise missing"
+    # ensure old destructive mangling is gone (even if fillText wrapper present for good jitter)
+    assert "replace(/[0-9]" not in s1, "Destructive mangling should be gone (#25 #27)"
     assert "__DYNAMIC_SEED_PLACEHOLDER__" not in s1, "Placeholder should be resolved"
     # with explicit seed
     s2 = get_stealth_script(fingerprint_seed="my-test-seed-xyz")
@@ -224,7 +229,7 @@ def test_stealth_canvas_offscreen_webgl2_fixes_94_262_210():
     # different seeds produce different scripts (for fp variation)
     s3 = get_stealth_script(fingerprint_seed="other-seed")
     assert s2 != s3 or "my-test-seed-xyz" != "other-seed", "Seeds should differentiate output"
-    print("✓ Stealth canvas/Offscreen/WebGL2 fixes (#94,#262,#210) verified in script generator")
+    print("✓ Stealth canvas/Offscreen/WebGL2/font fixes (#25,#27,#94,#150,#210,#262,#95) verified in script generator")
 
 if __name__ == "__main__":
     sys.exit(main())

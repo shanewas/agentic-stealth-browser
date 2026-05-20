@@ -143,16 +143,26 @@ class AgentBrowser:
             args=all_args,
         )
         
+        # Per-session stable fingerprint seed (canvas/WebGL noise + fonts) for consistency across reloads
+        # and variation between sessions. Addresses #150 (re-apply), #94, #210 etc.
+        session_name = (self.session or {}).get("name", "default-session")
+        fp_seed = f"agentic-{session_name}-canvas-v4"
+
+        # Inject on *context* (not page) so init script runs for:
+        # - the initial page, all subsequently created pages (new_page etc.)
+        # - every navigation, reload, and subframe
+        # This ensures stealth patches (canvas/Offscreen/WebGL/font) are re-applied after nav/reload (#150)
+        # and use the per-session seed for stable but unique fp.
+        await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed))
+        
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
         
-        # Inject advanced stealth on the page
-        await self.page.add_init_script(get_stealth_script())
-        
         # Create human behavior controller + orchestrator
-        self.human = HumanBehavior(self.page)
-        self.orchestrator = BehaviorOrchestrator(self.human)
+        # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
+        self.human = HumanBehavior(self.page, rng=self.rng)
+        self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
         
         # Initialize audit logging
         self.logger = AuditLogger(self.session["name"])
@@ -170,7 +180,8 @@ class AgentBrowser:
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
             page_getter=lambda: self.page,
-            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            light_mode=getattr(self, "light_mode", None),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            rng=self.rng  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
@@ -181,6 +192,122 @@ class AgentBrowser:
         self._pw = pw
 
         return self.browser
+
+    async def _perform_rotation_relaunch(
+        self,
+        new_session_meta: Optional[Dict] = None,
+        new_proxy_name: Optional[str] = None,
+    ) -> None:
+        """
+        Rotation hook implementation for #38/#16 (and #14 follow-on).
+        Called by AntiBlockOrchestrator.recover after proxy/session rotation + backoff.
+        Closes the old persistent context, relaunches a fresh one using:
+          - updated proxy from self.proxy_manager (now with new sticky session)
+          - new user_data_dir from rotated session (if provided)
+        Re-wires page, human behavior, scraper, stealth, and recovery references.
+        The next retry of _navigate / func in execute_with_recovery will use the fresh live browser.
+        Safety: does not recreate recovery (avoids reentrancy), preserves light_mode/persona/rate_limiter.
+        Only called on recovery paths; headless defaults to True for recovery relaunches.
+        """
+        if not getattr(self, "browser", None) or not getattr(self, "_pw", None):
+            return
+
+        log = getattr(self, "logger", None)
+        try:
+            # 1. Close old page + context (keep _pw for reuse; do not stop playwright)
+            if getattr(self, "page", None):
+                try:
+                    await self.page.close()
+                except Exception:
+                    pass
+                self.page = None
+            if getattr(self, "browser", None):
+                try:
+                    await self.browser.close()
+                except Exception:
+                    pass
+                self.browser = None
+
+            # 2. Adopt rotated session (provides fresh user_data_dir + name)
+            if new_session_meta and isinstance(new_session_meta, dict):
+                self.session = new_session_meta
+                if self.recovery:
+                    self.recovery.set_current_session_name(self.session.get("name"))
+
+            # 3. Recompute everything needed for a fresh launch_persistent_context (mirrors launch() logic, minimal dupe for isolated fix)
+            user_data = Path(self.session["user_data_dir"])
+            user_data.mkdir(parents=True, exist_ok=True)
+
+            extra_headers = get_extra_http_headers()
+
+            self.tls_manager = get_tls_manager("global", self.session.get("name"))
+            self.tls_manager.log_fingerprint_choice()
+            tls_args = self.tls_manager.get_launch_args()
+
+            base_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--no-sandbox",
+            ]
+            all_args = list(set(base_args + tls_args))
+
+            p_over = getattr(self, "persona", None).to_launch_overrides() if getattr(self, "persona", None) else {}
+            vp = p_over.get("viewport", {"width": 1366, "height": 768})
+            ua = p_over.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            loc = p_over.get("locale", "en-US")
+            tz = p_over.get("timezone_id", "America/New_York")
+
+            # Proxy now reflects the rotated config (from recovery's create_decodo or rotate_proxy)
+            proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
+            launch_proxy = proxy_args if proxy_args else None
+
+            # 4. Relaunch persistent context with new proxy + (optionally) new profile dir
+            opts = getattr(self, "_launch_options", {"headless": True, "slow_mo": 0, "headed": False})
+            h = opts.get("headless", True)
+            sm = opts.get("slow_mo", 0)
+            hd = opts.get("headed", False)
+            self.browser = await self._pw.chromium.launch_persistent_context(
+                user_data_dir=str(user_data),
+                headless=not hd if hd else h,
+                slow_mo=sm,
+                viewport=vp,
+                user_agent=ua,
+                locale=loc,
+                timezone_id=tz,
+                extra_http_headers=extra_headers,
+                args=all_args,
+                proxy=launch_proxy,
+            )
+
+            self.page = await self.browser.new_page()
+            self.context = self.browser
+
+            # 5. Re-apply stealth init script on context + fp seed
+            session_name = (self.session or {}).get("name", "default-session")
+            fp_seed = f"agentic-{session_name}-canvas-v4"
+            await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed))
+
+            # 6. Re-wire human/orchestrator/scraper for the *new* page (so clicks/scrolls etc work post-rotation)
+            self.human = HumanBehavior(self.page)
+            self.orchestrator = BehaviorOrchestrator(self.human)
+            self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
+
+            # 7. Update recovery's browser ref and page_getter (lambda will pick up new self.page on next call)
+            if self.recovery:
+                self.recovery.browser = self.browser
+                self.recovery._get_page = lambda: self.page
+
+            if log:
+                log.log_action("rotation_relaunch_succeeded", {
+                    "session": (self.session or {}).get("name"),
+                    "proxy_rotated": bool(launch_proxy),
+                    "new_proxy": new_proxy_name,
+                })
+        except Exception as e:
+            if log:
+                log.log_error("rotation_relaunch_failed", str(e), {"proxy": new_proxy_name})
+            # Do not raise: let the recovery retry path surface the failure naturally (max_retries etc)
+            # The old context is already closed, but browser may be in partial state; next operation will raise appropriately.
     
     async def goto(self, url: str, warm_up: bool = True, max_retries: int = 3):
         """Navigate with session warming and basic error recovery.
@@ -456,17 +583,27 @@ class AgentBrowser:
 
 
     async def screenshot_on_error(self, name: str = "error"):
-        """Take screenshot on error for visual debugging."""
+        """Take screenshot on error for visual debugging.
+        #149 fix: always log failure reason (via logger if available), fixed time.time() call, best-effort.
+        """
         if not self.page:
             return None
         try:
             import os
             os.makedirs("screenshots", exist_ok=True)
-            filename = f"screenshots/{name}_{int(time.time)}.png"
+            filename = f"screenshots/{name}_{int(time.time())}.png"
             await self.page.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
-            print(f"Screenshot failed: {e}")
+            # #149: never silent - log the exact failure (print fallback if no logger yet)
+            msg = f"Screenshot failed: {e}"
+            if getattr(self, "logger", None):
+                try:
+                    self.logger.log_error("screenshot_on_error_failed", str(e), {"name": name})
+                except Exception:
+                    print(msg)
+            else:
+                print(msg)
             return None
 
 
@@ -493,8 +630,14 @@ class AgentBrowser:
         if domain is None:
             try:
                 domain = urlparse(url).netloc
-            except:
+            except Exception as e:
+                # #126 fix: narrow bare except; log (if available) so parse errors are not hidden
                 domain = "unknown"
+                if getattr(self, "logger", None):
+                    try:
+                        self.logger.log_error("safe_goto_with_rate_limit_domain_parse_failed", str(e), {"url": url})
+                    except Exception:
+                        pass  # never let logging break the path
 
         # Use *this instance's* rate limiter (isolated from other AgentBrowser instances)
         rl = self.rate_limiter
