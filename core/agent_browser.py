@@ -38,6 +38,7 @@ class AgentBrowser:
 
     P1 #79/#87: Each instance now carries its own rate_limiter and metrics (isolated by default).
     Pass shared AccountRateLimiter/MetricsCollector to constructor for coordinated "fleet" use.
+    light_mode (#174/#113): reduces launch/warm-up cost/latency when True (skips heavy warm-ups + auto light downgrade in warm_up_before_work).
     """
 
     def __init__(
@@ -75,7 +76,7 @@ class AgentBrowser:
         self.account_id: Optional[str] = None
         self.light_mode: bool = light_mode  # #174/#113/#92/#84 perf P1 final closer: light_mode now auto-wires to recovery so True reduces expensive content() calls + heavy detection
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: bool = False):
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None):
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -100,7 +101,8 @@ class AgentBrowser:
         """
         if persona is not None:
             self.persona = persona
-        self.light_mode = light_mode
+        if light_mode is not None:
+            self.light_mode = light_mode
 
         pw = await async_playwright().start()
         
@@ -268,7 +270,6 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
-
 
 
 
