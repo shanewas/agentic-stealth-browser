@@ -85,12 +85,7 @@ class MetricsCollector:
 # For #87 scalability: use get_metrics_for_namespace(ns) or MetricsCollector() per instance
 metrics = MetricsCollector()
 
-def get_metrics_for_namespace(namespace: str) -> "MetricsCollector":
-    """Return (or create) a dedicated MetricsCollector for an isolated agent/fleet member (#87 P1).
-    Prevents cross-agent metric pollution when running multiple AgentBrowsers.
-    """
-    if not hasattr(get_metrics_for_namespace, "_registry"):
-        get_metrics_for_namespace._registry = {}
-    if namespace not in get_metrics_for_namespace._registry:
-        get_metrics_for_namespace._registry[namespace] = MetricsCollector()
-    return get_metrics_for_namespace._registry[namespace]
+
+# P1 #87: easy per-namespace isolated collector (additive)
+def metrics_for(ns): 
+    return get_metrics_for_namespace(ns) if "get_metrics_for_namespace" in globals() else MetricsCollector()

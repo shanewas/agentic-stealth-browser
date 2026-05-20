@@ -9,6 +9,7 @@ import time
 import os  # for env vars in launch (also used by other methods)
 from pathlib import Path
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright, BrowserContext
 
 from stealth.advanced_stealth import get_stealth_script, StealthConfig
@@ -23,18 +24,34 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-from production.rate_limiter import domain_limiter, account_limiter  # #87: namespace support for isolated multi AgentBrowser instances
+<<<<<<< HEAD
+from production.rate_limiter import domain_limiter, account_limiter  # see namespace support for #87 P1
+=======
+from production.rate_limiter import domain_limiter, account_limiter, DomainRateLimiter, AccountRateLimiter
+from production.metrics import metrics, MetricsCollector
+>>>>>>> origin/perf/light-mode-174-113
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
+
 
 class AgentBrowser:
     """
     High-undetectability browser for autonomous agents.
     Supports multiple isolated sessions and deep human mimicry.
+
+    P1 #79/#87: Each instance now carries its own rate_limiter and metrics (isolated by default).
+    Pass shared AccountRateLimiter/MetricsCollector to constructor for coordinated "fleet" use.
     """
-    
-    def __init__(self, session_name: Optional[str] = None, anonymous: bool = False, persona: Optional[Persona] = None):
+
+    def __init__(
+        self,
+        session_name: Optional[str] = None,
+        anonymous: bool = False,
+        persona: Optional[Persona] = None,
+        rate_limiter: Optional[AccountRateLimiter] = None,
+        metrics_collector: Optional[MetricsCollector] = None,
+    ):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
         self.proxy_manager = ProxyManager()
@@ -51,6 +68,14 @@ class AgentBrowser:
         self.page = None      # Playwright Page (main) — use this for most page actions
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
         self.persona = persona or DEFAULT_PERSONA  # Persona foundation integration
+
+        # P1 #79/#87 (global singletons + multi-instance isolation):
+        # Each AgentBrowser gets private rate limiting + metrics by default.
+        # This prevents cross-talk between concurrent independent sessions/agents.
+        # Advanced: pass the *same* limiter/metrics to multiple browsers for shared policy.
+        self.rate_limiter: AccountRateLimiter = rate_limiter or AccountRateLimiter()
+        self.metrics: MetricsCollector = metrics_collector or MetricsCollector()
+        self.account_id: Optional[str] = None
     
     async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None):
         """Launch browser with full stealth + human behavior.
@@ -218,7 +243,7 @@ class AgentBrowser:
     async def load_cookies(self, cookies_path: str):
         """
         [DEPRECATED] Legacy cookie loader.
-        Use load_cookies_from_file() + CookieManager instead (more resilient).
+        Use load_cookies_from_file(..., encryption_key=...) + CookieManager for resilient + secure (#82) loading.
         Kept for backward compatibility; fixed .context access (BUG-03).
         """
         import json
@@ -241,6 +266,7 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
+
 
 
 
@@ -301,13 +327,17 @@ class AgentBrowser:
             await asyncio.sleep(1.5)
 
 
-    async def load_cookies_from_file(self, cookies_path: str) -> Dict[str, Any]:
-        """Load cookies using the resilient CookieManager."""
+    async def load_cookies_from_file(self, cookies_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Load cookies using the resilient CookieManager.
+
+        Supports encryption_key for P1 #82 secure (encrypted) cookie loads.
+        Pass the same secret used with save_cookies_to_file(encrypt=True).
+        """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
 
         self.cookie_manager = CookieManager(self.browser)
-        result = await self.cookie_manager.load_cookies(cookies_path)
+        result = await self.cookie_manager.load_cookies(cookies_path, encryption_key=encryption_key)
 
         if result.get("status") == "success":
             # Also initialize session orchestrator
@@ -321,6 +351,25 @@ class AgentBrowser:
             return {"status": "no_manager", "message": "No cookie manager initialized"}
 
         return await self.cookie_manager.get_cookie_health()
+
+    async def save_cookies_to_file(self, cookies_path: str, encrypt: bool = False, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Save cookies to file (plain or encrypted) via CookieManager.
+
+        P1 #82: Use encrypt=True + any secret key for at-rest Fernet encryption + integrity protection.
+        Complements the #90 cleanup flow: store good sessions securely, auto-clean bad ones.
+        """
+        if not self.browser:
+            raise RuntimeError("Browser not launched. Call launch() first.")
+
+        if not self.cookie_manager:
+            self.cookie_manager = CookieManager(self.browser)
+        else:
+            # ensure latest context wiring for cookie ops
+            self.cookie_manager.browser_context = self.browser
+
+        return await self.cookie_manager.save_cookies_to_file(
+            cookies_path, encrypt=encrypt, encryption_key=encryption_key
+        )
 
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
@@ -355,6 +404,7 @@ class AgentBrowser:
         """Ensure cookies are fresh before long operations."""
         if not self.cookie_manager:
             return {"status": "no_manager"}
+        return await self.cookie_manager.refresh_cookies_if_needed(max_age_hours)
 
     async def cleanup_compromised_session(self, remove_dir: bool = False) -> Dict[str, Any]:
         """#90 P1: Invalidate current session cookies + mark as compromised.
@@ -370,8 +420,11 @@ class AgentBrowser:
                 result = self.session_manager.cleanup_session(name, remove_dir=remove_dir)
 
         if self.cookie_manager:
-            c = await self.cookie_manager.clear_cookies()
-            result["cookie_clear"] = c
+            try:
+                c = await self.cookie_manager.clear_cookies()
+                result["cookie_clear"] = c
+            except Exception as e:
+                result["cookie_clear"] = {"status": "error", "message": str(e)}
 
         # Direct clear on context too (defense in depth)
         if self.browser:
@@ -408,9 +461,8 @@ class AgentBrowser:
             result = await action_func()
             duration = time.time() - start
             
-            # Record in metrics if available
-            if hasattr(self, 'metrics'):
-                self.metrics.record_time(name, duration)
+            # Record in per-instance metrics (P1 #79 isolation; always present now)
+            self.metrics.record_time(name, duration)
             
             print(f"[Profile] {name}: {duration:.2f}s")
             return result
@@ -420,40 +472,37 @@ class AgentBrowser:
             raise
 
 
-    async def safe_goto_with_rate_limit(self, url: str, domain: str = None, account: str = None, namespace: Optional[str] = None, **kwargs):
-        """Navigate with rate limiting protection.
-        Pass namespace= for P1 #87 scalability: isolates rate state across multiple logical agents/instances.
-        """
+    async def safe_goto_with_rate_limit(self, url: str, domain: str = None, account: str = None, **kwargs):
+        """Navigate with rate limiting protection (now per-instance for #79/#87 isolation)."""
         if domain is None:
             try:
-                from urllib.parse import urlparse
                 domain = urlparse(url).netloc
             except:
                 domain = "unknown"
 
-        # Wait if rate limit would be exceeded (forward namespace for isolation #87)
-        if account:
-            wait_time = await account_limiter.wait_if_needed(account, domain, namespace=namespace)
-        else:
-            wait_time = await domain_limiter.wait_if_needed(domain, namespace=namespace)
+        # Use *this instance's* rate limiter (isolated from other AgentBrowser instances)
+        rl = self.rate_limiter
+        effective_account = account or self.account_id or (self.session.get("name") if self.session else None) or "default"
+        wait_time = await rl.wait_if_needed(effective_account, domain)
 
         if wait_time > 0:
             print(f"[Rate Limit] Waited {wait_time:.1f}s for {domain}")
 
-        # Record the request
-        if hasattr(self, 'metrics'):
-            self.metrics.increment("requests_total")
+        # Record the request in per-instance metrics
+        self.metrics.increment("requests_total")
 
         return await self.safe_goto(url, **kwargs)
 
-    def set_rate_limit(self, domain: str, requests_per_minute: int = 8, cooldown_seconds: int = 60):
-        """Configure custom rate limit for a domain."""
+    def set_rate_limit(self, domain: str, requests_per_minute: int = 8, cooldown_seconds: int = 60, account: Optional[str] = None):
+        """Configure custom rate limit for a domain (applied to this instance's limiter)."""
         from production.rate_limiter import RateLimitConfig
         config = RateLimitConfig(
             requests_per_minute=requests_per_minute,
             cooldown_seconds=cooldown_seconds
         )
-        domain_limiter.set_limit(domain, config)
+        # Per-instance: target the sub-limiter for the given (or default) account
+        dl = self.rate_limiter.get_limiter(account or "default")
+        dl.set_limit(domain, config)
 
     async def close(self):
         """Close the browser, page, and underlying Playwright instance.
