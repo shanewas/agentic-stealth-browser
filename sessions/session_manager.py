@@ -6,7 +6,7 @@ Supports named sessions, anonymous sessions, and isolation
 import json
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict
 
 
@@ -30,7 +30,7 @@ class SessionManager:
         
         meta = {
             "name": name,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "anonymous": anonymous,
             "user_data_dir": str(session_path / "user_data"),
             "cookies_file": str(session_path / "cookies.json"),
@@ -46,26 +46,19 @@ class SessionManager:
         """Load existing session metadata"""
         session_path = self.base_dir / name
         meta_file = session_path / "meta.json"
-        
         if not meta_file.exists():
             return None
-        
-        with open(meta_file) as f:
+        with open(meta_file, "r") as f:
             return json.load(f)
     
-    def list_sessions(self) -> list:
-        """List all available sessions"""
+    def list_sessions(self) -> List[Dict]:
+        """List all sessions"""
+        from typing import List
         sessions = []
-        for p in self.base_dir.iterdir():
-            if p.is_dir():
-                meta = self.get_session(p.name)
-                if meta:
-                    sessions.append(meta)
+        for meta_file in self.base_dir.glob("*/meta.json"):
+            try:
+                with open(meta_file, "r") as f:
+                    sessions.append(json.load(f))
+            except Exception:
+                continue
         return sessions
-    
-    def delete_session(self, name: str):
-        """Delete a session and all its data"""
-        import shutil
-        session_path = self.base_dir / name
-        if session_path.exists():
-            shutil.rmtree(session_path)
