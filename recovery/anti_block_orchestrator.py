@@ -5,7 +5,7 @@ Handles early detection, platform-specific strategies, and intelligent rotation.
 
 Phase 8 fixes:
 - Circuit breaker for rapid repeated failures per platform/domain (#130 P1)
-- light_mode (light_detection=True default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
+- Light detection mode (default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
 - Throttled / conditional heavy content analysis (only when light=False or force_heavy)
 - Deduped duplicate return in calculate_backoff
 - Cost awareness stub + escalation hooks for future (#252, #276, #283)
@@ -234,6 +234,17 @@ class AntiBlockOrchestrator:
                 page = self._get_page()
                 content_lower = ""
                 if page:
+                    # Use lighter signals first (title) to avoid unnecessary page.content() calls (#92 #84)
+                    try:
+                        t = (await page.title() or "").lower()
+                        if any(x in t for x in ["just a moment", "checking your browser", "challenge", "verify you are human"]):
+                            return BlockType.CAPTCHA
+                        if "linkedin" in platform and any(x in t for x in ["security verification", "unusual activity"]):
+                            return BlockType.ACCOUNT_RESTRICTION
+                        if "amazon" in platform and any(x in t for x in ["robot", "sorry", "captcha"]):
+                            return BlockType.CAPTCHA
+                    except Exception:
+                        pass  # lighter title signal unavailable, fall to content guard
                     # Simple content() guard: only call if page looks usable (perf + safety)
                     if hasattr(page, "content"):
                         try:
@@ -321,8 +332,14 @@ class AntiBlockOrchestrator:
             })
             return False
 
-        block_type = await self.detect_block(context)
-        context.block_type = block_type
+        # Simple guard for perf P1s (#84, #92 content() overuse + #174 latency):
+        # Avoid redundant detect_block (hence page.content() when not light_mode) in recovery paths.
+        # The execute success path pre-sets context.block_type so this skips the call.
+        if getattr(context, "block_type", BlockType.NONE) == BlockType.NONE:
+            block_type = await self.detect_block(context)
+            context.block_type = block_type
+        else:
+            block_type = context.block_type
 
         strategy = self.get_strategy(context.platform)
 
@@ -458,6 +475,7 @@ class AntiBlockOrchestrator:
 
                 # If we detect a block even on "success", treat it as failure
                 context.last_error = f"Detected {block_type.value}"
+                context.block_type = block_type  # for recover() guard (avoids 2nd content() call)
                 should_continue = await self.recover(context)
                 if not should_continue:
                     break
