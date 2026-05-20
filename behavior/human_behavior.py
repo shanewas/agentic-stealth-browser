@@ -328,6 +328,73 @@ class HumanBehavior:
             # position unchanged; ensure recorded (in case first bare click)
             await self._record_mouse_position(cx, cy)
 
+    async def human_right_click(self, selector: str = None, x: int = None, y: int = None):
+        """#229 minimal realistic right-click / context menu simulation (opt-in, high-value for human mimic).
+        Natural mouse approach (reuses move continuity) then right button click + brief hold/pause as if reviewing menu.
+        Does not auto-choose menu item (caller can follow up if needed).
+        """
+        # #251 think if critical context? rare for right, but consistent
+        if selector and any(k in (selector or "").lower() for k in ["submit", "login", "send"]):
+            try:
+                await self.think_before_action("normal")
+            except Exception:
+                pass
+        did_move = False
+        if selector:
+            try:
+                box = await self.page.query_selector(selector)
+                if box:
+                    box_info = await box.bounding_box()
+                    if box_info:
+                        target_x = box_info["x"] + box_info["width"] * self.rng.uniform(0.25, 0.75)
+                        target_y = box_info["y"] + box_info["height"] * self.rng.uniform(0.25, 0.75)
+                        await self.move_mouse_naturally(int(target_x), int(target_y))
+                        did_move = True
+            except Exception:
+                pass
+        elif x is not None and y is not None:
+            await self.move_mouse_naturally(x, y)
+            did_move = True
+
+        await asyncio.sleep(self.rng.uniform(0.06, 0.15))
+        cx, cy = self.last_mouse_pos
+        # Right click via Playwright mouse (button support)
+        await self.page.mouse.click(cx, cy, button="right")
+        await self._record_mouse_position(cx, cy)
+        # Realistic pause as if context menu rendered / user considering
+        await asyncio.sleep(self.rng.uniform(0.25, 0.85))
+        if self.realism_level >= 2 and self.rng.random() < 0.3:
+            # occasional small corrective move away after right-click (human "whoops" or inspect)
+            await self.move_mouse_naturally(cx + self.rng.randint(-20, 40), cy + self.rng.randint(-15, 25))
+
+    async def simulate_changed_mind(self, probability: float = 0.09) -> bool:
+        """#235: simulate realistic "I changed my mind" abort / re-plan (opt-in, call before high-stakes commit).
+        Returns True if action was "aborted" (caller should re-think or skip).
+        Uses back-scroll re-read (existing pattern), occasional Escape, or distraction + think.
+        Ties into fatigue/distraction from #251 for more natural abort rate.
+        """
+        self._update_fatigue()
+        fat = getattr(self, "fatigue_level", 0.0)
+        eff_prob = min(0.35, probability + fat * 0.25)  # fatigued users change mind more
+        if self.realism_level < 1 or self.rng.random() >= eff_prob:
+            return False
+        # Choose abort flavor
+        if self.rng.random() < 0.45:
+            # back up / re-read (like scroll backticks)
+            try:
+                await self.page.mouse.wheel(0, -self.rng.randint(60, 140))
+            except Exception:
+                pass
+        elif self.rng.random() < 0.35 and self.realism_level >= 2:
+            try:
+                await self.page.keyboard.press("Escape")
+            except Exception:
+                pass
+        else:
+            await self.simulate_distraction(0.4)
+        await self.think(250, int(900 * (1 + fat * 0.4)))
+        return True
+
     async def scroll_naturally(self, total_pixels: int = 400, direction: str = "down"):
         """Scroll in small, human-like increments with occasional re-read backticks (realism)."""
         steps = self.rng.randint(5, 12)
