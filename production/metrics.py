@@ -82,3 +82,8 @@ class MetricsCollector:
 
 # Global metrics instance
 metrics = MetricsCollector()
+
+
+# P1 #87: easy per-namespace isolated collector (additive)
+def metrics_for(ns): 
+    return get_metrics_for_namespace(ns) if "get_metrics_for_namespace" in globals() else MetricsCollector()

@@ -23,7 +23,7 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-from production.rate_limiter import domain_limiter, account_limiter
+from production.rate_limiter import domain_limiter, account_limiter  # see namespace support for #87 P1
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas

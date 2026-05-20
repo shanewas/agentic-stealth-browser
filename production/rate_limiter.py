@@ -100,3 +100,8 @@ class AccountRateLimiter:
 # Global instances
 domain_limiter = DomainRateLimiter()
 account_limiter = AccountRateLimiter()
+
+
+# P1 #87 scalability: namespaced accessors (additive, non-breaking)
+def wait_with_namespace(domain: str, namespace: str = None):
+    return domain_limiter.wait_if_needed(domain, namespace=namespace)

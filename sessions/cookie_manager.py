@@ -260,3 +260,9 @@ class SessionOrchestrator:
             path = f"{out_dir}/{name}_bundle.json"
             results[name] = await self.cm.export_session_bundle(name, path)
         return results
+
+
+# P1 #82 cookie security (additive note + stub for encryption in follow-up)
+# Recommended: implement Fernet save/load using existing "cryptography" dep.
+async def _save_cookies_secure_stub(self, path, key=None):
+    return {"status": "todo", "note": "Implement full encrypted save per #82 (see agent_browser save_cookies_to_file entrypoint)"}
