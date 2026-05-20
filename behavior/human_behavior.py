@@ -292,3 +292,88 @@ class HumanBehavior:
 
             if self.rng.random() < 0.25:
                 break
+
+    # --- Phase 8 Human Behavior Realism Additions (Closes #275, #267, #260, #284, #291) ---
+
+    async def accidental_click_with_correction(self, selector: str = None, x: int = None, y: int = None):
+        """Simulate realistic accidental click followed by immediate correction (#275)"""
+        # Perform the click
+        await self.human_click(selector, x, y)
+        await asyncio.sleep(self.rng.uniform(0.05, 0.15))
+        # ~15% chance it was "accidental" - correct by moving slightly and re-click or escape
+        if self.rng.random() < 0.15 and self.realism_level >= 2:
+            # Move a bit off then back or press Escape if modal risk
+            try:
+                await self.page.mouse.move(
+                    (x or 500) + self.rng.randint(-30, 30),
+                    (y or 400) + self.rng.randint(-20, 20)
+                )
+                await asyncio.sleep(0.08)
+                if self.rng.random() < 0.4:
+                    await self.page.keyboard.press("Escape")
+                else:
+                    # re-attempt click in correct spot
+                    await self.human_click(selector, x, y)
+            except Exception:
+                pass  # non-fatal
+
+    async def type_with_select_all_replace(self, selector: str, new_text: str, mistake_rate: float = 0.02):
+        """Simulate realistic 'select all + replace' editing pattern (#267)"""
+        await self.human_click(selector)
+        await asyncio.sleep(self.rng.uniform(0.1, 0.25))
+        # Select all (Ctrl/Cmd + A)
+        if self.rng.random() < 0.7:  # common pattern
+            await self.page.keyboard.press("Control+A" if self.rng.random() > 0.5 else "Meta+A")
+            await asyncio.sleep(self.rng.uniform(0.05, 0.12))
+            # Delete or just type over
+            if self.rng.random() < 0.3:
+                await self.page.keyboard.press("Backspace")
+        # Now type the replacement
+        await self.type_like_human(selector, new_text, mistake_rate=mistake_rate)
+
+    async def press_keyboard_shortcut(self, shortcut: str):
+        """Simulate realistic keyboard shortcut / hotkey usage (#260)"""
+        # e.g. "Control+C", "Meta+V", "Alt+Tab", "Control+Shift+T"
+        try:
+            await asyncio.sleep(self.rng.uniform(0.05, 0.2))
+            await self.page.keyboard.press(shortcut)
+            await asyncio.sleep(self.rng.uniform(0.1, 0.4))
+        except Exception as e:
+            print(f"[HumanBehavior] shortcut non-fatal: {shortcut} {e}")
+
+    async def simulate_terms_privacy_reading(self, min_pauses: int = 2):
+        """Simulate realistic reading of terms/privacy policy with pauses and micro-scrolls (#284)"""
+        for i in range(self.rng.randint(min_pauses, min_pauses + 3)):
+            # Longer think pause while "reading legal text"
+            await self.think(1800, 4200)
+            # Small scroll or mouse drift
+            await self.scroll_naturally(self.rng.randint(40, 120))
+            if self.rng.random() < 0.6:
+                await self.micro_movement_while_waiting(400)
+            if self.rng.random() < 0.25:
+                await self.page.keyboard.press("PageDown")
+        await self.think(600, 1400)
+
+    async def mobile_in_spirit_interaction(self, action: str = "tap"):
+        """Approximate small-screen / mobile-like interaction patterns even on desktop (#291)"""
+        # Larger touch targets, slower deliberate moves, occasional double-tap simulation
+        if action == "tap":
+            await asyncio.sleep(self.rng.uniform(0.15, 0.35))
+            # Simulate fat finger by larger random offset then correct
+            try:
+                pos = await self.page.evaluate("() => ({x: window.mouseX||500, y: window.mouseY||400})")
+                await self.page.mouse.move(
+                    pos.get("x", 500) + self.rng.randint(-12, 12),
+                    pos.get("y", 400) + self.rng.randint(-8, 8)
+                )
+                await self.page.mouse.down()
+                await asyncio.sleep(0.08)
+                await self.page.mouse.up()
+                if self.rng.random() < 0.2:
+                    # double tap
+                    await asyncio.sleep(0.12)
+                    await self.page.mouse.down()
+                    await asyncio.sleep(0.05)
+                    await self.page.mouse.up()
+            except Exception:
+                pass

@@ -228,3 +228,28 @@ def test_stealth_canvas_offscreen_webgl2_fixes_94_262_210():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def test_human_mouse_bezier_properties_296():
+    """Test that generated mouse paths follow Bézier with claimed properties (#296 P2 testing)"""
+    import asyncio
+    from behavior.human_behavior import HumanBehavior
+    # We can't easily run full page, so unit test the curve generator directly
+    class FakePage:
+        async def evaluate(self, js): 
+            return {"x": 500, "y": 350}
+        async def mouse(self): pass  # dummy
+    hb = HumanBehavior(FakePage())
+    # Access private for test (or make a test helper, but quick)
+    points = asyncio.get_event_loop().run_until_complete(
+        hb._bezier_curve((100,100), (400,300), steps=20)
+    )
+    assert len(points) == 21, "Expected steps+1 points"
+    # Check roughly increasing x for left->right
+    xs = [p[0] for p in points]
+    assert xs[0] < xs[-1] or abs(xs[-1]-xs[0]) < 50, "Bézier should generally progress"
+    # Wobble bounded
+    for p in points:
+        assert 50 < p[0] < 500, "x in reasonable range"
+        assert 50 < p[1] < 400, "y in reasonable range"
+    print("✓ Human mouse Bézier curve generator produces plausible paths (#296)")
+
