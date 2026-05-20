@@ -14,9 +14,9 @@ from typing import Optional, Tuple
 class HumanBehavior:
     """Orchestrates realistic human-like actions"""
 
-    def __init__(self, page):
+    def __init__(self, page, rng: Optional["random.Random"] = None):
         self.page = page
-        self.rng = random.Random()
+        self.rng = rng or random.Random()
 
         # Authoritative Python-side last mouse pos (with JS sync) for reliable chaining.
         # Every gesture (move, click, micro, correction) starts from previous end point.

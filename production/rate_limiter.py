@@ -93,6 +93,13 @@ class DomainRateLimiter:
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
                 now = datetime.now()
+                # Re-clean after sleep so the waited request is recorded without off-by-one (expired entries linger otherwise)
+                # Fixes #116 while preserving exact namespace isolation and per-account logic
+                minute_ago = now - timedelta(minutes=1)
+                self.request_times[key] = [
+                    t for t in self.request_times[key]
+                    if t > minute_ago
+                ]
                 self.request_times[key].append(now)
                 self.last_request[key] = now
                 return wait_time
@@ -104,6 +111,13 @@ class DomainRateLimiter:
                 wait_time = config.cooldown_seconds - time_since_last
                 await asyncio.sleep(wait_time)
                 now = datetime.now()
+                # Re-clean after sleep so the waited request is recorded without off-by-one (expired entries linger otherwise)
+                # Fixes #116 while preserving exact namespace isolation and per-account logic
+                minute_ago = now - timedelta(minutes=1)
+                self.request_times[key] = [
+                    t for t in self.request_times[key]
+                    if t > minute_ago
+                ]
                 self.request_times[key].append(now)
                 self.last_request[key] = now
                 return wait_time
