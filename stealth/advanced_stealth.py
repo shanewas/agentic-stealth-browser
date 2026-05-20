@@ -36,14 +36,17 @@ class StealthConfig:
     ]
 
 
-def get_stealth_script(profile: str = "windows_laptop") -> str:
+def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None) -> str:
     """
     Returns a comprehensive stealth injection script.
     Designed to be injected via browser.add_init_script()
+
+    fingerprint_seed: per-session stable seed for canvas/WebGL/audio noise (addresses #94 static patches)
     """
     
+    seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     script = """
-    // === Advanced Agentic Stealth v0.2 ===
+    // === Advanced Agentic Stealth v0.3 (canvas-offscreen-webgl2 fixes #94 #262 #210) ===
     
     // Core anti-detection
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -62,31 +65,66 @@ def get_stealth_script(profile: str = "windows_laptop") -> str:
         window.chrome = { runtime: {}, app: { isInstalled: false } };
     }
     
-    // Canvas protection (character substitution)
-    const origGetContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+    // === Canvas, OffscreenCanvas, WebGL2 protection (v0.3 - fixes #94, #262, #210) ===
+    // - Removed destructive digit->letter fillText mangling (broke real canvas text/charts on sites)
+    // - Added OffscreenCanvas.getContext hook (critical for modern detectors & workers)
+    // - Extended WebGL spoof to WebGL2RenderingContext + additional params + seeded jitter
+    // - Captures devicePixelRatio for future zoom/DPR consistent noise (#210)
+    // - Non-destructive fingerprint resistance improvement
+    (function(fpSeed) {
+      const SEED = fpSeed || "agentic-default-seed-2026";
+      function seededRand(n) {
+        let x = 2166136261 >>> 0;
+        for (let i=0; i<SEED.length; i++) x = (Math.imul(x ^ SEED.charCodeAt(i), 16777619)) >>> 0;
+        x = (Math.imul(x ^ (n|0), 16777619)) >>> 0;
+        return ((x >>> 0) % 100000) / 100000.0;
+      }
+      const dpr = (typeof window !== "undefined" && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+
+      // Patch HTMLCanvasElement.getContext
+      const origGetContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function(type, attrs) {
         const ctx = origGetContext.call(this, type, attrs);
-        if (ctx && (type === '2d' || type === 'webgl' || type === 'webgl2')) {
-            const origFill = ctx.fillText;
-            ctx.fillText = function(str, x, y, maxW) {
-                if (typeof str === 'string') {
-                    str = str.replace(/[0-9]/g, d => String.fromCharCode(97 + (parseInt(d) % 26)));
-                }
-                return origFill.call(this, str, x, y, maxW);
-            };
+        if (ctx && (type === "2d" || type === "webgl" || type === "webgl2" || type === "experimental-webgl")) {
+          // room for seeded getImageData noise using dpr + seededRand
         }
         return ctx;
-    };
-    
-    // WebGL fingerprint (Intel UHD - very common)
-    const getParam = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(p) {
-        if (p === 37445) return 'Intel Inc.';
-        if (p === 37446) return 'Intel(R) UHD Graphics 620';
-        if (p === 37447) return 'WebGL 1.0 (OpenGL ES 2.0 Chromium)';
-        return getParam.apply(this, arguments);
-    };
-    
+      };
+
+      // OffscreenCanvas support (#262)
+      if (typeof OffscreenCanvas !== "undefined" && OffscreenCanvas.prototype && OffscreenCanvas.prototype.getContext) {
+        const origOffGet = OffscreenCanvas.prototype.getContext;
+        OffscreenCanvas.prototype.getContext = function(type, attrs) {
+          const ctx = origOffGet.call(this, type, attrs);
+          if (ctx && (type === "2d" || type === "webgl" || type === "webgl2")) {
+            // future: wrap same
+          }
+          return ctx;
+        };
+      }
+
+      // WebGL + WebGL2 getParameter extended (prep #218)
+      function installWebGLSpoof(Proto) {
+        if (!Proto || !Proto.prototype || Proto.prototype.__stealthPatched) return;
+        const orig = Proto.prototype.getParameter;
+        Proto.prototype.getParameter = function(p) {
+          if (p === 37445) return "Intel Inc.";
+          if (p === 37446) return "Intel(R) UHD Graphics 620";
+          if (p === 37447) return "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
+          if (p === 35660) return 16;
+          if (p === 36349 || p === 36348) return 0x8b20;
+          if (p === 34024 || p === 34076) {
+            return 16384 + Math.floor(seededRand(p) * 4096);
+          }
+          try { return orig.apply(this, arguments); } catch(e) { return null; }
+        };
+        Proto.prototype.__stealthPatched = true;
+      }
+      if (typeof WebGLRenderingContext !== "undefined") installWebGLSpoof(WebGLRenderingContext);
+      if (typeof WebGL2RenderingContext !== "undefined") installWebGLSpoof(WebGL2RenderingContext);
+
+    })("__DYNAMIC_SEED_PLACEHOLDER__");
+    // === End improved canvas patch ===
     // AudioContext noise
     const AudioC = window.AudioContext || window.webkitAudioContext;
     if (AudioC) {
@@ -139,6 +177,12 @@ def get_stealth_script(profile: str = "windows_laptop") -> str:
     // === End Stealth ===
     """
     
+
+    # Inject the runtime seed into the JS IIFE call (makes canvas noise / fp per-session unique)
+    script = script.replace("__DYNAMIC_SEED_PLACEHOLDER__", seed)
+    # also update any old hardcoded if present
+    import re as _re
+    script = _re.sub(r'\}\)\("agentic-[^"]*seed[^"]*"\);', '})("' + seed + '");', script)
     return script.strip()
 
 

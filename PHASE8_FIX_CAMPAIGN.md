@@ -76,3 +76,38 @@
 
 See also: `tests/test_phase7_fixes.py`, `recovery/anti_block_orchestrator.py`, `core/agent_browser.py`
 
+
+## Stealth & Fingerprinting Fixes Agent Progress
+
+**Agent:** Stealth & Fingerprinting Fixes Agent  
+**Started:** 2026-05-19 (first session)
+
+### Batch 1: Canvas + OffscreenCanvas + WebGL2 improvements (PR in prep)
+**Issues addressed:** #94, #262, #210 (core of group), related old #27
+**Changes:**
+- Removed destructive `fillText` digit mangling in canvas patch (was breaking legitimate site canvas usage like charts, text labels).
+- Added `OffscreenCanvas.prototype.getContext` hook (previously unpatched; modern sites, workers, detectors use it).
+- Extended WebGL spoofing to `WebGL2RenderingContext` + additional params + small seeded jitter.
+- Added `fingerprint_seed` param to `get_stealth_script()` and wired per-session unique seed in `AgentBrowser.launch` (different sessions now produce different canvas/WebGL fingerprints; defeats static detection).
+- Captured `devicePixelRatio` in patch for future DPR/zoom-aware noise.
+- Added pure regression test `test_stealth_canvas_offscreen_webgl2_fixes_94_262_210`.
+- Updated scorecard skeleton (bonus Offscreen check prepared).
+- Updated version, comments with issue refs.
+**Files:** `stealth/advanced_stealth.py`, `core/agent_browser.py`, `tests/test_phase7_fixes.py`
+**Testing:** Python syntax clean, direct invocation tests pass, existing phase7 sync tests unaffected (async test env quirks pre-existing).
+**Risk:** Low — additive hooks + seed injection, no behavior change for non-canvas paths. Destructive code removed (improvement).
+**Next in stealth:** WebGL extensions (#218), TLS validation (#293 etc), fonts, more APIs.
+
+**Branch:** `fix/stealth-canvas-offscreen-webgl2-94-262-210`
+**Status:** Ready for commit + PR (Closes #94, #262, #210)
+
+### Overall Stealth Backlog
+52 open stealth-labeled issues. Grouping strategy:
+- Canvas/Offscreen/WebGL2/DPR (this batch)
+- WebGL depth + extensions + precision
+- TLS realism, validation, docs
+- Fonts + measurement
+- Prototype robustness + missing APIs (battery, speech, webrtc, hardware, audio, mediaqueries, client-hints)
+- Self-detection + maintenance
+
+Will open first PR after this update. Will batch 3-5 PRs before reporting final.

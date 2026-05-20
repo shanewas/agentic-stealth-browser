@@ -105,6 +105,8 @@ class AgentBrowser:
         See also: apply_preset(), get_health_status(), debug_report()
         """
         pw = await async_playwright().start()
+        launch_start = time.time()
+
         
         user_data = Path(self.session["user_data_dir"])
         user_data.mkdir(parents=True, exist_ok=True)
@@ -232,7 +234,14 @@ class AgentBrowser:
         # Store playwright instance for proper cleanup
         self._pw = pw
 
+        # Record launch timing to metrics (perf observability)
+        if self.metrics:
+            launch_dur = time.time() - launch_start
+            self.metrics.record_time("browser_launch_duration", launch_dur)
+            self.metrics.increment("browser_launches")
+
         return self.browser
+
     
     async def apply_preset(self, name: str) -> Dict[str, Any]:
         """
