@@ -151,6 +151,33 @@ class CookieManager:
             "last_check": now.isoformat()
         }
 
+    async def clear_cookies(self) -> Dict[str, Any]:
+        """Clear in-memory tracked cookies and the underlying browser context cookies (if any).
+
+        P1 #90: supports automatic invalidation on account restriction or compromise detection.
+        Safe to call multiple times; idempotent.
+        """
+        cleared = len(self.cookies)
+        self.cookies = []
+        self.last_refresh = None
+
+        if self.browser_context:
+            try:
+                await self.browser_context.clear_cookies()
+                return {"status": "success", "cleared": cleared, "context_cleared": True}
+            except Exception as e:
+                return {"status": "partial", "cleared": cleared, "error": str(e)}
+
+        return {"status": "success", "cleared": cleared}
+
+    async def ensure_fresh_cookies(self, max_age_hours: int = 8) -> Dict[str, Any]:
+        """Check/report cookie freshness (compatibility wrapper).
+
+        Used by AgentBrowser.ensure_cookies_fresh and documented APIs.
+        Delegates to the core refresh check.
+        """
+        return await self.refresh_cookies_if_needed(max_age_hours)
+
     def create_resilient_session(self, session_name: str) -> Dict[str, Any]:
         """Create or get a resilient session record."""
         if not hasattr(self, "sessions"):
@@ -241,11 +268,26 @@ class CookieManager:
 
 
 class SessionOrchestrator:
-    """High-level coordinator for multiple resilient sessions (MCP / agent use)."""
+    """High-level coordinator for multiple resilient sessions (MCP / agent use).
 
-    def __init__(self):
+    Updated for MCP contract compatibility (#106 hygiene): accepts session_manager
+    in constructor and exposes create/export/import for tests + MCP wrappers.
+    """
+
+    def __init__(self, session_manager: Optional[object] = None):
+        self.main_session_manager = session_manager
         self.cm = CookieManager()
         self.active_sessions: Dict[str, Dict] = {}
+        # Compat aliases for existing MCP contract tests (#106)
+        self.sessions = self.active_sessions
+        self.cookie_managers: Dict[str, Any] = {}
+
+    def create_resilient_session(self, session_name: str) -> Dict[str, Any]:
+        """Create session (MCP hygiene / contract compat). Delegates to cm."""
+        sess = self.cm.create_resilient_session(session_name)
+        self.active_sessions[session_name] = sess
+        self.cookie_managers[session_name] = self.cm
+        return sess
 
     async def start_session(self, name: str, cookies_path: Optional[str] = None) -> Dict[str, Any]:
         sess = self.cm.create_resilient_session(name)
@@ -253,6 +295,14 @@ class SessionOrchestrator:
         if cookies_path:
             await self.cm.load_cookies(cookies_path)
         return {"status": "started", "session": name}
+
+    async def export_session_bundle(self, session_name: str, bundle_path: str) -> Dict[str, Any]:
+        """Delegate for full MCP test / agent contract."""
+        return await self.cm.export_session_bundle(session_name, bundle_path)
+
+    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None) -> Dict[str, Any]:
+        """Delegate for full MCP test / agent contract."""
+        return await self.cm.import_session_bundle(bundle_path, target_session_name)
 
     async def export_all(self, out_dir: str) -> Dict[str, Any]:
         results = {}
