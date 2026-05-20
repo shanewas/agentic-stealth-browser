@@ -46,7 +46,7 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     script = """
-    // === Advanced Agentic Stealth v0.3 (canvas-offscreen-webgl2 fixes #94 #262 #210) ===
+    // === Advanced Agentic Stealth v0.3 (canvas-offscreen-webgl2 fixes #94 #262 #210 + webrtc #170) ===
     
     // Core anti-detection
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -160,15 +160,55 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
         })
     });
     
-    // WebRTC protection
-    const RTC = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
-    if (RTC) {
-        window.RTCPeerConnection = function(...args) {
-            const pc = new RTC(...args);
-            pc.createDataChannel = () => ({});
-            return pc;
+    // WebRTC protection (improved #170 P1 leak prevention)
+    // Prevents local IP / private network leaks via ICE candidates + prototype tampering resistance
+    (function() {
+        const RTC = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
+        if (!RTC) return;
+        const OrigRTC = RTC;
+        const fakePublicIP = "203.0.113." + Math.floor(Math.random()*200 + 10); // RFC5737 TEST-NET-3
+        window.RTCPeerConnection = function(config, constraints) {
+            try {
+                if (config && Array.isArray(config.iceServers)) {
+                    config.iceServers = config.iceServers.filter(s => !/stun:.*(local|private|10\.|192\.168|172\.)/i.test(JSON.stringify(s)));
+                }
+                const pc = new OrigRTC(config || {iceServers: [{urls: "stun:stun.l.google.com:19302"}]}, constraints);
+                const origCreateOffer = pc.createOffer;
+                pc.createOffer = async function(...a) {
+                    const offer = await origCreateOffer.apply(this, a);
+                    return offer;
+                };
+                // Mangle candidates to never expose real private IPs
+                const origSet = Object.getOwnPropertyDescriptor(OrigRTC.prototype, "onicecandidate");
+                Object.defineProperty(pc, "onicecandidate", {
+                    set: function(h) {
+                        const wrapped = h ? function(ev) {
+                            if (ev && ev.candidate && ev.candidate.candidate) {
+                                let c = ev.candidate.candidate;
+                                // replace any private / local IP with safe public fake
+                                c = c.replace(/(\d{1,3}\.){3}\d{1,3}/g, (m) => {
+                                    if (/^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.)/.test(m)) return fakePublicIP;
+                                    return m;
+                                });
+                                try { ev.candidate.candidate = c; } catch(e){}
+                            }
+                            return h.call(this, ev);
+                        } : h;
+                        OrigRTC.prototype.onicecandidate = wrapped; // best effort
+                    },
+                    get: function() { return OrigRTC.prototype.onicecandidate; }
+                });
+                pc.createDataChannel = function() { return { label: "stealth", readyState: "open" }; };
+                return pc;
+            } catch(e) {
+                return new OrigRTC(config, constraints);
+            }
         };
-    }
+        // Prototype robustness (sites checking modified prototypes)
+        if (window.RTCPeerConnection && window.RTCPeerConnection.prototype) {
+            window.RTCPeerConnection.prototype.__stealthPatched = true;
+        }
+    })();
     
     // Screen consistency
     Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
