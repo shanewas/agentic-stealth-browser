@@ -118,6 +118,11 @@ domain_limiter = DomainRateLimiter()
 account_limiter = AccountRateLimiter()
 
 
+<<<<<<< HEAD
+# P1 #87 scalability: namespaced accessors (additive, non-breaking)
+def wait_with_namespace(domain: str, namespace: str = None):
+    return domain_limiter.wait_if_needed(domain, namespace=namespace)
+=======
 def get_isolated_rate_limiters(namespace: str) -> tuple[DomainRateLimiter, AccountRateLimiter]:
     """Factory for completely isolated limiter pair for a logical agent/fleet member.
     Recommended for #87 scalability when running multiple AgentBrowsers in one process.
@@ -125,3 +130,4 @@ def get_isolated_rate_limiters(namespace: str) -> tuple[DomainRateLimiter, Accou
     # Each call returns fresh pair (no sharing even with same ns unless you cache)
     # For shared-within-namespace use the global + namespace arg (lighter).
     return DomainRateLimiter(), AccountRateLimiter()
+>>>>>>> origin/perf/light-mode-174-113

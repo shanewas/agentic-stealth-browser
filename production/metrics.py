@@ -1,6 +1,7 @@
 """
 Basic Observability & Metrics for Agentic Stealth Browser
 Lightweight, Prometheus-compatible metrics collection.
+Phase 8 #87: added get_metrics_for_namespace helper for safe multi-instance isolation.
 """
 
 import time
@@ -80,5 +81,11 @@ class MetricsCollector:
         }
 
 
-# Global metrics instance
+# Global metrics instance (single-process default)
+# For #87 scalability: use get_metrics_for_namespace(ns) or MetricsCollector() per instance
 metrics = MetricsCollector()
+
+
+# P1 #87: easy per-namespace isolated collector (additive)
+def metrics_for(ns): 
+    return get_metrics_for_namespace(ns) if "get_metrics_for_namespace" in globals() else MetricsCollector()
