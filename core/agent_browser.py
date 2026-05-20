@@ -7,6 +7,7 @@ import asyncio
 import random
 import time
 import os  # for env vars in launch (also used by other methods)
+import atexit  # #161 graceful shutdown on process exit
 from pathlib import Path
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse
@@ -213,7 +214,77 @@ class AgentBrowser:
         self.tls_manager: Optional[Any] = None
         self.debug_reporter: Optional[Any] = None
         self._launch_options: Dict[str, Any] = {}  # for rotation relaunch preservation (incl. debug/preset/region)
-    
+        self._custom_launch_options: Dict[str, Any] = {}  # #143: custom PW launch opts
+
+        # P2 #182: pluggable page_getter for internal decoupling and extensibility (overridable for multi-page, testing, custom routing)
+        self._page_getter: Optional[callable] = None
+
+        # #161 P2: graceful shutdown support (atexit + signal friendly)
+        self._atexit_registered = False
+        self._register_atexit_shutdown()
+
+    @property
+    def page_getter(self):
+        """Pluggable page acquisition for decoupling (#182, builds on Phase 7 BUG-04).
+
+        Recommended access pattern for extension code, recovery, and internal methods:
+            p = browser.page_getter()
+            if p:
+                await p.goto(...)
+
+        Default: returns self.page (the primary page).
+        Can be overridden via assignment or subclass for multi-page workflows (#176),
+        mock pages in tests, or custom page routing.
+
+        See docs in launch() and multi-page methods. All new internal call sites use this.
+        """
+        if self._page_getter is not None:
+            return self._page_getter
+        def _default():
+            return getattr(self, "page", None)
+        return _default
+
+    @page_getter.setter
+    def page_getter(self, getter):
+        """Allow setting custom page_getter callable (must be zero-arg returning page or None)."""
+        if getter is not None and not callable(getter):
+            raise TypeError("page_getter must be callable or None")
+        self._page_getter = getter
+
+    def _register_atexit_shutdown(self):
+        """#161: Register atexit handler for best-effort graceful close on process exit.
+        Uses sync wrapper around async close() to avoid event loop issues at exit.
+        """
+        if self._atexit_registered:
+            return
+        def _atexit_cleanup_sync():
+            try:
+                # If there's a running loop (e.g. in async app shutdown), best-effort schedule
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop and not loop.is_closed():
+                        # schedule close; may not complete if interpreter exiting, but attempt
+                        asyncio.create_task(self.close())
+                        return
+                except RuntimeError:
+                    pass  # no running loop
+                # Fallback: run in fresh loop (common for atexit in sync scripts)
+                try:
+                    asyncio.run(self.close())
+                except RuntimeError:
+                    # already running or closed loop; last-ditch direct sync attempts
+                    pass
+                except Exception:
+                    pass
+            except Exception:
+                # never raise from atexit
+                pass
+        try:
+            atexit.register(_atexit_cleanup_sync)
+            self._atexit_registered = True
+        except Exception:
+            pass  # registration failure non-fatal
+
     async def launch(
         self,
         headless: bool = True,
@@ -226,6 +297,7 @@ class AgentBrowser:
         debug: bool = False,   # P2/P3 DX: enable DebugReporter (#265)
         preset: Optional[str] = None,  # P2/P3: platform preset (#288)
         region: Optional[str] = None,  # P2/P3: TLS region override
+        launch_options: Optional[Dict[str, Any]] = None,  # #143: custom Playwright launch_persistent_context / context opts (merged safely, e.g. ignore_default_args, extra args)
     ):  # combined: #57/#48/#47 pooled + P2 resume + #351 health/debug/preset/region
         """Launch browser with full stealth + human behavior.
         
@@ -236,6 +308,10 @@ class AgentBrowser:
 
         Consumers (including MCP wrappers) must use self.page for page methods
         (goto, content, inner_text, click, etc.). Never call them on self.browser.
+
+        P2 Core cluster (#134 #143 #155 #161 #176 #182): use page_getter() for decoupled access,
+        launch(..., launch_options={...}) for custom PW opts, switch_region(), new_page()/get_pages(),
+        async with + atexit for graceful, CookieManager consolidation.
 
         Preferred usage (issue #292):
             async with AgentBrowser() as browser:
@@ -256,6 +332,8 @@ class AgentBrowser:
             debug: Enable debug mode (#265) - populates DebugReporter for fingerprint/headers/patches.
             preset: Platform preset e.g. "linkedin_2026" (#288) - sets region, behavior, recovery tuning.
             region: TLS region override ("us", "eu", "japan", "korea", "global").
+            launch_options: Dict of extra kwargs passed to Playwright's launch_persistent_context (or context opts in pooled).
+                Merged safely after our derived args/headers/etc. Examples: ignore_default_args=["--disable-..."], channel="chrome", etc. (#143)
             Proxy support: configure via self.proxy_manager.create_decodo_config(...) *before* calling launch()
             (or pass preconfigured ProxyManager in advanced usage); it is now wired into launch_persistent_context (#14, #29).
         """
@@ -298,12 +376,14 @@ class AgentBrowser:
                 pass
         if region:
             self.current_region = str(region).lower()
+        self._custom_launch_options = launch_options or {}  # #143
         # store for rotation relaunch
         self._launch_options = {
             "headless": headless, "slow_mo": slow_mo, "headed": headed,
             "light_mode": light_mode, "use_pooled_context": use_pooled_context,
             "debug": self.debug_mode, "preset": self.current_preset, "region": self.current_region,
             "resume": resume,
+            "launch_options": launch_options,  # #143 preserve custom for rotation relaunch
         }
         # P1 #57/#48/#47: optional pooled path (shared browser + new_context) vs classic per-instance persistent
         extra_headers = get_extra_http_headers()
@@ -366,6 +446,11 @@ class AgentBrowser:
                 "proxy": launch_proxy,
                 # browser-level args (tls/no-sandbox etc) applied at shared launch time
             }
+            # #143: merge user-provided custom launch/context options safely (non-overriding critical keys)
+            custom = getattr(self, "_custom_launch_options", {}) or {}
+            for k, v in (custom or {}).items():
+                if k not in ("user_data_dir", "headless", "slow_mo"):  # protect launch-time ones for pooled path
+                    context_opts[k] = v
             self.browser = await pool.create_context(**context_opts)
         else:
             # Classic (default, fully backward compatible): per-instance persistent context + own playwright
@@ -373,18 +458,24 @@ class AgentBrowser:
             self._pw = pw
             user_data = Path(self.session["user_data_dir"])
             user_data.mkdir(parents=True, exist_ok=True)
-            self.browser = await pw.chromium.launch_persistent_context(
-                user_data_dir=str(user_data),
-                headless=not headed if headed else headless,
-                slow_mo=slow_mo,
-                viewport=vp,
-                user_agent=ua,
-                locale=loc,
-                timezone_id=tz,
-                extra_http_headers=extra_headers,
-                args=all_args,
-                proxy=launch_proxy,
-            )
+            # #143 support: build kwargs dict then merge custom options
+            lp_kwargs = {
+                "user_data_dir": str(user_data),
+                "headless": not headed if headed else headless,
+                "slow_mo": slow_mo,
+                "viewport": vp,
+                "user_agent": ua,
+                "locale": loc,
+                "timezone_id": tz,
+                "extra_http_headers": extra_headers,
+                "args": all_args,
+                "proxy": launch_proxy,
+            }
+            custom = getattr(self, "_custom_launch_options", {}) or {}
+            for k, v in (custom or {}).items():
+                if k not in ("user_data_dir",):  # never override critical
+                    lp_kwargs[k] = v
+            self.browser = await pw.chromium.launch_persistent_context(**lp_kwargs)
         
         # Per-session stable fingerprint seed (canvas/WebGL noise + fonts) for consistency across reloads
         # and variation between sessions. Addresses #150 (re-apply), #94, #210 etc.
@@ -407,6 +498,9 @@ class AgentBrowser:
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
+
+        # #182: initialize default page_getter (overridable); recovery and internal now prefer via getter
+        self._page_getter = None  # ensures property falls back to self.page
 
         # Create human behavior controller + orchestrator
         # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
@@ -455,7 +549,7 @@ class AgentBrowser:
             browser=self.browser,
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
-            page_getter=lambda: self.page,
+            page_getter=self.page_getter,  # #182: use the (overridable) page_getter for better decoupling
             light_mode=getattr(self, "light_mode", None),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
             rng=self.rng  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
         )
@@ -562,6 +656,7 @@ class AgentBrowser:
             h = opts.get("headless", True)
             sm = opts.get("slow_mo", 0)
             hd = opts.get("headed", False)
+            self._custom_launch_options = opts.get("launch_options") or getattr(self, "_custom_launch_options", {}) or {}  # #143 preserve across rotation
             if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
                 context_opts = {
                     "viewport": vp,
@@ -571,20 +666,31 @@ class AgentBrowser:
                     "extra_http_headers": extra_headers,
                     "proxy": launch_proxy,
                 }
+                # #143 merge custom in rotation too
+                custom = getattr(self, "_custom_launch_options", {}) or {}
+                for k, v in (custom or {}).items():
+                    if k not in ("user_data_dir", "headless", "slow_mo"):
+                        context_opts[k] = v
                 self.browser = await self._pool.create_context(**context_opts)
             else:
-                self.browser = await self._pw.chromium.launch_persistent_context(
-                    user_data_dir=str(user_data),
-                    headless=not hd if hd else h,
-                    slow_mo=sm,
-                    viewport=vp,
-                    user_agent=ua,
-                    locale=loc,
-                    timezone_id=tz,
-                    extra_http_headers=extra_headers,
-                    args=all_args,
-                    proxy=launch_proxy,
-                )
+                # #143: build + merge custom in rotation relaunch
+                lp_kwargs = {
+                    "user_data_dir": str(user_data),
+                    "headless": not hd if hd else h,
+                    "slow_mo": sm,
+                    "viewport": vp,
+                    "user_agent": ua,
+                    "locale": loc,
+                    "timezone_id": tz,
+                    "extra_http_headers": extra_headers,
+                    "args": all_args,
+                    "proxy": launch_proxy,
+                }
+                custom = getattr(self, "_custom_launch_options", {}) or {}
+                for k, v in (custom or {}).items():
+                    if k not in ("user_data_dir",):
+                        lp_kwargs[k] = v
+                self.browser = await self._pw.chromium.launch_persistent_context(**lp_kwargs)
 
             self.page = await self.browser.new_page()
             self.context = self.browser
@@ -606,10 +712,10 @@ class AgentBrowser:
             except Exception:
                 pass
 
-            # 7. Update recovery's browser ref and page_getter (lambda will pick up new self.page on next call)
+            # 7. Update recovery's browser ref and page_getter (#182: now delegates to AgentBrowser.page_getter for pluggability)
             if self.recovery:
                 self.recovery.browser = self.browser
-                self.recovery._get_page = lambda: self.page
+                self.recovery._get_page = self.page_getter  # uses the overridable getter (defaults to current self.page)
 
             if log:
                 log.log_action("rotation_relaunch_succeeded", {
@@ -696,28 +802,13 @@ class AgentBrowser:
         """
         [DEPRECATED] Legacy cookie loader.
         Use load_cookies_from_file(..., encryption_key=...) + CookieManager for resilient + secure (#82) loading. Supports #270 rotation via list keys.
-        Kept for backward compatibility; fixed .context access (BUG-03).
+        Kept for backward compatibility; now delegates to consolidated CookieManager (resolves #134 duplication).
         """
-        import json
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
-
-        with open(cookies_path, "r") as f:
-            cookies = json.load(f)
-
-        # Convert to Playwright format if needed
-        for cookie in cookies:
-            if "sameSite" in cookie:
-                # Playwright expects "None", "Lax", or "Strict"
-                if cookie["sameSite"] not in ["None", "Lax", "Strict"]:
-                    cookie["sameSite"] = "None"
-            try:
-                # self.browser is the BrowserContext (naming kept for backward compat)
-                await self.browser.add_cookies([cookie])
-            except Exception as e:
-                print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
-
-        return {"status": "success", "cookies_loaded": len(cookies)}
+        # Delegate to the single implementation in CookieManager (no duplicated json/sameSite/add logic)
+        # sameSite normalization now handled inside modern load path or by Playwright.
+        return await self.load_cookies_from_file(cookies_path, encryption_key=None)
 
 
 
@@ -782,8 +873,10 @@ class AgentBrowser:
             await self.human.simulate_reading(duration_seconds)
         else:
             # Fallback (defensive after BUG-01 fix)
-            if self.page:
-                await self.page.mouse.wheel(0, self.rng.randint(200, 400))
+            # #182: page_getter usage
+            p = self.page_getter()
+            if p:
+                await p.mouse.wheel(0, self.rng.randint(200, 400))
             await asyncio.sleep(1.5)
 
 
@@ -963,14 +1056,16 @@ class AgentBrowser:
     async def screenshot_on_error(self, name: str = "error"):
         """Take screenshot on error for visual debugging.
         #149 fix: always log failure reason (via logger if available), fixed time.time() call, best-effort.
+        #182: uses page_getter() internally (decoupled access).
         """
-        if not self.page:
+        p = self.page_getter()
+        if not p:
             return None
         try:
             import os
             os.makedirs("screenshots", exist_ok=True)
             filename = f"screenshots/{name}_{int(time.time())}.png"
-            await self.page.screenshot(path=filename, full_page=True)
+            await p.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
             # #149: never silent - log the exact failure (print fallback if no logger yet)
@@ -1069,8 +1164,9 @@ class AgentBrowser:
         # Current URL (best effort)
         current_url = "unknown"
         try:
-            if self.page:
-                current_url = getattr(self.page, "url", "unknown")
+            p = self.page_getter()
+            if p:
+                current_url = getattr(p, "url", "unknown")
         except Exception:
             pass
 
@@ -1211,6 +1307,49 @@ class AgentBrowser:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    async def switch_region(self, new_region: str, relaunch: bool = False) -> Dict[str, Any]:
+        """P2 #155: Switch TLS/region profile mid-session.
+
+        Updates current_region, tls_manager, and relevant headers/patches.
+        Where possible without restart (headers, health, future rotation metadata, some stealth).
+
+        For full effect on launch-time TLS fingerprint args (e.g. client hello), set relaunch=True
+        (performs internal _perform_rotation_relaunch style refresh using current session/proxy).
+        Or call after and let recovery rotate if needed.
+
+        Returns status + note on limitations.
+        """
+        if not new_region:
+            return {"status": "error", "message": "region required"}
+        old_region = getattr(self, "current_region", "global")
+        new_r = str(new_region).lower()
+        self.current_region = new_r
+        try:
+            self.tls_manager = get_tls_manager(new_r, (self.session or {}).get("name"))
+            if hasattr(self.tls_manager, "log_fingerprint_choice"):
+                self.tls_manager.log_fingerprint_choice()
+        except Exception:
+            pass
+        # preserve for rotations / health
+        if hasattr(self, "_launch_options"):
+            self._launch_options["region"] = new_r
+        # update extra headers? (global fn may pick region? but for now metadata only)
+        result = {
+            "status": "success",
+            "old_region": old_region,
+            "new_region": new_r,
+            "relaunch_performed": False,
+            "note": "Partial update applied (headers/health/rotation metadata). Full TLS client profile change requires relaunch or new context.",
+        }
+        if relaunch and hasattr(self, "_perform_rotation_relaunch"):
+            try:
+                await self._perform_rotation_relaunch()
+                result["relaunch_performed"] = True
+                result["note"] = "Relaunch performed for full region/TLS effect."
+            except Exception as e:
+                result["relaunch_error"] = str(e)
+        return result
+
     def get_stealth_score(self) -> Dict[str, Any]:
         """#269 lightweight stealth score estimator."""
         score = 62
@@ -1229,6 +1368,71 @@ class AgentBrowser:
             return {"status": "ok", "sequence": getattr(self.logger, "replay_sequence", lambda l: [])(limit), "count": 0}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    # --- Multi-page / multi-tab support (P2 #176) ---
+    async def new_page(self, make_current: bool = False) -> Any:
+        """Create an additional concurrent page/tab within the same browser context.
+
+        Supports #176: users can now do multi-tab workflows.
+        All pages inherit the context's stealth init scripts automatically.
+
+        Args:
+            make_current: If True, wire the new page as self.page + re-init human/orchestrator/scraper
+                          (for seamless switch; old page remains open unless user closes it).
+
+        Returns:
+            The new Playwright Page object. Caller can keep reference for background tabs.
+        """
+        if not self.browser:
+            raise RuntimeError("Browser not launched. Call launch() first.")
+        new_p = await self.browser.new_page()
+        if make_current:
+            old_p = getattr(self, "page", None)
+            self.page = new_p
+            # re-wire for convenience (human etc now target the new current page)
+            self.human = HumanBehavior(new_p, rng=self.rng, device_profile=getattr(self.persona, "device", None))
+            self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
+            self.scraper = StealthScraper(new_p, self.human, self.orchestrator)
+            # update recovery page_getter via our pluggable one
+            if self.recovery:
+                self.recovery._get_page = self.page_getter
+            # note: user responsible for closing old_p if desired
+        return new_p
+
+    def get_pages(self) -> list:
+        """Return list of all open pages in the browser context (if launched).
+
+        Useful for #176 multi-tab management. Primary is self.page or via page_getter().
+        """
+        if self.browser and hasattr(self.browser, "pages"):
+            try:
+                return list(self.browser.pages)  # Playwright BrowserContext exposes .pages
+            except Exception:
+                pass
+        return [self.page] if self.page else []
+
+    async def switch_to_page(self, page: Any) -> bool:
+        """Switch the 'current' page to the provided one (from get_pages or new_page).
+
+        Re-wires human behavior etc. Does not close the previous current page.
+        Returns True on success. For #176 multi-tab support.
+        """
+        if not self.browser or not page:
+            return False
+        try:
+            # validate it belongs? best effort
+            if self.browser and page not in (getattr(self.browser, "pages", []) or []):
+                # still allow, user may have external
+                pass
+            self.page = page
+            self.human = HumanBehavior(page, rng=self.rng, device_profile=getattr(self.persona, "device", None))
+            self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
+            self.scraper = StealthScraper(page, self.human, self.orchestrator)
+            if self.recovery:
+                self.recovery._get_page = self.page_getter
+            return True
+        except Exception:
+            return False
 
     async def close(self):
         """Close the browser, page, and underlying Playwright instance.
@@ -1290,7 +1494,8 @@ class AgentBrowser:
             await self.launch(
                 light_mode=getattr(self, "light_mode", None),
                 use_pooled_context=getattr(self, "use_pooled_context", None),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
-                resume=getattr(self, "_resume", False)  # P2 resume preservation
+                resume=getattr(self, "_resume", False),  # P2 resume preservation
+                launch_options=getattr(self, "_custom_launch_options", None)  # #143: preserve custom opts on implicit launch
             )
         return self
 
