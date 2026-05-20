@@ -160,14 +160,23 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
         })
     });
     
-    // WebRTC protection
+    // WebRTC protection (stronger for #170 P1)
     const RTC = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
     if (RTC) {
         window.RTCPeerConnection = function(...args) {
             const pc = new RTC(...args);
             pc.createDataChannel = () => ({});
+            pc.createOffer = async () => ({ type: "offer", sdp: "" });
+            pc.createAnswer = async () => ({ type: "answer", sdp: "" });
+            pc.setLocalDescription = async () => {};
+            pc.setRemoteDescription = async () => {};
             return pc;
         };
+        window.RTCPeerConnection.prototype = RTC.prototype;
+    }
+    // Also nuke getUserMedia etc
+    if (navigator.mediaDevices) {
+        navigator.mediaDevices.getUserMedia = async () => { throw new Error("WebRTC disabled"); };
     }
     
     // Screen consistency
