@@ -24,12 +24,8 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-<<<<<<< HEAD
-from production.rate_limiter import domain_limiter, account_limiter  # see namespace support for #87 P1
-=======
 from production.rate_limiter import domain_limiter, account_limiter, DomainRateLimiter, AccountRateLimiter
 from production.metrics import metrics, MetricsCollector
->>>>>>> origin/perf/light-mode-174-113
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
@@ -51,6 +47,7 @@ class AgentBrowser:
         persona: Optional[Persona] = None,
         rate_limiter: Optional[AccountRateLimiter] = None,
         metrics_collector: Optional[MetricsCollector] = None,
+        light_mode: bool = False,
     ):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
@@ -76,8 +73,9 @@ class AgentBrowser:
         self.rate_limiter: AccountRateLimiter = rate_limiter or AccountRateLimiter()
         self.metrics: MetricsCollector = metrics_collector or MetricsCollector()
         self.account_id: Optional[str] = None
+        self.light_mode: bool = light_mode  # #174/#113/#92/#84 perf P1 final closer: light_mode now auto-wires to recovery so True reduces expensive content() calls + heavy detection
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None):
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: bool = False):
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -98,9 +96,11 @@ class AgentBrowser:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
+            light_mode: Enable light mode for #174 perf (skips heavy warm-ups). Also reduces recovery work (#92/#84) via AntiBlockOrchestrator.
         """
         if persona is not None:
             self.persona = persona
+        self.light_mode = light_mode
 
         pw = await async_playwright().start()
         
@@ -167,7 +167,8 @@ class AgentBrowser:
             browser=self.browser,
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
-            page_getter=lambda: self.page
+            page_getter=lambda: self.page,
+            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
@@ -209,6 +210,7 @@ class AgentBrowser:
         Navigate with full anti-block recovery.
         Uses the AntiBlockOrchestrator for intelligent detection and recovery.
         Recommended for production / high-reliability use.
+        Respects self.light_mode to skip warm-ups per #174.
         """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
@@ -266,6 +268,7 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
+
 
 
 
@@ -446,7 +449,7 @@ class AgentBrowser:
         try:
             import os
             os.makedirs("screenshots", exist_ok=True)
-            filename = f"screenshots/{name}_{int(time.time())}.png"
+            filename = f"screenshots/{name}_{int(time.time)}.png"
             await self.page.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
