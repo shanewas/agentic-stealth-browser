@@ -5,7 +5,7 @@ Handles early detection, platform-specific strategies, and intelligent rotation.
 
 Phase 8 fixes:
 - Circuit breaker for rapid repeated failures per platform/domain (#130 P1)
-- Light detection mode (default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
+- light_mode (light_detection=True default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
 - Throttled / conditional heavy content analysis (only when light=False or force_heavy)
 - Deduped duplicate return in calculate_backoff
 - Cost awareness stub + escalation hooks for future (#252, #276, #283)
@@ -51,7 +51,7 @@ class AntiBlockOrchestrator:
     Central coordinator for detecting and recovering from blocks/rate limits.
     Much more aggressive and intelligent than basic try/except.
 
-    Phase 8 improvements focus on performance (avoid content() spam) and resilience (circuit breaker).
+    Phase 8 improvements focus on performance (light_mode guards content() in recovery paths) and resilience (circuit breaker).
     """
 
     # Platform-specific recovery strategies
@@ -90,7 +90,7 @@ class AntiBlockOrchestrator:
         }
     }
 
-    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True):
+    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None):
         self.browser = browser          # usually the BrowserContext (for future use)
         self.session_manager = session_manager
         self.proxy_manager = proxy_manager
@@ -99,6 +99,9 @@ class AntiBlockOrchestrator:
         self.recovery_history: Dict[str, int] = {}  # platform -> consecutive recoveries
 
         # === Phase 8 Performance & Resilience ===
+        # Support light_mode alias for #174/#92/#84 callers (improves light_mode paths)
+        if light_mode is not None:
+            light_detection = bool(light_mode)
         self.light_detection = light_detection  # default True -> huge perf win (skips content() most times)
         self.circuit_breaker_threshold = 5
         self.circuit_cooldown = 300  # seconds (5 min)
@@ -173,7 +176,7 @@ class AntiBlockOrchestrator:
         - Page content patterns (HEAVY - only when not light_detection or force_heavy)  # perf fixes
         - Platform-specific heuristics
 
-        light_detection=True (default) avoids the expensive await page.content() on hot paths.
+        light_mode (light_detection=True default) avoids the expensive await page.content() on hot paths.
         """
         status = context.http_status
         response_time = context.response_time
@@ -223,15 +226,22 @@ class AntiBlockOrchestrator:
 
         # === Browser content analysis (EXPENSIVE - gated by light_detection) ===
         # Phase 8 perf fix: content() is called far too often in recovery paths.
-        # Only run when light_detection=False or explicitly forced (for deep debug / #273 explain).
-        do_heavy = force_heavy or (not getattr(self, 'light_detection', True))
+        # Only run when light_mode=False (light_detection=False) or explicitly forced (for deep debug / #273 explain).
+        # Ultra-narrow: direct attr (no getattr) + simple content() guard for final #174/#92/#84 close
+        do_heavy = force_heavy or (not self.light_detection)
         if self._get_page and do_heavy:
             try:
                 page = self._get_page()
                 content_lower = ""
                 if page:
-                    page_content = await page.content()
-                    content_lower = page_content.lower()[:3000]
+                    # Simple content() guard: only call if page looks usable (perf + safety)
+                    if hasattr(page, "content"):
+                        try:
+                            page_content = await page.content()
+                            content_lower = page_content.lower()[:3000]
+                        except Exception:
+                            content_lower = ""
+                    # else: leave content_lower="", skip expensive/unsafe content()
 
                 if content_lower:
                     # Cloudflare / generic challenge pages
@@ -463,7 +473,10 @@ class AntiBlockOrchestrator:
 
 
 # Convenience function
-def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True):
+def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None):
+    # Support light_mode for callers (final light_mode path improvement for perf P1s)
+    if light_mode is not None:
+        light_detection = bool(light_mode)
     return AntiBlockOrchestrator(
         browser, session_manager, proxy_manager, page_getter=page_getter, light_detection=light_detection
     )
