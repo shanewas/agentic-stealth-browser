@@ -37,19 +37,57 @@ class StealthConfig:
     ]
 
 
-@functools.lru_cache(maxsize=128)
-def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None) -> str:
+def get_playwright_version() -> str:
+    """Detect installed Playwright version for #279 future-proofing (new signals on updates)."""
+    try:
+        import playwright
+        return getattr(playwright, "__version__", "unknown")
+    except Exception:
+        try:
+            from importlib.metadata import version as _v
+            return _v("playwright")
+        except Exception:
+            return "unknown"
+
+
+def check_stealth_compatibility() -> Dict[str, Any]:
+    """#279: Detect potential new automation signals from newer Playwright/Chromium.
+    Returns dict with warning for graceful handling (log + continue with existing robust patches).
+    """
+    pw_ver = get_playwright_version()
+    warning = None
+    try:
+        major = int(str(pw_ver).split(".")[0]) if pw_ver not in ("unknown", "") else 0
+    except Exception:
+        major = 0
+    if pw_ver != "unknown" and major >= 2:
+        warning = (
+            f"Playwright {pw_ver} detected (post baseline). New automation signals may appear after Chromium updates. "
+            "Existing patches are try-wrapped/configurable for graceful degradation. Review #279."
+        )
+    return {
+        "playwright_version": pw_ver,
+        "warning": warning,
+        "stealth_version": "0.4-p2",
+        "recommended": "monitor https://github.com/shanewas/agentic-stealth-browser/issues/279",
+    }
+
+
+# lru_cache removed (hardware dict unhashable; fp_seed varies per session so hit rate low anyway)
+def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None, hardware: Dict[str, Any] = None) -> str:
     """
     Returns a comprehensive stealth injection script.
     Designed to be injected via browser.add_init_script()
 
     fingerprint_seed: per-session stable seed for canvas/WebGL/audio noise (addresses #94 static patches)
-    Caching (#P2 perf): avoids re-building large script string on repeated launches / many browsers.
+    hardware: dict from persona.device.get_hardware_fingerprint() for #255 correlation
+    (no lru due to variable hardware; build is cheap)
     """
     
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
+    hw = hardware or {"hardwareConcurrency": 8, "deviceMemory": 8}
     script = """
-    // === Advanced Agentic Stealth v0.4 (canvas/Offscreen/WebGL2/font fixes #25 #27 #94 #150 #210 #262 #95 + webrtc #170) ===
+    // === Advanced Agentic Stealth v0.4-p2 (canvas/Offscreen/WebGL2/font+measure #271 #95, hardware #255, __stealth marker, #279 compat) ===
     
     // Core anti-detection (improved for #138)
     Object.defineProperty(navigator, 'webdriver', {
@@ -70,10 +108,21 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
         get: () => ({ length: 2, item: () => null, namedItem: () => null })
     });
     
-    // Hardware fingerprint (consistent)
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    // Hardware fingerprint (consistent, persona power_level correlated via #255)
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => __HW_CONC__ });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => __DEV_MEM__ });
     Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+    
+    // P2: __stealth marker + realistic font list (for #271 measureText correlation + #279 detection)
+    // List chosen to match common Windows desktop; measurements jittered consistently via font-aware seed.
+    // Full document.fonts replacement avoided (risk of side-effects); exposed list + patched measure suffice for correlation.
+    window.__stealth = window.__stealth || {
+        version: "0.4-p2",
+        patched: ["webdriver","canvas","offscreen","webgl","webgl2","measureText","hardware","webrtc","fonts"],
+        fonts: ["Arial","Helvetica","Times New Roman","Courier New","Verdana","Georgia","Palatino Linotype","Garamond","Book Antiqua","Comic Sans MS","Trebuchet MS","Arial Black","Impact","Lucida Console","Segoe UI","Calibri","Cambria","Consolas","Tahoma"],
+        playwright_compat: "baseline-124+",
+        ts: Date.now()
+    };
     
     // Languages
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -145,12 +194,14 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
                   return id;
                 };
               }
-              // measureText jitter (#95 font spoofing via canvas)
+              // measureText jitter (#95 + #271: font-aware seed for list/measurement correlation)
               const origMeasure = ctx.measureText;
               if (origMeasure) {
                 ctx.measureText = function(text) {
                   const m = origMeasure.call(this, text);
-                  const j = (seededRand( ((text||"").length % 17) * 51 + 9001 ) - 0.5) * 0.9;
+                  const font = (this && this.font) ? String(this.font).substring(0, 25) : "def";
+                  const jseed = ((text||"").length % 17) * 51 + 9001 + font.length * 7;
+                  const j = (seededRand( jseed ) - 0.5) * 0.85;
                   try { Object.defineProperty(m, "width", {value: m.width + j, configurable: true}); } catch(e){}
                   return m;
                 };
@@ -284,6 +335,9 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
 
     # Inject the runtime seed into the JS IIFE call (makes canvas noise / fp per-session unique)
     script = script.replace("__DYNAMIC_SEED_PLACEHOLDER__", seed)
+    # P2: inject persona-correlated hardware (#255) + update placeholders
+    script = script.replace("__HW_CONC__", str(hw.get("hardwareConcurrency", 8)))
+    script = script.replace("__DEV_MEM__", str(hw.get("deviceMemory", 8)))
     # also update any old hardcoded if present
     import re as _re
     script = _re.sub(r'\}\)\("agentic-[^"]*seed[^"]*"\);', '})("' + seed + '");', script)

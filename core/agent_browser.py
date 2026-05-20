@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, BrowserContext, Browser
 
-from stealth.advanced_stealth import get_stealth_script, StealthConfig
+from stealth.advanced_stealth import get_stealth_script, StealthConfig, check_stealth_compatibility, get_playwright_version
 from stealth.tls_fingerprint import get_tls_manager
 from recovery.anti_block_orchestrator import AntiBlockOrchestrator
 from behavior.human_behavior import HumanBehavior
@@ -298,6 +298,17 @@ class AgentBrowser:
         # P2: persona power-correlated hardware for deviceMemory / hardwareConcurrency in stealth script
         persona_obj = getattr(self, "persona", None)
         hw_fingerprint = persona_obj.device.get_hardware_fingerprint() if persona_obj and hasattr(persona_obj, "device") else {"hardwareConcurrency": 8, "deviceMemory": 8}
+
+        # #279 future-proofing: detect PW version + new signals, warn gracefully (no hard fail)
+        try:
+            compat = check_stealth_compatibility()
+            if compat.get("warning") and getattr(self, "debug_reporter", None):
+                self.debug_reporter.record_patch("playwright_compat_warning", compat)
+            elif compat.get("warning"):
+                # minimal: could use logger but avoid new dep; record via audit if possible
+                pass
+        except Exception:
+            pass
 
         # Proxy wiring (#14, #29): if caller pre-configured ProxyManager (e.g. create_decodo_config before launch),
         # pass the Playwright proxy dict (socks5 supported) so real traffic uses residential proxy.
@@ -650,7 +661,7 @@ class AgentBrowser:
     async def load_cookies(self, cookies_path: str):
         """
         [DEPRECATED] Legacy cookie loader.
-        Use load_cookies_from_file(..., encryption_key=...) + CookieManager for resilient + secure (#82) loading.
+        Use load_cookies_from_file(..., encryption_key=...) + CookieManager for resilient + secure (#82) loading. Supports #270 rotation via list keys.
         Kept for backward compatibility; fixed .context access (BUG-03).
         """
         import json
@@ -742,10 +753,10 @@ class AgentBrowser:
             await asyncio.sleep(1.5)
 
 
-    async def load_cookies_from_file(self, cookies_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+    async def load_cookies_from_file(self, cookies_path: str, encryption_key: Any = None) -> Dict[str, Any]:
         """Load cookies using the resilient CookieManager.
 
-        Supports encryption_key for P1 #82 secure (encrypted) cookie loads.
+        Supports encryption_key (str or list[str] for #270 key rotation) for P1 #82 secure (encrypted) cookie loads.
         Pass the same secret used with save_cookies_to_file(encrypt=True).
         """
         if not self.browser:
@@ -767,10 +778,11 @@ class AgentBrowser:
 
         return await self.cookie_manager.get_cookie_health()
 
-    async def save_cookies_to_file(self, cookies_path: str, encrypt: bool = False, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+    async def save_cookies_to_file(self, cookies_path: str, encrypt: bool = False, encryption_key: Any = None) -> Dict[str, Any]:
         """Save cookies to file (plain or encrypted) via CookieManager.
 
         P1 #82: Use encrypt=True + any secret key for at-rest Fernet encryption + integrity protection.
+        encryption_key may be str or list[str] (#270 rotation: first for encrypt).
         Complements the #90 cleanup flow: store good sessions securely, auto-clean bad ones.
         """
         if not self.browser:

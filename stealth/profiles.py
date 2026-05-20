@@ -46,9 +46,21 @@ class DeviceProfile:
     platform: str = "Win32"
     hardware_concurrency: int = 8
     device_memory: int = 8  # GB, for future navigator.deviceMemory spoof
+    power_level: str = "medium"  # "low"|"medium"|"high" -> correlates hardware for #255
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    def get_hardware_fingerprint(self) -> Dict[str, Any]:
+        """Return hardware dict correlated to power_level (implements #255 correlation).
+        Called from AgentBrowser for dynamic navigator.deviceMemory / hardwareConcurrency.
+        """
+        mapping = {
+            "low": {"hardwareConcurrency": 4, "deviceMemory": 4},
+            "medium": {"hardwareConcurrency": 8, "deviceMemory": 8},
+            "high": {"hardwareConcurrency": 12, "deviceMemory": 16},
+        }
+        return mapping.get(getattr(self, "power_level", "medium"), mapping["medium"])
 
     @classmethod
     def default(cls) -> "DeviceProfile":
@@ -112,6 +124,7 @@ DEFAULT_PERSONA = Persona(
         platform="Win32",
         hardware_concurrency=8,
         device_memory=8,
+        power_level="medium",
     ),
     description="Baseline professional US desktop persona (2026 stealth default).",
     recommended_preset="linkedin_2026",
