@@ -224,13 +224,13 @@ class AgentBrowser:
             return await self.goto(url, warm_up=warm_up)
 
         async def _navigate():
-            if warm_up and "linkedin.com" in url and not self.light_mode:
+            if warm_up and "linkedin.com" in url and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto now skips linkedin warm-up cost/latency under light_mode (matches legacy goto + doc promises for launch/warm-up perf)
                 await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                 await self.human.scroll_naturally(280)
                 await self.human.think(900, 1600)
             
             response = await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            if not self.light_mode:
+            if not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto skips post-goto think under light_mode completing full warm-up cost reduction for launch perf (#174 #113)
                 await self.human.think(500, 1200)
             return response
 
@@ -244,6 +244,7 @@ class AgentBrowser:
         except Exception as e:
             self.logger.log_error("safe_goto_failed", str(e), {"url": url, "platform": platform})
             return False
+
 
 
 
@@ -273,7 +274,6 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
-
 
 
 
