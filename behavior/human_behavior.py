@@ -239,3 +239,61 @@ class HumanBehavior:
 
             if self.rng.random() < 0.25:
                 break
+
+async def fake_search_action(self, query: str = None):
+        """Simulate a natural search action (very effective warm-up)."""
+        if query is None:
+            queries = ["python developer", "data analyst", "project manager", "marketing specialist"]
+            query = self.rng.choice(queries)
+
+        try:
+            # Look for search input
+            search_selectors = [
+                "input[type='search']",
+                "input[name='q']",
+                "input[placeholder*='search']",
+                "input[aria-label*='search']"
+            ]
+
+            for selector in search_selectors:
+                try:
+                    el = await self.page.query_selector(selector)
+                    if el:
+                        await self.human_click(selector)
+                        await self.type_like_human(selector, query)
+                        await asyncio.sleep(self.rng.uniform(0.4, 0.9))
+                        await self.page.keyboard.press("Enter")
+                        await self.think(1200, 2400)
+                        return True
+                except:
+                    continue
+
+            # Fallback: just type in body
+            await self.page.keyboard.type(query)
+            await asyncio.sleep(0.6)
+            await self.page.keyboard.press("Enter")
+            return True
+
+        except Exception as e:
+            return False
+
+    async def random_idle_behavior(self, duration_seconds: float = 5.0):
+        """Advanced random idle behavior with multiple patterns."""
+        end_time = asyncio.get_event_loop().time() + duration_seconds
+
+        patterns = [
+            lambda: self.think(800, 2200),
+            lambda: self.micro_movement_while_waiting(800),
+            lambda: self.scroll_naturally(self.rng.randint(80, 180)),
+            lambda: asyncio.sleep(self.rng.uniform(1.2, 2.8)),
+        ]
+
+        while asyncio.get_event_loop().time() < end_time:
+            pattern = self.rng.choice(patterns)
+            if asyncio.iscoroutinefunction(pattern):
+                await pattern()
+            else:
+                await pattern()
+
+            if self.rng.random() < 0.3:
+                break

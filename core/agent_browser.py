@@ -284,10 +284,15 @@ class AgentBrowser:
                 await self.human.scroll_naturally(350)
                 await self.human.think(1200, 2200)
                 await self.human.micro_movement_while_waiting(600)
+                if self.rng.random() < 0.4:
+                    await self.human.random_idle_behavior(3.0)
 
             elif intensity == "heavy":
                 await self.human.simulate_reading(6.0)
                 await self.human.apply_viewport_jitter()
+                if self.rng.random() < 0.5:
+                    await self.human.fake_search_action()
+                await self.human.random_idle_behavior(4.0)
 
             return {"status": "success", "intensity": intensity}
         except Exception as e:
