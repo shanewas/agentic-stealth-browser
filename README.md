@@ -40,7 +40,7 @@ This project has a **solid architectural base** but is not yet production-harden
   - Basic audit logging and AI hooks
 
 - **MCP Integration**
-  - Exposed via `stealth-playwright-mcp` skill for use inside Hermes Agent
+  - Solid: Full stealth-playwright-mcp with debug/preset/explain/health tools, recovery wiring, correct .page usage (fixed #106 browser.browser). Used in Hermes.
 
 ### What's Incomplete or Weak
 
