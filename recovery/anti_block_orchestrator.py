@@ -89,29 +89,78 @@ class AntiBlockOrchestrator:
         """
         Early detection of blocks using multiple signals:
         - HTTP status codes
-        - Response timing anomalies
-        - Page content patterns (if browser context available)
+        - Response timing anomalies  
+        - Page content patterns (when browser context available)
+        - Platform-specific heuristics
         """
         status = context.http_status
         response_time = context.response_time
-
-        # Strong signals
-        if status in [429, 403]:
-            if status == 429:
-                return BlockType.HARD_RATE_LIMIT
-            return BlockType.SOFT_RATE_LIMIT
-
-        if status == 200 and response_time > 8.0:
-            # Unusually slow response can indicate soft throttling
-            return BlockType.SOFT_RATE_LIMIT
-
-        # Check for common block patterns in error message
         error_lower = (context.last_error or "").lower()
-        if any(x in error_lower for x in ["captcha", "blocked", "unusual activity", "verify"]):
+        platform = context.platform.lower()
+
+        # === Strong HTTP signals ===
+        if status == 429:
+            return BlockType.HARD_RATE_LIMIT
+        if status == 403:
+            return BlockType.SOFT_RATE_LIMIT
+        if status in [503, 502]:
+            return BlockType.PROXY_BLOCK
+
+        # === Timing anomalies ===
+        if status == 200 and response_time > 12.0:
+            return BlockType.SOFT_RATE_LIMIT
+
+        # === Error message patterns ===
+        captcha_keywords = ["captcha", "challenge", "verify", "security check", "robot check"]
+        if any(kw in error_lower for kw in captcha_keywords):
             return BlockType.CAPTCHA
 
         if "rate limit" in error_lower or "too many requests" in error_lower:
             return BlockType.HARD_RATE_LIMIT
+
+        if "blocked" in error_lower or "access denied" in error_lower:
+            if "amazon" in platform or "proxy" in error_lower:
+                return BlockType.PROXY_BLOCK
+            return BlockType.SOFT_RATE_LIMIT
+
+        # === Platform-specific detection ===
+        if "linkedin" in platform:
+            linkedin_blocks = [
+                "unusual activity", "security verification", "verify your identity",
+                "temporarily restricted", "account restricted"
+            ]
+            if any(kw in error_lower for kw in linkedin_blocks):
+                return BlockType.ACCOUNT_RESTRICTION
+            if "rate limit" in error_lower:
+                return BlockType.HARD_RATE_LIMIT
+
+        if "amazon" in platform:
+            amazon_blocks = ["sorry", "robot", "unusual activity", "captcha"]
+            if any(kw in error_lower for kw in amazon_blocks):
+                return BlockType.CAPTCHA
+
+        # === Browser content analysis (if available) ===
+        if self.browser and hasattr(self.browser, "content"):
+            try:
+                page_content = await self.browser.content()
+                content_lower = page_content.lower()[:3000]
+
+                # Cloudflare / generic challenge pages
+                if any(x in content_lower for x in ["checking your browser", "just a moment", "cf-challenge"]):
+                    return BlockType.CAPTCHA
+
+                # LinkedIn specific content
+                if "linkedin" in platform:
+                    if any(x in content_lower for x in ["security verification", "unusual activity detected"]):
+                        return BlockType.ACCOUNT_RESTRICTION
+
+                # Amazon specific
+                if "amazon" in platform:
+                    if any(x in content_lower for x in ["enter the characters", "sorry, we just need to make sure"]):
+                        return BlockType.CAPTCHA
+
+            except Exception:
+                pass  # Browser content check failed, continue with other signals
 
         return BlockType.NONE
 
@@ -135,8 +184,8 @@ class AntiBlockOrchestrator:
 
     async def recover(self, context: RecoveryContext) -> bool:
         """
-        Main recovery flow.
-        Returns True if recovery was successful (or should retry).
+        Main recovery flow with actual proxy/session rotation.
+        Returns True if we should continue retrying.
         """
         block_type = await self.detect_block(context)
         context.block_type = block_type
@@ -157,19 +206,44 @@ class AntiBlockOrchestrator:
         if block_type == BlockType.NONE:
             return True
 
-        # Decide on rotation
-        should_rotate_session = context.attempt >= strategy["rotate_session_after"]
-        should_rotate_proxy = context.attempt >= strategy["rotate_proxy_after"]
+        # === Actual rotation logic ===
+        should_rotate_session = context.attempt >= strategy.get("rotate_session_after", 3)
+        should_rotate_proxy = context.attempt >= strategy.get("rotate_proxy_after", 3)
 
         if should_rotate_session and self.session_manager:
-            self.logger.log_action("recovery_rotate_session", {"platform": context.platform})
-            # Session rotation logic would go here
-            # self.session_manager.rotate_session(...)
+            try:
+                self.logger.log_action("recovery_rotate_session", {
+                    "platform": context.platform,
+                    "attempt": context.attempt
+                })
+                # Create a fresh session
+                new_session = self.session_manager.create_session(
+                    session_name=f"recovery-{context.platform}-{context.attempt}",
+                    anonymous=True
+                )
+                context.metadata["new_session"] = new_session.get("name")
+            except Exception as e:
+                self.logger.log_error("session_rotation_failed", str(e))
 
         if should_rotate_proxy and self.proxy_manager:
-            self.logger.log_action("recovery_rotate_proxy", {"platform": context.platform})
-            # Proxy rotation logic
-            # await self.proxy_manager.rotate_proxy(...)
+            try:
+                self.logger.log_action("recovery_rotate_proxy", {
+                    "platform": context.platform,
+                    "attempt": context.attempt
+                })
+                # Generate new sticky session
+                if hasattr(self.proxy_manager, 'current_config') and self.proxy_manager.current_config:
+                    cfg = self.proxy_manager.current_config
+                    new_config = self.proxy_manager.create_decodo_config(
+                        user=cfg.username.split('-')[1] if hasattr(cfg, 'username') else "default",
+                        password=cfg.password if hasattr(cfg, 'password') else "",
+                        country=cfg.country if hasattr(cfg, 'country') else "jp",
+                        session_name=f"recovery-{context.attempt}",
+                        duration_minutes=30  # shorter duration for recovery
+                    )
+                    context.metadata["new_proxy"] = new_config.session_name
+            except Exception as e:
+                self.logger.log_error("proxy_rotation_failed", str(e))
 
         # Calculate and apply backoff
         delay = self.calculate_backoff(context)

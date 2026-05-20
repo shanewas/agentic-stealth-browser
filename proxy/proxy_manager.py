@@ -80,3 +80,51 @@ class ProxyManager:
         
         cfg = self.current_config
         return f"socks5://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}"
+
+
+    async def test_proxy_connection(self, timeout: int = 10) -> Dict:
+        """Test if the current proxy configuration actually works."""
+        import httpx
+        
+        if not self.current_config:
+            return {"status": "error", "message": "No proxy configured"}
+
+        cfg = self.current_config
+        proxy_url = f"socks5://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}"
+
+        try:
+            async with httpx.AsyncClient(proxies={"http://": proxy_url, "https://": proxy_url}, timeout=timeout) as client:
+                response = await client.get("https://api.ipify.org?format=json")
+                if response.status_code == 200:
+                    ip_data = response.json()
+                    return {
+                        "status": "success",
+                        "ip": ip_data.get("ip"),
+                        "provider": cfg.provider,
+                        "country": cfg.country,
+                        "session": cfg.session_name
+                    }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": str(e),
+                "provider": cfg.provider
+            }
+
+        return {"status": "error", "message": "Unknown failure"}
+
+    def get_current_proxy_info(self) -> Dict:
+        """Return current proxy configuration summary."""
+        if not self.current_config:
+            return {"configured": False}
+        
+        cfg = self.current_config
+        return {
+            "configured": True,
+            "provider": cfg.provider,
+            "host": cfg.host,
+            "port": cfg.port,
+            "country": cfg.country,
+            "session_name": cfg.session_name,
+            "duration_minutes": cfg.session_duration_minutes
+        }

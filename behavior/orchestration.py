@@ -70,3 +70,71 @@ class BehaviorOrchestrator:
         # Final small movements
         await self.human.move_mouse_naturally(600, 400)
         await self.human.think(600, 1200)
+
+
+    async def natural_linkedin_browsing(self, actions: int = 5):
+        """Simulate natural LinkedIn browsing behavior"""
+        for i in range(actions):
+            # Read feed naturally
+            await self.read_page_naturally(1, 3)
+
+            # Occasional profile hover / click
+            if self.rng.random() < 0.35:
+                await self.human.move_mouse_naturally(
+                    self.rng.randint(450, 850),
+                    self.rng.randint(280, 520)
+                )
+                await self.human.think(600, 1300)
+
+            # Scroll more
+            await self.human.scroll_naturally(self.rng.randint(350, 650))
+
+            # Longer reading pause
+            if self.rng.random() < 0.4:
+                await self.human.think(1800, 4200)
+
+            # Small chance of clicking into a post
+            if self.rng.random() < 0.22 and i > 1:
+                await self.human.human_click()
+                await self.read_page_naturally(1, 2)
+                # Go back
+                await self.human.think(800, 1600)
+
+    async def natural_amazon_shopping(self, actions: int = 4):
+        """Natural Amazon browsing flow"""
+        for _ in range(actions):
+            await self.human.scroll_naturally(self.rng.randint(280, 520))
+            await self.human.think(900, 2100)
+
+            # Occasional product hover
+            if self.rng.random() < 0.45:
+                await self.human.move_mouse_naturally(
+                    self.rng.randint(300, 700),
+                    self.rng.randint(250, 550)
+                )
+                await self.human.apply_viewport_jitter()
+
+            # Longer pause on interesting items
+            if self.rng.random() < 0.3:
+                await self.human.think(2200, 4800)
+
+    async def natural_search_session(self, query: str = None):
+        """Simulate a natural search + browsing session"""
+        # Initial page read
+        await self.read_page_naturally(2, 4)
+
+        # Search behavior
+        if query and self.rng.random() < 0.6:
+            try:
+                # Type search query naturally
+                await self.human.type_like_human("input[type='search'], input[name='q']", query)
+                await self.human.think(400, 900)
+                await self.human.human_click("button[type='submit'], button[aria-label*='search']")
+                await self.human.think(1200, 2400)
+            except:
+                pass
+
+        # Browse results
+        await self.human.scroll_naturally(self.rng.randint(400, 700))
+        await self.read_page_naturally(1, 3)
+
