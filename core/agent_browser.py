@@ -98,6 +98,8 @@ class AgentBrowser:
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
             light_mode: Enable light mode (#174/#113) to reduce launch/warm-up cost/latency (skips heavy warm-ups + auto-downgrades warm_up_before_work).
+            Proxy support: configure via self.proxy_manager.create_decodo_config(...) *before* calling launch()
+            (or pass preconfigured ProxyManager in advanced usage); it is now wired into launch_persistent_context (#14, #29).
         """
         if persona is not None:
             self.persona = persona
@@ -131,6 +133,12 @@ class AgentBrowser:
         loc = p_over.get("locale", "en-US")
         tz = p_over.get("timezone_id", "America/New_York")
 
+        # Proxy wiring (#14, #29): if caller pre-configured ProxyManager (e.g. create_decodo_config before launch),
+        # pass the Playwright proxy dict (socks5 supported) so real traffic uses residential proxy.
+        # Foundation for rotation (#38/#16). get_playwright_proxy_args is no longer dead code.
+        proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
+        launch_proxy = proxy_args if proxy_args else None
+
         self.browser = await pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data),
             headless=not headed if headed else headless,
@@ -141,18 +149,35 @@ class AgentBrowser:
             timezone_id=tz,
             extra_http_headers=extra_headers,
             args=all_args,
+            proxy=launch_proxy,
         )
+        
+        # Per-session stable fingerprint seed (canvas/WebGL noise + fonts) for consistency across reloads
+        # and variation between sessions. Addresses #150 (re-apply), #94, #210 etc.
+        session_name = (self.session or {}).get("name", "default-session")
+        fp_seed = f"agentic-{session_name}-canvas-v4"
+
+        # Inject on *context* (not page) so init script runs for:
+        # - the initial page, all subsequently created pages (new_page etc.)
+        # - every navigation, reload, and subframe
+        # This ensures stealth patches (canvas/Offscreen/WebGL/font) are re-applied after nav/reload (#150)
+        # and use the per-session seed for stable but unique fp.
+        await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed))
         
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
         
-        # Inject advanced stealth on the page
-        await self.page.add_init_script(get_stealth_script())
-        
         # Create human behavior controller + orchestrator
         self.human = HumanBehavior(self.page)
         self.orchestrator = BehaviorOrchestrator(self.human)
+
+        # Seed JS mouse tracker from Python last_pos for continuity (#24 #101).
+        # Must be after add_init_script + page ready. Safe best-effort.
+        try:
+            await self.human.initialize_mouse_tracker()
+        except Exception:
+            pass
         
         # Initialize audit logging
         self.logger = AuditLogger(self.session["name"])
@@ -387,34 +412,89 @@ class AgentBrowser:
         """Perform natural warm-up before real automation work.
 
         Respects self.light_mode (#174/#113): auto-downgrades to 'light' to reduce launch/warm-up cost and latency.
+        Now uses profile_action around mouse/click/hover/scroll actions for timing + visibility (#169).
+        Best-effort: sub-failures logged (via profile + AuditLogger) but do not silently claim full success
+        if critical warm-up gestures all failed. Returns partial/degraded status when needed.
         """
         if not self.human:
             return {"status": "error", "message": "Human behavior not initialized"}
 
+        attempted = 0
+        succeeded = 0
+        errors = []
+
+        def _should_profile(act_name: str) -> bool:
+            # profile the ones that involve clicks/hovers/mouse moves (core of #169 complaint)
+            return any(k in act_name.lower() for k in ("mouse", "click", "hover", "micro", "scroll", "idle", "read", "search", "jitter"))
+
+        async def _run_step(name: str, coro_func):
+            """Run a warm-up step, wrapped in profile_action when appropriate, best-effort."""
+            nonlocal attempted, succeeded
+            attempted += 1
+            try:
+                if _should_profile(name) and hasattr(self, "profile_action"):
+                    # profile_action will print timing or "FAILED" + re-raise; we catch for best-effort
+                    result = await self.profile_action(f"warmup_{name}", coro_func)
+                else:
+                    result = await coro_func()
+                succeeded += 1
+                return result
+            except Exception as e:
+                err_msg = f"{name}: {str(e)}"
+                errors.append(err_msg)
+                if self.logger:
+                    try:
+                        self.logger.log_error("warm_up_step_failed", str(e), {"step": name, "intensity": intensity})
+                    except Exception:
+                        pass
+                # best-effort: continue; profile already logged the failure visibly
+                return None
+
         try:
             if getattr(self, "light_mode", False):
-                intensity = "light"  # ultra-narrow final polish for #174/#113: light_mode=True reduces warm-up cost/latency (auto-downgrade heavy/medium paths)
+                intensity = "light"
+
             if intensity == "light":
-                await self.human.scroll_naturally(200)
-                await self.human.think(800, 1500)
+                await _run_step("scroll_light", lambda: self.human.scroll_naturally(200))
+                await _run_step("think_light", lambda: self.human.think(800, 1500))
 
             elif intensity == "medium":
-                await self.human.scroll_naturally(350)
-                await self.human.think(1200, 2200)
-                await self.human.micro_movement_while_waiting(600)
+                await _run_step("scroll_med", lambda: self.human.scroll_naturally(350))
+                await _run_step("think_med", lambda: self.human.think(1200, 2200))
+                await _run_step("micro_move", lambda: self.human.micro_movement_while_waiting(600))
                 if self.rng.random() < 0.4:
-                    await self.human.random_idle_behavior(3.0)
+                    await _run_step("random_idle", lambda: self.human.random_idle_behavior(3.0))
 
             elif intensity == "heavy":
-                await self.human.simulate_reading(6.0)
-                await self.human.apply_viewport_jitter()
+                await _run_step("simulate_reading", lambda: self.human.simulate_reading(6.0))
+                await _run_step("viewport_jitter", lambda: self.human.apply_viewport_jitter())
                 if self.rng.random() < 0.5:
-                    await self.human.fake_search_action()
-                await self.human.random_idle_behavior(4.0)
+                    await _run_step("fake_search", lambda: self.human.fake_search_action())
+                await _run_step("random_idle_heavy", lambda: self.human.random_idle_behavior(4.0))
 
-            return {"status": "success", "intensity": intensity}
+            status = "success"
+            if attempted > 0 and succeeded == 0:
+                status = "degraded"  # all critical steps (esp mouse/click profile ones) failed; do not pretend warmed (#169)
+            elif attempted > 0 and succeeded < attempted:
+                status = "partial"
+
+            result = {"status": status, "intensity": intensity, "steps_attempted": attempted, "steps_succeeded": succeeded}
+            if errors:
+                result["errors"] = errors[:3]  # limit
+            if self.logger:
+                try:
+                    self.logger.log_action("warm_up_complete", result)
+                except Exception:
+                    pass
+            return result
         except Exception as e:
-            return {"status": "error", "message": str(e)}
+            # top level unexpected
+            if self.logger:
+                try:
+                    self.logger.log_error("warm_up_failed", str(e), {"intensity": intensity})
+                except Exception:
+                    pass
+            return {"status": "error", "message": str(e), "steps_attempted": attempted, "steps_succeeded": succeeded}
 
     async def ensure_cookies_fresh(self, max_age_hours: int = 8) -> Dict[str, Any]:
         """Ensure cookies are fresh before long operations."""
@@ -471,7 +551,9 @@ class AgentBrowser:
 
 
     async def profile_action(self, name: str, action_func):
-        """Profile the execution time of an action."""
+        """Profile the execution time of an action.
+        Failures are printed + re-raised (no silent success) -- used in warm-up for #169 visibility.
+        """
         start = time.time()
         try:
             result = await action_func()
@@ -485,6 +567,11 @@ class AgentBrowser:
         except Exception as e:
             duration = time.time() - start
             print(f"[Profile] {name} FAILED after {duration:.2f}s: {e}")
+            if getattr(self, "logger", None):
+                try:
+                    self.logger.log_error("profile_action_failed", str(e), {"name": name, "duration": duration})
+                except Exception:
+                    pass
             raise
 
 

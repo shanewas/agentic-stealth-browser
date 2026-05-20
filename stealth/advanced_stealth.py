@@ -46,7 +46,7 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     script = """
-    // === Advanced Agentic Stealth v0.3 (canvas-offscreen-webgl2 fixes #94 #262 #210 + webrtc #170) ===
+    // === Advanced Agentic Stealth v0.4 (canvas/Offscreen/WebGL2/font fixes #25 #27 #94 #150 #210 #262 #95 + webrtc #170) ===
     
     // Core anti-detection
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -65,12 +65,13 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
         window.chrome = { runtime: {}, app: { isInstalled: false } };
     }
     
-    // === Canvas, OffscreenCanvas, WebGL2 protection (v0.3 - fixes #94, #262, #210) ===
-    // - Removed destructive digit->letter fillText mangling (broke real canvas text/charts on sites)
-    // - Added OffscreenCanvas.getContext hook (critical for modern detectors & workers)
-    // - Extended WebGL spoof to WebGL2RenderingContext + additional params + seeded jitter
-    // - Captures devicePixelRatio for future zoom/DPR consistent noise (#210)
-    // - Non-destructive fingerprint resistance improvement
+    // === Canvas, OffscreenCanvas, WebGL2, Font protection (v0.4 - fixes #25 #27 #94 #150 #210 #262 #95) ===
+    // - Non-destructive tiny seeded subpixel jitter on fillText/strokeText (changes raster pixels for toDataURL fp consistently; content/visibility identical; defeats old mangling)
+    // - Seeded small noise on getImageData (covers pixel read-back, OffscreenCanvas 2d, workers)
+    // - measureText jitter for realistic font measurement spoofing (#95)
+    // - Unified robust prototype patching for HTMLCanvasElement + OffscreenCanvas (#262)
+    // - DPR/zoom-aware jitterScale for consistent fingerprints across zoom levels (#210)
+    // - Patches re-applied automatically on nav/reload via context init_script (#150)
     (function(fpSeed) {
       const SEED = fpSeed || "agentic-default-seed-2026";
       function seededRand(n) {
@@ -80,27 +81,71 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
         return ((x >>> 0) % 100000) / 100000.0;
       }
       const dpr = (typeof window !== "undefined" && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+      const jitterScale = 0.55 / Math.max(1, dpr);  // #210: DPR-aware subpixel jitter
 
-      // Patch HTMLCanvasElement.getContext
-      const origGetContext = HTMLCanvasElement.prototype.getContext;
-      HTMLCanvasElement.prototype.getContext = function(type, attrs) {
-        const ctx = origGetContext.call(this, type, attrs);
-        if (ctx && (type === "2d" || type === "webgl" || type === "webgl2" || type === "experimental-webgl")) {
-          // room for seeded getImageData noise using dpr + seededRand
-        }
-        return ctx;
-      };
-
-      // OffscreenCanvas support (#262)
-      if (typeof OffscreenCanvas !== "undefined" && OffscreenCanvas.prototype && OffscreenCanvas.prototype.getContext) {
-        const origOffGet = OffscreenCanvas.prototype.getContext;
-        OffscreenCanvas.prototype.getContext = function(type, attrs) {
-          const ctx = origOffGet.call(this, type, attrs);
-          if (ctx && (type === "2d" || type === "webgl" || type === "webgl2")) {
-            // future: wrap same
+      function installCanvasPatches(Proto) {
+        if (!Proto || !Proto.prototype || Proto.prototype.__stealthPatchedCanvas) return;
+        const origGetContext = Proto.prototype.getContext;
+        Proto.prototype.getContext = function(type, attrs) {
+          const ctx = origGetContext.call(this, type, attrs);
+          if (ctx && (type === "2d" || type === "webgl" || type === "webgl2" || type === "experimental-webgl")) {
+            if (ctx.__stealthPatched) return ctx;
+            if (type === "2d") {
+              // fillText/strokeText jitter: pixel fp changes without mangling drawn text/numbers (#25 #27)
+              const origFill = ctx.fillText;
+              ctx.fillText = function(text, x, y, maxWidth) {
+                const h = ((text || "").length + (x|0) + ((y|0)<<3)) >>> 0;
+                const jx = (seededRand(h) - 0.5) * jitterScale;
+                const jy = (seededRand(h + 1337) - 0.5) * jitterScale * 0.6;
+                return origFill.call(this, text, x + jx, y + jy, maxWidth);
+              };
+              const origStroke = ctx.strokeText;
+              if (origStroke) {
+                ctx.strokeText = function(text, x, y, maxWidth) {
+                  const h = 4242 + ((text || "").length + (x|0) + ((y|0)<<3)) >>> 0;
+                  const jx = (seededRand(h) - 0.5) * jitterScale;
+                  const jy = (seededRand(h + 1337) - 0.5) * jitterScale * 0.6;
+                  return origStroke.call(this, text, x + jx, y + jy, maxWidth);
+                };
+              }
+              // getImageData noise for read fp (#262 Offscreen too via shared proto)
+              const origGetImageData = ctx.getImageData;
+              if (origGetImageData) {
+                ctx.getImageData = function(sx, sy, sw, sh, settings) {
+                  const id = origGetImageData.call(this, sx, sy, sw, sh, settings);
+                  const d = id.data;
+                  const base = ((sx|0) * 31 + (sy|0) * 17 + (sw|0)) >>> 0;
+                  for (let i = 0; i < d.length; i += 4) {
+                    const rj = (seededRand(base + i) - 0.5) * 2.2;
+                    const gj = (seededRand(base + i + 1) - 0.5) * 2.2;
+                    const bj = (seededRand(base + i + 2) - 0.5) * 2.2;
+                    d[i]     = Math.max(0, Math.min(255, (d[i]     || 0) + Math.floor(rj)));
+                    d[i + 1] = Math.max(0, Math.min(255, (d[i + 1] || 0) + Math.floor(gj)));
+                    d[i + 2] = Math.max(0, Math.min(255, (d[i + 2] || 0) + Math.floor(bj)));
+                  }
+                  return id;
+                };
+              }
+              // measureText jitter (#95 font spoofing via canvas)
+              const origMeasure = ctx.measureText;
+              if (origMeasure) {
+                ctx.measureText = function(text) {
+                  const m = origMeasure.call(this, text);
+                  const j = (seededRand( ((text||"").length % 17) * 51 + 9001 ) - 0.5) * 0.9;
+                  try { Object.defineProperty(m, "width", {value: m.width + j, configurable: true}); } catch(e){}
+                  return m;
+                };
+              }
+            }
+            ctx.__stealthPatched = true;
           }
           return ctx;
         };
+        Proto.prototype.__stealthPatchedCanvas = true;
+      }
+      installCanvasPatches(HTMLCanvasElement);
+      if (typeof OffscreenCanvas !== "undefined" && OffscreenCanvas.prototype) {
+        installCanvasPatches(OffscreenCanvas);
       }
 
       // WebGL + WebGL2 getParameter extended (prep #218)
