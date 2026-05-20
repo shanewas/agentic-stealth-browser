@@ -48,6 +48,34 @@ class CookieManager:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    async def load_cookies_from_data(self, cookies_data: Any) -> Dict[str, Any]:
+        """Load cookies from in-memory data (list / dict / JSON string or bytes).
+        Addresses P1 #145 (MCP cookies/state): allows Claude / MCP clients to pass
+        cookie blobs directly without requiring a locally-accessible filesystem path.
+        """
+        try:
+            if isinstance(cookies_data, (str, bytes)):
+                data = json.loads(cookies_data)
+            else:
+                data = cookies_data
+
+            if isinstance(data, list):
+                self.cookies = data
+            elif isinstance(data, dict):
+                self.cookies = data.get("cookies", data.get("cookies_file_content", []))
+            else:
+                self.cookies = []
+
+            if self.browser_context and self.cookies:
+                try:
+                    await self.browser_context.add_cookies(self.cookies)
+                except Exception as e:
+                    return {"status": "partial", "loaded": len(self.cookies), "error": str(e)}
+
+            return {"status": "success", "cookies_loaded": len(self.cookies), "source": "inline_data"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     def is_cookie_expired(self, cookie: Dict, max_age_hours: int = 24) -> bool:
         """Check if a single cookie is expired or too old."""
         if "expires" not in cookie or not cookie["expires"]:

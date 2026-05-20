@@ -1,0 +1,63 @@
+name: Stealth + Recovery CI (E2E opt-in for #125/#256)
+on:
+  push:
+    branches: [ master, main, 'fix/*', 'feat/*' ]
+  pull_request:
+    branches: [ master, main ]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_real_e2e:
+        description: 'Run real E2E anti-block recovery test against protected site (#256)'
+        required: false
+        default: false
+        type: boolean
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  fast-unit-stealth-recovery:
+    name: Fast unit tests (stealth + recovery)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install + Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "pytest>=8" pytest-asyncio playwright
+          playwright install chromium --with-deps
+      - name: Run fast non-E2E tests
+        run: python -m pytest tests/ -q -m "not e2e" --tb=line
+        env:
+          RUN_E2E_ANTI_BLOCK: "0"
+      - name: Smoke
+        run: python -c "from recovery.anti_block_orchestrator import AntiBlockOrchestrator; from core.agent_browser import AgentBrowser; print('✓ OK')"
+  e2e-anti-block-recovery:
+    name: E2E anti-block recovery on protected site (#256)
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.run_real_e2e == 'true') || github.event_name == 'schedule'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install + browser
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "pytest>=8" pytest-asyncio playwright
+          playwright install chromium --with-deps
+      - name: Run solid E2E test
+        run: python -m pytest tests/test_e2e_anti_block_recovery.py -q -s --tb=short
+        env:
+          RUN_E2E_ANTI_BLOCK: "1"

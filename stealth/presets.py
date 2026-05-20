@@ -192,3 +192,69 @@ if __name__ == "__main__":
     li = get_preset("linkedin_2026")
     print("LinkedIn 2026 TLS region:", li.tls_region.value)
     print("Notes excerpt:", li.notes[:100], "...")
+
+# === Persona / DeviceProfile foundation (added for #109 + #88) ===
+# Minimal solid start - co-located with PlatformPreset for smallest footprint.
+# Future: can move to dedicated stealth/profiles.py once stable.
+
+from dataclasses import dataclass, field, asdict
+from typing import Dict, Any, Optional
+
+
+@dataclass(frozen=True)
+class DeviceProfile:
+    """Core device + browser environment profile (centralizes viewport, UA, locale, tz etc)."""
+    name: str = "win_chrome_124_desktop"
+    viewport: Dict[str, int] = field(default_factory=lambda: {"width": 1366, "height": 768})
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    locale: str = "en-US"
+    timezone_id: str = "America/New_York"
+    platform: str = "Win32"
+    hardware_concurrency: int = 8
+    device_memory: int = 8
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def default(cls) -> "DeviceProfile":
+        return cls()
+
+
+@dataclass
+class Persona:
+    """User persona foundation. Wraps DeviceProfile for AgentBrowser launch etc."""
+    name: str
+    device: DeviceProfile = field(default_factory=DeviceProfile.default)
+    description: str = ""
+    locale: Optional[str] = None
+    timezone_id: Optional[str] = None
+    notes: str = ""
+    recommended_preset: Optional[str] = None
+
+    def effective_locale(self) -> str:
+        return self.locale or self.device.locale
+
+    def effective_timezone(self) -> str:
+        return self.timezone_id or self.device.timezone_id
+
+    def to_launch_overrides(self) -> Dict[str, Any]:
+        return {
+            "viewport": self.device.viewport,
+            "user_agent": self.device.user_agent,
+            "locale": self.effective_locale(),
+            "timezone_id": self.effective_timezone(),
+        }
+
+
+DEFAULT_PERSONA = Persona(name="professional_us_desktop", description="Baseline 2026 professional US desktop for P1 #109 foundation.")
+PERSONAS = {"default": DEFAULT_PERSONA, "us_professional": DEFAULT_PERSONA}
+
+def get_persona(name: str = "default") -> Persona:
+    return PERSONAS.get(name.lower().strip().replace("-", "_"), DEFAULT_PERSONA)
+
+def list_personas():
+    return list(PERSONAS.keys())
+
+
+__all__ = ["Persona", "DeviceProfile", "DEFAULT_PERSONA", "get_persona", "list_personas"]
