@@ -78,10 +78,11 @@ class AntiBlockOrchestrator:
         }
     }
 
-    def __init__(self, browser=None, session_manager=None, proxy_manager=None):
-        self.browser = browser
+    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None):
+        self.browser = browser          # usually the BrowserContext (for future use)
         self.session_manager = session_manager
         self.proxy_manager = proxy_manager
+        self._get_page = page_getter    # callable that returns current Playwright Page (for content checks)
         self.logger = AuditLogger("recovery")
         self.recovery_history: Dict[str, int] = {}  # platform -> consecutive recoveries
 
@@ -139,11 +140,14 @@ class AntiBlockOrchestrator:
             if any(kw in error_lower for kw in amazon_blocks):
                 return BlockType.CAPTCHA
 
-        # === Browser content analysis (if available) ===
-        if self.browser and hasattr(self.browser, "content"):
+        # === Browser content analysis (if page_getter available) ===
+        # BUG-04 fix: previously received Context which has no .content(); now use injected page getter
+        if self._get_page:
             try:
-                page_content = await self.browser.content()
-                content_lower = page_content.lower()[:3000]
+                page = self._get_page()
+                if page:
+                    page_content = await page.content()
+                    content_lower = page_content.lower()[:3000]
 
                 # Cloudflare / generic challenge pages
                 if any(x in content_lower for x in ["checking your browser", "just a moment", "cf-challenge"]):
@@ -307,5 +311,5 @@ class AntiBlockOrchestrator:
 
 
 # Convenience function
-def create_orchestrator(browser=None, session_manager=None, proxy_manager=None):
-    return AntiBlockOrchestrator(browser, session_manager, proxy_manager)
+def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None):
+    return AntiBlockOrchestrator(browser, session_manager, proxy_manager, page_getter=page_getter)

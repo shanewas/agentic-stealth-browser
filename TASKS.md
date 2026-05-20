@@ -157,9 +157,10 @@
   - Fix applied directly to the Hermes skill (stealth_mcp.py:80,105 now use `.page`). Library-side naming cleanup tracked under BUG-03.
   - **Done (runtime):** 2026-05 — edit applied to /root/.hermes/.../stealth_mcp.py. MCP content tools now functional once AgentBrowser has .page.
 
-- [ ] **BUG-03** — Legacy `load_cookies()` + recovery paths use wrong attributes (`.context`, `.url` on BrowserContext). Inconsistent naming (`self.browser` is Context, `self.page` is Page).
+- [x] **BUG-03** — Legacy `load_cookies()` + recovery paths use wrong attributes (`.context`, `.url` on BrowserContext). Inconsistent naming (`self.browser` is Context, `self.page` is Page).
   - Files: `core/agent_browser.py`
   - Actions: Deprecate/fix legacy method, add clear properties or docstring, fix safe_click/safe_type.
+  - **Done:** 2026-05 — commit ad37196. Added .context alias, fixed bad accesses, strong docstring, deprecated old loader. MCP consumers now have safe .page to use.
 
 - [ ] **BUG-04** — `AntiBlockOrchestrator.detect_block` content analysis assumes `browser.content()` but receives Context (no such method). Silent failure.
   - Files: `recovery/anti_block_orchestrator.py`, wiring in `core/agent_browser.py`
