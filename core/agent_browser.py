@@ -97,7 +97,7 @@ class AgentBrowser:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
-            light_mode: Enable light mode for #174/#113 perf (reduces launch/warm-up cost/latency; skips heavy warm-ups + auto-downgrades warm_up_before_work).
+            light_mode: Enable light mode (#174/#113) to reduce launch/warm-up cost/latency (skips heavy warm-ups + auto-downgrades warm_up_before_work).
         """
         if persona is not None:
             self.persona = persona
@@ -217,7 +217,7 @@ class AgentBrowser:
         Navigate with full anti-block recovery.
         Uses the AntiBlockOrchestrator for intelligent detection and recovery.
         Recommended for production / high-reliability use.
-        Respects self.light_mode to skip warm-ups per #174/#113 (launch/warm-up cost reduction).  # ultra-narrow absolute final closer for ONLY #174 and #113
+        Respects self.light_mode to skip warm-ups per #174.
         """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
@@ -277,7 +277,6 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
-
 
 
 
@@ -385,7 +384,10 @@ class AgentBrowser:
 
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
-        """Perform natural warm-up before real automation work."""
+        """Perform natural warm-up before real automation work.
+
+        Respects self.light_mode (#174/#113): auto-downgrades to 'light' to reduce launch/warm-up cost and latency.
+        """
         if not self.human:
             return {"status": "error", "message": "Human behavior not initialized"}
 

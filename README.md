@@ -259,7 +259,7 @@ await browser.ensure_cookies_fresh(max_age_hours=6)
 
 | Method                        | Description                              | Parameters |
 |-------------------------------|------------------------------------------|----------|
-| `launch(..., light_mode=False)` | Launch browser with stealth (#174/#113: light_mode reduces launch/warm-up cost/latency) | `headless`, `slow_mo`, `light_mode`, `persona` |
+| `launch(..., light_mode=False)` | Launch browser with stealth (#174/#113: light_mode to reduce launch/warm-up cost/latency) | `headless`, `slow_mo`, `light_mode`, `persona` |
 | `safe_goto(url, platform)`    | Navigate with recovery                   | `url`, `platform`, `warm_up` |
 | `load_cookies_from_file(path)`| Load cookies from real browser           | `cookies_path` |
 | `warm_up_before_work(intensity)` | Perform natural warm-up               | `intensity` ("light", "medium", "heavy") |
