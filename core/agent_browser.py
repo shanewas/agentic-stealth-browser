@@ -20,6 +20,7 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
+from production.rate_limiter import domain_limiter, account_limiter
 
 
 class AgentBrowser:
@@ -344,6 +345,40 @@ class AgentBrowser:
             duration = time.time() - start
             print(f"[Profile] {name} FAILED after {duration:.2f}s: {e}")
             raise
+
+
+    async def safe_goto_with_rate_limit(self, url: str, domain: str = None, account: str = None, **kwargs):
+        """Navigate with rate limiting protection."""
+        if domain is None:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+            except:
+                domain = "unknown"
+
+        # Wait if rate limit would be exceeded
+        if account:
+            wait_time = await account_limiter.wait_if_needed(account, domain)
+        else:
+            wait_time = await domain_limiter.wait_if_needed(domain)
+
+        if wait_time > 0:
+            print(f"[Rate Limit] Waited {wait_time:.1f}s for {domain}")
+
+        # Record the request
+        if hasattr(self, 'metrics'):
+            self.metrics.increment("requests_total")
+
+        return await self.safe_goto(url, **kwargs)
+
+    def set_rate_limit(self, domain: str, requests_per_minute: int = 8, cooldown_seconds: int = 60):
+        """Configure custom rate limit for a domain."""
+        from production.rate_limiter import RateLimitConfig
+        config = RateLimitConfig(
+            requests_per_minute=requests_per_minute,
+            cooldown_seconds=cooldown_seconds
+        )
+        domain_limiter.set_limit(domain, config)
 
     async def close(self):
         if self.browser:
