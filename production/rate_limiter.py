@@ -2,6 +2,10 @@ from collections import defaultdict
 """
 Rate Limiting per Domain/Account
 Prevents getting blocked by enforcing per-domain and per-account limits.
+
+Phase 8 P1 #87 (scalability): added optional namespace / fleet isolation support.
+Multiple AgentBrowser instances (or logical agents) can now safely share the
+module without cross-contamination of rate state when a namespace is provided.
 """
 
 import asyncio
@@ -20,88 +24,110 @@ class RateLimitConfig:
 
 
 class DomainRateLimiter:
-    """Rate limiter per domain."""
+    """Rate limiter per domain.
+    Supports optional namespace for multi-instance / fleet isolation (#87).
+    """
 
     def __init__(self):
         self.configs: Dict[str, RateLimitConfig] = {}
         self.request_times: Dict[str, list] = defaultdict(list)
         self.last_request: Dict[str, datetime] = {}
 
-    def set_limit(self, domain: str, config: RateLimitConfig):
-        """Set custom rate limit for a domain."""
-        self.configs[domain] = config
+    def set_limit(self, domain: str, config: RateLimitConfig, namespace: Optional[str] = None):
+        """Set custom rate limit for a domain (namespaced if provided)."""
+        key = self._key(domain, namespace)
+        self.configs[key] = config
 
-    def _get_config(self, domain: str) -> RateLimitConfig:
-        """Get config for domain or return default."""
-        return self.configs.get(domain, RateLimitConfig())
+    def _key(self, domain: str, namespace: Optional[str] = None) -> str:
+        return f"{namespace}:{domain}" if namespace else domain
 
-    async def wait_if_needed(self, domain: str) -> float:
-        """Wait if rate limit would be exceeded. Returns wait time in seconds."""
+    def _get_config(self, domain: str, namespace: Optional[str] = None) -> RateLimitConfig:
+        """Get config for domain or return default (namespaced lookup first)."""
+        key = self._key(domain, namespace)
+        return self.configs.get(key, self.configs.get(domain, RateLimitConfig()))
+
+    async def wait_if_needed(self, domain: str, namespace: Optional[str] = None) -> float:
+        """Wait if rate limit would be exceeded. Returns wait time in seconds.
+        Pass namespace for isolated multi-agent usage (#87 P1).
+        """
         now = datetime.now()
-        config = self._get_config(domain)
+        config = self._get_config(domain, namespace)
+        key = self._key(domain, namespace)
 
         # Clean old requests
         minute_ago = now - timedelta(minutes=1)
         hour_ago = now - timedelta(hours=1)
 
-        self.request_times[domain] = [
-            t for t in self.request_times[domain]
+        self.request_times[key] = [
+            t for t in self.request_times[key]
             if t > minute_ago
         ]
 
         # Check per-minute limit
-        if len(self.request_times[domain]) >= config.requests_per_minute:
-            wait_time = (self.request_times[domain][0] + timedelta(minutes=1) - now).total_seconds()
+        if len(self.request_times[key]) >= config.requests_per_minute:
+            wait_time = (self.request_times[key][0] + timedelta(minutes=1) - now).total_seconds()
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
-                # BUG-05 fix: record the request at the time it is actually issued (after waiting)
                 now = datetime.now()
-                self.request_times[domain].append(now)
-                self.last_request[domain] = now
+                self.request_times[key].append(now)
+                self.last_request[key] = now
                 return wait_time
 
         # Check cooldown
-        if domain in self.last_request:
-            time_since_last = (now - self.last_request[domain]).total_seconds()
+        if key in self.last_request:
+            time_since_last = (now - self.last_request[key]).total_seconds()
             if time_since_last < config.cooldown_seconds:
                 wait_time = config.cooldown_seconds - time_since_last
                 await asyncio.sleep(wait_time)
-                # BUG-05 fix: record post-wait so the window/cooldown is accurate
                 now = datetime.now()
-                self.request_times[domain].append(now)
-                self.last_request[domain] = now
+                self.request_times[key].append(now)
+                self.last_request[key] = now
                 return wait_time
 
         # Record this request (happy path, no wait)
-        self.request_times[domain].append(now)
-        self.last_request[domain] = now
+        self.request_times[key].append(now)
+        self.last_request[key] = now
 
         return 0.0
 
 
 class AccountRateLimiter:
-    """Rate limiter per account/username."""
+    """Rate limiter per account/username.
+    Supports namespace isolation for scalability (#87).
+    """
 
     def __init__(self):
-        self.account_limits: Dict[str, DomainRateLimiter] = {}
+        self.account_limiters: Dict[str, DomainRateLimiter] = {}
 
-    def get_limiter(self, account: str) -> DomainRateLimiter:
-        """Get or create rate limiter for account."""
-        if account not in self.account_limits:
-            self.account_limits[account] = DomainRateLimiter()
-        return self.account_limits[account]
+    def get_limiter(self, account: str, namespace: Optional[str] = None) -> DomainRateLimiter:
+        """Get or create rate limiter for account (namespaced)."""
+        ns_key = f"{namespace}:{account}" if namespace else account
+        if ns_key not in self.account_limiters:
+            self.account_limiters[ns_key] = DomainRateLimiter()
+        return self.account_limiters[ns_key]
 
-    async def wait_if_needed(self, account: str, domain: str) -> float:
-        """Wait if needed for this account + domain combination."""
-        limiter = self.get_limiter(account)
-        return await limiter.wait_if_needed(domain)
+    async def wait_if_needed(self, account: str, domain: str, namespace: Optional[str] = None) -> float:
+        """Wait if needed for this account + domain (isolated by namespace if given)."""
+        limiter = self.get_limiter(account, namespace)
+        return await limiter.wait_if_needed(domain, namespace=namespace)
 
 
-# Global instances
+# Global instances (still work for single-process simple cases)
+# For multi-instance safe usage (#87) pass namespace= to wait_if_needed calls.
 domain_limiter = DomainRateLimiter()
 account_limiter = AccountRateLimiter()
 
 
+<<<<<<< HEAD
 # P1 #87 scalability: namespaced accessors (additive, non-breaking)
 def wait_with_namespace(domain: str, namespace: str = None):
     return domain_limiter.wait_if_needed(domain, namespace=namespace)
+=======
+def get_isolated_rate_limiters(namespace: str) -> tuple[DomainRateLimiter, AccountRateLimiter]:
+    """Factory for completely isolated limiter pair for a logical agent/fleet member.
+    Recommended for #87 scalability when running multiple AgentBrowsers in one process.
+    """
+    # Each call returns fresh pair (no sharing even with same ns unless you cache)
+    # For shared-within-namespace use the global + namespace arg (lighter).
+    return DomainRateLimiter(), AccountRateLimiter()
+>>>>>>> origin/perf/light-mode-174-113
