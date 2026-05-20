@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -78,7 +78,7 @@ class AuditLogger:
     def log_action(self, action: str, details: Optional[Dict] = None, level: str = "info"):
         """Log a browser action with structured data"""
         entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "session": self.session_name,
             "action": action,
             "details": details or {},
@@ -153,7 +153,7 @@ class DebugReporter:
     def record_patch(self, name: str, data: Dict[str, Any]):
         """Record a stealth patch application for later reporting."""
         self.patches[name] = data
-        self.records.append({"type": "patch", "name": name, "data": data, "ts": datetime.utcnow().isoformat()})
+        self.records.append({"type": "patch", "name": name, "data": data, "ts": datetime.now(timezone.utc).isoformat()})
 
     def dump_fingerprint(self) -> Dict[str, Any]:
         """Return the TLS / fingerprint profile chosen for this session."""
@@ -177,7 +177,7 @@ class DebugReporter:
     def full_debug_report(self, include_recent_logs: bool = True) -> Dict[str, Any]:
         """Produce a comprehensive debug bundle for the current browser state."""
         report = {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "tls_fingerprint": self.dump_fingerprint(),
             "http_headers": self.dump_headers(),
             "stealth_patches": self.dump_patches(),
