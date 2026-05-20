@@ -503,8 +503,14 @@ class AgentBrowser:
         if domain is None:
             try:
                 domain = urlparse(url).netloc
-            except:
+            except Exception as e:
+                # #126 fix: narrow bare except; log (if available) so parse errors are not hidden
                 domain = "unknown"
+                if getattr(self, "logger", None):
+                    try:
+                        self.logger.log_error("safe_goto_with_rate_limit_domain_parse_failed", str(e), {"url": url})
+                    except Exception:
+                        pass  # never let logging break the path
 
         # Use *this instance's* rate limiter (isolated from other AgentBrowser instances)
         rl = self.rate_limiter
