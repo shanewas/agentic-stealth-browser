@@ -111,3 +111,23 @@ See also: `tests/test_phase7_fixes.py`, `recovery/anti_block_orchestrator.py`, `
 - Self-detection + maintenance
 
 Will open first PR after this update. Will batch 3-5 PRs before reporting final.
+---
+
+## Phase 8 Closer Agent Progress (Maximum Pressure - 2026-05-20 continued)
+
+**Sub-agent:** Recovery + Stealth + DX Closer (aggressive batch mode)
+
+**PRs delivered in this session:**
+- PR #310: Recovery perf + circuit breaker (light mode default, #130 #52 #53 #76 #84 #92 #174 #252 etc) — ~8 P1/P2
+- PR #311: Stealth WebRTC strong leak prevention + prototype (#170 P1)
+- PR #312: Docs Troubleshooting + Anti-Patterns (#133 #209 P1)
+
+**Total issues impacted/closed by this agent today:** 12+
+
+**Strategy followed:** P1 first, small safe changes, tests where possible, branches per coherent batch, PRs with "Closes" refs. Clean workspace maintained between batches. Silent execution.
+
+**Next recommended:** #256 e2e real-site recovery test (bigger), #109 Persona, more stealth (fonts, battery), performance pooling, MCP contract tests.
+
+All changes minimal, additive where possible, preserve backward compat.
+
+*Phase 8 closer campaign — maximum pressure applied.*
