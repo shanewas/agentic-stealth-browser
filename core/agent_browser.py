@@ -97,7 +97,7 @@ class AgentBrowser:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
-            light_mode: Enable light mode for #174/#113 perf (reduces launch/warm-up cost/latency; skips heavy warm-ups + auto-downgrades warm_up_before_work). Also reduces recovery work (#92/#84) via AntiBlockOrchestrator.
+            light_mode: Enable light mode for #174/#113 perf (reduces launch/warm-up cost/latency; skips heavy warm-ups + auto-downgrades warm_up_before_work).
         """
         if persona is not None:
             self.persona = persona
