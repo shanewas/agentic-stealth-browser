@@ -145,23 +145,25 @@ class AntiBlockOrchestrator:
         if self._get_page:
             try:
                 page = self._get_page()
+                content_lower = ""
                 if page:
                     page_content = await page.content()
                     content_lower = page_content.lower()[:3000]
 
-                # Cloudflare / generic challenge pages
-                if any(x in content_lower for x in ["checking your browser", "just a moment", "cf-challenge"]):
-                    return BlockType.CAPTCHA
-
-                # LinkedIn specific content
-                if "linkedin" in platform:
-                    if any(x in content_lower for x in ["security verification", "unusual activity detected"]):
-                        return BlockType.ACCOUNT_RESTRICTION
-
-                # Amazon specific
-                if "amazon" in platform:
-                    if any(x in content_lower for x in ["enter the characters", "sorry, we just need to make sure"]):
+                if content_lower:
+                    # Cloudflare / generic challenge pages
+                    if any(x in content_lower for x in ["checking your browser", "just a moment", "cf-challenge"]):
                         return BlockType.CAPTCHA
+
+                    # LinkedIn specific content
+                    if "linkedin" in platform:
+                        if any(x in content_lower for x in ["security verification", "unusual activity detected"]):
+                            return BlockType.ACCOUNT_RESTRICTION
+
+                    # Amazon specific
+                    if "amazon" in platform:
+                        if any(x in content_lower for x in ["enter the characters", "sorry, we just need to make sure"]):
+                            return BlockType.CAPTCHA
 
             except Exception:
                 pass  # Browser content check failed, continue with other signals
@@ -185,6 +187,31 @@ class AntiBlockOrchestrator:
         backoff = min(base * (2 ** (context.attempt - 1)), max_backoff)
         jitter_amount = backoff * jitter * random.uniform(-1, 1)
         return max(5.0, backoff + jitter_amount)
+        return max(5.0, backoff + jitter_amount)
+
+    def _safe_extract_base_user(self, proxy_username: str) -> str:
+        """Robustly extract the base 'user' part from Decodo proxy username string.
+        Format is typically 'user-REALUSER-country-...-session-...'.
+        Never crashes recovery; falls back to 'default'.
+        Addresses #99, #10.
+        """
+        if not proxy_username or not isinstance(proxy_username, str):
+            return "default"
+        try:
+            parts = proxy_username.split("-")
+            # Common: ['user', 'REALUSER', 'country', ...]
+            if len(parts) > 1 and parts[0].lower() == "user":
+                return parts[1]
+            # Fallback search for first non-empty token after initial 'user-'
+            if proxy_username.lower().startswith("user-"):
+                after = proxy_username[5:]
+                if "-" in after:
+                    return after.split("-", 1)[0]
+                if after:
+                    return after
+        except Exception:
+            pass
+        return "default"
 
     async def recover(self, context: RecoveryContext) -> bool:
         """
@@ -235,17 +262,26 @@ class AntiBlockOrchestrator:
                     "platform": context.platform,
                     "attempt": context.attempt
                 })
-                # Generate new sticky session
-                if hasattr(self.proxy_manager, 'current_config') and self.proxy_manager.current_config:
+                # Generate new sticky session (robust, #99/#10)
+                if getattr(self.proxy_manager, 'current_config', None):
                     cfg = self.proxy_manager.current_config
+                    base_user = self._safe_extract_base_user(getattr(cfg, 'username', None))
+                    pwd = getattr(cfg, 'password', "")
+                    ctry = getattr(cfg, 'country', "jp")
                     new_config = self.proxy_manager.create_decodo_config(
-                        user=cfg.username.split('-')[1] if hasattr(cfg, 'username') else "default",
-                        password=cfg.password if hasattr(cfg, 'password') else "",
-                        country=cfg.country if hasattr(cfg, 'country') else "jp",
+                        user=base_user,
+                        password=pwd,
+                        country=ctry,
                         session_name=f"recovery-{context.attempt}",
                         duration_minutes=30  # shorter duration for recovery
                     )
+                    # Ensure manager state is updated for future use
+                    self.proxy_manager.current_config = new_config
                     context.metadata["new_proxy"] = new_config.session_name
+                    context.metadata["new_proxy_config"] = {
+                        "session_name": new_config.session_name,
+                        "country": ctry
+                    }
             except Exception as e:
                 self.logger.log_error("proxy_rotation_failed", str(e))
 
