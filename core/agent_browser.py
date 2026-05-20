@@ -189,7 +189,7 @@ class AgentBrowser:
         
         for attempt in range(max_retries):
             try:
-                if warm_up and "linkedin.com" in url and attempt == 0:
+                if warm_up and "linkedin.com" in url and attempt == 0 and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: legacy goto path now skips warm-up cost/latency under light_mode (matches safe_goto + class/launch doc promises for launch/warm-up perf)
                     # Natural session warming
                     await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                     await self.human.scroll_naturally(280)
@@ -244,6 +244,7 @@ class AgentBrowser:
             return False
 
 
+
     async def load_cookies(self, cookies_path: str):
         """
         [DEPRECATED] Legacy cookie loader.
@@ -270,6 +271,7 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
+
 
 
 
