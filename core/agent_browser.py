@@ -183,7 +183,10 @@ class AgentBrowser:
         return self.browser
     
     async def goto(self, url: str, warm_up: bool = True, max_retries: int = 3):
-        """Navigate with session warming and basic error recovery"""
+        """Navigate with session warming and basic error recovery.
+
+        Respects self.light_mode (#174/#113) to skip warm-up costs/latency (pre-warm, post-goto think, retry think) matching safe_goto for full launch/warm-up perf reduction.
+        """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
         
@@ -274,6 +277,7 @@ class AgentBrowser:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
         return {"status": "success", "cookies_loaded": len(cookies)}
+
 
 
 
