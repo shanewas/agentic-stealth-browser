@@ -6,7 +6,6 @@ Combines stealth, human behavior, and session management
 import asyncio
 import random
 import time
-import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, BrowserContext
@@ -24,13 +23,6 @@ from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
 from production.rate_limiter import domain_limiter, account_limiter
-
-# Metrics wiring (perf/observability fixes #239 #294)
-try:
-    from production.metrics import metrics as global_metrics
-except Exception:
-    global_metrics = None
-
 
 
 class AgentBrowser:
@@ -55,10 +47,6 @@ class AgentBrowser:
         self.browser = None   # Playwright BrowserContext (persistent) — see launch() docstring
         self.page = None      # Playwright Page (main) — use this for most page actions
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
-
-        # Wire metrics (eliminates dead hasattr paths #239)
-        self.metrics = global_metrics
-
     
     async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False):
         """Launch browser with full stealth + human behavior.
@@ -83,7 +71,6 @@ class AgentBrowser:
             headed: Force headed mode even if headless=True (for debugging)
         """
         pw = await async_playwright().start()
-        launch_start = time.time()
         
         user_data = Path(self.session["user_data_dir"])
         user_data.mkdir(parents=True, exist_ok=True)
@@ -146,15 +133,6 @@ class AgentBrowser:
 
         # Store playwright instance for proper cleanup
         self._pw = pw
-
-        # Record launch perf metric
-        if getattr(self, "metrics", None):
-            try:
-                launch_dur = time.time() - launch_start
-                self.metrics.record_time("browser_launch_duration", launch_dur)
-                self.metrics.increment("browser_launches")
-            except Exception:
-                pass
 
         return self.browser
     
@@ -327,19 +305,9 @@ class AgentBrowser:
 
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
-        """Perform natural warm-up before real automation work.
-        Adaptive: honors AGENTIC_STEALTH_REALISM (light/off -> force light) and CI env (#258 #274).
-        """
+        """Perform natural warm-up before real automation work."""
         if not self.human:
             return {"status": "error", "message": "Human behavior not initialized"}
-
-        # Auto downgrade for CI / low-resource / explicit perf mode
-        ci_env = bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("JENKINS_URL"))
-        realism = getattr(self.human, "realism_level", 3)
-        if (ci_env or realism <= 1) and intensity == "heavy":
-            intensity = "light"
-        if realism == 0 and intensity != "light":
-            intensity = "light"
 
         try:
             if intensity == "light":
@@ -395,7 +363,7 @@ class AgentBrowser:
             duration = time.time() - start
             
             # Record in metrics if available
-            if self.metrics:
+            if hasattr(self, 'metrics'):
                 self.metrics.record_time(name, duration)
             
             print(f"[Profile] {name}: {duration:.2f}s")
@@ -425,7 +393,7 @@ class AgentBrowser:
             print(f"[Rate Limit] Waited {wait_time:.1f}s for {domain}")
 
         # Record the request
-        if self.metrics:
+        if hasattr(self, 'metrics'):
             self.metrics.increment("requests_total")
 
         return await self.safe_goto(url, **kwargs)

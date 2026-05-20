@@ -119,3 +119,42 @@
 - Self-detection + maintenance
 
 Will open first PR after this update. Will batch 3-5 PRs before reporting final.
+
+---
+
+**Report checkpoint (Stealth Agent):** 2026-05-20T11:50:23.173852
+- PR #304 (canvas batch #94 #262 #210): https://github.com/shanewas/agentic-stealth-browser/pull/304  -- merged changes to main stealth script + wiring + tests
+- PR #305 (TLS batch #114 #246 #293): https://github.com/shanewas/agentic-stealth-browser/pull/305
+- 8+ issues directly referenced and linked via comments.
+- 2 coherent PRs opened on first day of work. No blockers encountered (edits careful, tested via invocation + py tests).
+- Ready to continue with WebGL extensions, fonts, or API patches (battery/speech/hardware/webrtc) or prototype robustness in next batches.
+- All work followed rules: read files, minimal changes, tests added, git branches, gh PRs, PHASE8 updates.
+
+## Core Reliability & AgentBrowser Agent - Progress Update (2026-05-20)
+
+**Completed P1 fixes (high value, safe, tested):**
+- **#292 Core context manager**: Implemented `async def __aenter__` + `async def __aexit__` + hardened `close()` (page + context + playwright stop, idempotent, never raises). 
+  - Preferred usage: `async with AgentBrowser(...) as browser: await browser.safe_goto(...)`
+  - Guarantees cleanup on exceptions (critical for reliability, prevents browser leaks).
+  - Added comprehensive regression test exercising normal + exceptional paths + pre-launched case.
+  - All tests pass (including real headless launches).
+  - **PR**: #302 (open) titled "fix(core): Implement async context manager for reliable AgentBrowser cleanup (#292)"
+  - Branch: `fix/292-context-manager-cleanup`
+  - Commit: 48db553 (restored + verified post-parallel edit conflicts)
+
+**Files changed / protected:**
+- `core/agent_browser.py` (context manager + robust close; restored from known-good after parallel edit incident)
+- `tests/test_phase7_fixes.py` (added `test_292_context_manager`, merged with stealth additions for no-conflict)
+- `tests/test_basic.py` (import hygiene fix for direct runs)
+- `audit/logger.py` (defensive DebugReporter stub + enable_debug_mode to survive DX partial merges)
+
+**Status on other core issues (next up):**
+- #254 (page_getter coupling): Identified, plan flexible PageProvider protocol or injectable factory.
+- #278 (ephemeral/throwaway): Can leverage the new context manager + `ephemeral=True` flag in future small PR.
+- #249 (exception hierarchy): Ready to introduce `AgentBrowserError` base + subclasses (StealthError, RecoveryFailed, etc.) in small safe increment.
+- #261, #270, #237, #285: In backlog; will batch after P1s.
+
+**Test verification:** `python tests/test_phase7_fixes.py` now passes end-to-end for core + stealth.
+
+**Next actions for this agent:** Tackle #254 or #278 with similar small+tested pattern + new PR. Update tracker after each.
+

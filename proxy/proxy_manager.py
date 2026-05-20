@@ -1,10 +1,14 @@
 """
 Proxy Manager for Agentic Browser
-Supports Decodo, Smartproxy, and other residential providers with sticky sessions
+Supports Decodo, Smartproxy, and other residential providers with sticky sessions.
+Phase 8: Added tier selection (residential, datacenter, mobile, isp), better rotation hooks (#119).
 """
 
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, Literal
+
+
+ProxyTier = Literal["residential", "datacenter", "mobile", "isp"]
 
 
 @dataclass
@@ -17,36 +21,42 @@ class ProxyConfig:
     country: str = "jp"
     session_name: Optional[str] = None
     session_duration_minutes: int = 1440
+    tier: ProxyTier = "residential"
 
 
 class ProxyManager:
     """
     Manages proxy configuration and sticky session generation.
     Currently optimized for Decodo residential proxies.
+    Supports tier-aware selection and Playwright integration.
     """
-    
+
+    SUPPORTED_PROVIDERS = ["decodo", "smartproxy", "oxylabs", "selfhosted"]
+
     def __init__(self):
         self.current_config: Optional[ProxyConfig] = None
-    
+        self._proxy_history: list = []
+
     def create_decodo_config(
         self,
         user: str,
         password: str,
         country: str = "jp",
         session_name: Optional[str] = None,
-        duration_minutes: int = 1440
+        duration_minutes: int = 1440,
+        tier: ProxyTier = "residential"
     ) -> ProxyConfig:
-        """Create a Decodo residential proxy config with sticky session"""
-        
+        """Create a Decodo residential (or tiered) proxy config with sticky session"""
+
         if session_name is None:
             import uuid
             session_name = f"agent-{uuid.uuid4().hex[:8]}"
-        
+
         proxy_user = (
             f"user-{user}-country-{country}-"
             f"session-{session_name}-sessionduration-{duration_minutes}"
         )
-        
+
         config = ProxyConfig(
             provider="decodo",
             host="gate.decodo.com",
@@ -55,37 +65,51 @@ class ProxyManager:
             password=password,
             country=country,
             session_name=session_name,
-            session_duration_minutes=duration_minutes
+            session_duration_minutes=duration_minutes,
+            tier=tier
         )
-        
+
         self.current_config = config
+        self._proxy_history.append({"action": "create", "config": config, "ts": __import__("time").time()})
         return config
-    
+
+    def select_tier(self, desired_tier: ProxyTier, country: str = "jp", **kwargs) -> ProxyConfig:
+        """High-level tier selection helper."""
+        if not self.current_config:
+            return self.create_decodo_config(
+                user=kwargs.get("user", "default"),
+                password=kwargs.get("password", ""),
+                country=country,
+                tier=desired_tier,
+                **{k: v for k, v in kwargs.items() if k not in ["user", "password"]}
+            )
+        self.current_config.tier = desired_tier
+        return self.current_config
+
     def get_playwright_proxy_args(self) -> Dict:
         """Return Playwright-compatible proxy configuration"""
         if not self.current_config:
             return {}
-        
+
         cfg = self.current_config
         return {
             "server": f"socks5://{cfg.host}:{cfg.port}",
             "username": cfg.username,
             "password": cfg.password
         }
-    
+
     def get_curl_proxy_string(self) -> str:
         """Return curl-compatible proxy string"""
         if not self.current_config:
             return ""
-        
+
         cfg = self.current_config
         return f"socks5://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}"
-
 
     async def test_proxy_connection(self, timeout: int = 10) -> Dict:
         """Test if the current proxy configuration actually works."""
         import httpx
-        
+
         if not self.current_config:
             return {"status": "error", "message": "No proxy configured"}
 
@@ -102,13 +126,15 @@ class ProxyManager:
                         "ip": ip_data.get("ip"),
                         "provider": cfg.provider,
                         "country": cfg.country,
-                        "session": cfg.session_name
+                        "session": cfg.session_name,
+                        "tier": cfg.tier
                     }
         except Exception as e:
             return {
                 "status": "error",
                 "message": str(e),
-                "provider": cfg.provider
+                "provider": cfg.provider,
+                "tier": getattr(cfg, 'tier', 'unknown')
             }
 
         return {"status": "error", "message": "Unknown failure"}
@@ -117,7 +143,7 @@ class ProxyManager:
         """Return current proxy configuration summary."""
         if not self.current_config:
             return {"configured": False}
-        
+
         cfg = self.current_config
         return {
             "configured": True,
@@ -126,5 +152,23 @@ class ProxyManager:
             "port": cfg.port,
             "country": cfg.country,
             "session_name": cfg.session_name,
-            "duration_minutes": cfg.session_duration_minutes
+            "duration_minutes": cfg.session_duration_minutes,
+            "tier": cfg.tier,
+            "history_length": len(self._proxy_history)
         }
+
+    def rotate_proxy(self, reason: str = "manual") -> Optional[ProxyConfig]:
+        """Create a fresh sticky session config (for recovery use)."""
+        if not self.current_config:
+            return None
+        cfg = self.current_config
+        new_config = self.create_decodo_config(
+            user=cfg.username.split('-')[1] if '-' in cfg.username else "default",
+            password=cfg.password,
+            country=cfg.country,
+            session_name=f"rotated-{__import__('uuid').uuid4().hex[:6]}",
+            duration_minutes=30,
+            tier=cfg.tier
+        )
+        self._proxy_history.append({"action": "rotate", "reason": reason, "old": cfg.session_name, "new": new_config.session_name})
+        return new_config
