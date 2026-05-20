@@ -104,6 +104,14 @@ class AntiBlockOrchestrator:
         if light_mode is not None:
             light_detection = bool(light_mode)
         self.light_detection = light_detection  # default True -> huge perf win (skips content() most times)
+        # ultra-narrow absolute final closer for ONLY #174 and #113 (recovery path): tie to .light_mode on passed browser obj if present
+        # lightweight, silent, fast, complements explicit light_mode kw; guarantees no heavy content() in recovery when flag set
+        if browser is not None:
+            try:
+                if getattr(browser, "light_mode", False):
+                    self.light_detection = True
+            except Exception:
+                pass
         self.circuit_breaker_threshold = 5
         self.circuit_cooldown = 300  # seconds (5 min)
         self.failure_counts: Dict[str, int] = {}
