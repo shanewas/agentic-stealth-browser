@@ -119,6 +119,94 @@ Then use tools:
 
 ---
 
+
+
+## Usage Examples
+
+### Basic Stealth Navigation
+
+```python
+from core.agent_browser import AgentBrowser
+
+async def basic_example():
+    browser = AgentBrowser(session_name="example")
+    await browser.launch(headless=True)
+    
+    # Navigate with full stealth + recovery
+    await browser.safe_goto("https://www.linkedin.com/in/williamhgates", platform="linkedin")
+    
+    # Human-like behavior
+    await browser.human.scroll_naturally(400)
+    await browser.human.think(1500, 2800)
+    
+    await browser.close()
+```
+
+### Loading Cookies from Real Browser (Recommended for Upwork/LinkedIn)
+
+```python
+async def with_cookies():
+    browser = AgentBrowser(session_name="upwork-session")
+    await browser.launch(headless=True)
+    
+    # Load cookies exported from real Edge/Chrome
+    await browser.load_cookies_from_file("~/.upwork/cookies.json")
+    
+    # Warm up the session
+    await browser.warm_up_before_work(intensity="medium")
+    
+    # Now perform actions with fresh cookies + human behavior
+    await browser.safe_goto("https://www.upwork.com/nx/search/jobs/", platform="upwork")
+    await browser.human.simulate_reading(8.0)
+    
+    await browser.close()
+```
+
+### Region-Specific Fingerprinting
+
+```python
+from stealth.tls_fingerprint import get_tls_manager
+
+# Use Japanese TLS fingerprint
+tls = get_tls_manager("japan")
+tls.log_fingerprint_choice()
+```
+
+### Detection Testing
+
+```python
+from tests.detection_runner import DetectionTester
+
+tester = DetectionTester()
+await tester.run_full_suite()
+tester.save_results()
+```
+
+
+
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable              | Description                        | Default     |
+|-----------------------|------------------------------------|-------------|
+| `STEALTH_REGION`      | TLS fingerprint region             | `japan`     |
+| `STEALTH_HEADLESS`    | Run browser in headless mode       | `true`      |
+| `STEALTH_PROXY`       | Use residential proxy              | `false`     |
+
+### Recommended Settings
+
+```python
+# For maximum stealth (LinkedIn / Upwork)
+browser = AgentBrowser(session_name="production")
+await browser.launch(headless=True)
+await browser.load_cookies_from_file("cookies.json")
+await browser.warm_up_before_work("heavy")
+await browser.ensure_cookies_fresh(max_age_hours=6)
+```
+
+
 ## License
 
 Private repository. All rights reserved.
