@@ -25,3 +25,5 @@
 | `safe_goto` / `safe_click`    | Actions with automatic recovery          |
 | `ensure_cookies_fresh(hours)` | Auto cookie refresh                      |
 | `warm_up_session(intensity)`  | Session warm-up before work              |
+
+*Last updated: 2026-05-20 (quick MCP hygiene #106 + cookie cleanup #90)*
