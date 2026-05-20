@@ -1,0 +1,7 @@
+version: '3.8'
+services:
+  stealth:
+    build: {context: ., dockerfile: production/Dockerfile}
+    environment: {STEALTH_REGION: "${STEALTH_REGION:-japan}"}
+    volumes: ["cookies:/cookies", "sessions:/sessions"]
+volumes: {cookies: {}, sessions: {}}

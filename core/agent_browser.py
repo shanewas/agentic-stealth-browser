@@ -104,6 +104,16 @@ class AgentBrowser:
 
         See also: apply_preset(), get_health_status(), debug_report()
         """
+        # Production/container env var wiring (#18)
+        # Explicit call args take precedence; env provides friendly defaults for Docker / k8s / compose
+        if region is None:
+            region = os.getenv("STEALTH_REGION") or os.getenv("AGENTIC_STEALTH_REGION") or os.getenv("STEALTH_REGION_OVERRIDE")
+
+        env_headless = os.getenv("STEALTH_HEADLESS")
+        if env_headless is not None and not headed:
+            headless = str(env_headless).lower() not in ("0", "false", "no", "")
+
+        # realism is already read inside HumanBehavior via STEALTH_REALISM / AGENTIC_STEALTH_REALISM envs
         pw = await async_playwright().start()
         launch_start = time.time()
 
