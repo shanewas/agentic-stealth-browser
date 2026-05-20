@@ -136,6 +136,7 @@ class AgentBrowser:
         self,
         session_name: Optional[str] = None,
         anonymous: bool = False,
+        ephemeral: bool = False,  # P2/P3 MVP: throwaway session (auto-tagged + prunable)
         persona: Optional[Persona] = None,
         rate_limiter: Optional[AccountRateLimiter] = None,
         metrics_collector: Optional[MetricsCollector] = None,
@@ -143,7 +144,7 @@ class AgentBrowser:
         use_pooled_context: bool = False,  # P1 #57/#48/#47: opt-in for shared Browser + new_context reuse (when rotation not required)
     ):
         self.session_manager = SessionManager()
-        self.session = self.session_manager.create_session(session_name, anonymous)
+        self.session = self.session_manager.create_session(session_name, anonymous, ephemeral=ephemeral)
         self.proxy_manager = ProxyManager()
         self.human = None
         self.orchestrator = None
@@ -170,8 +171,28 @@ class AgentBrowser:
         self.use_pooled_context: bool = use_pooled_context  # #57/#48/#47 scalability: when True, launch uses shared browser pool instead of per-instance launch_persistent_context
         self._using_pool: bool = False
         self._pooled_ctx_id: Optional[int] = None  # track for release
+
+        # P2/P3 DX & Observability (#281, #265, #288): health/status, debug, presets
+        self.debug_mode: bool = False
+        self.current_preset: Optional[str] = None
+        self.current_region: str = "global"
+        self.tls_manager: Optional[Any] = None
+        self.debug_reporter: Optional[Any] = None
+        self._launch_options: Dict[str, Any] = {}  # for rotation relaunch preservation (incl. debug/preset/region)
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None, use_pooled_context: Optional[bool] = None):  # #57/#48/#47 pooled scalability opt-in (also overridable here)
+    async def launch(
+        self,
+        headless: bool = True,
+        slow_mo: int = 0,
+        headed: bool = False,
+        persona: Optional[Persona] = None,
+        light_mode: Optional[bool] = None,
+        use_pooled_context: Optional[bool] = None,
+        resume: bool = False,
+        debug: bool = False,
+        preset: Optional[str] = None,
+        region: Optional[str] = None,
+    ):
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -197,6 +218,9 @@ class AgentBrowser:
             use_pooled_context: If True, use shared _BrowserPool + new_context() for scalability (P1 #57/#48/#47).
                 Only effective when proxy rotation is not required (or handled by creating fresh pooled ctxs).
                 Default False for full backward compat + per-session disk persistence via launch_persistent_context.
+            debug: Enable debug mode (#265) - populates DebugReporter for fingerprint/headers/patches.
+            preset: Platform preset e.g. "linkedin_2026" (#288) - sets region, behavior, recovery tuning.
+            region: TLS region override ("us", "eu", "japan", "korea", "global").
             Proxy support: configure via self.proxy_manager.create_decodo_config(...) *before* calling launch()
             (or pass preconfigured ProxyManager in advanced usage); it is now wired into launch_persistent_context (#14, #29).
         """
@@ -219,11 +243,34 @@ class AgentBrowser:
             # TLS manager will be (re)created below; store for selection
             self._env_region = env_region.lower()
 
+        # P2/P3 DX wiring (#281 health, #265 debug, #288 preset)
+        self.debug_mode = bool(debug)
+        if preset:
+            self.current_preset = preset
+            try:
+                from stealth.presets import get_preset
+                p = get_preset(preset)
+                # derive region from preset if not explicitly passed
+                if not region and hasattr(p, 'tls_region'):
+                    reg = p.tls_region
+                    region = reg.value if hasattr(reg, 'value') else str(reg)
+            except Exception:
+                pass
+        if region:
+            self.current_region = str(region).lower()
+        # store for rotation relaunch
+        self._launch_options = {
+            "headless": headless, "slow_mo": slow_mo, "headed": headed,
+            "light_mode": light_mode, "use_pooled_context": use_pooled_context,
+            "debug": self.debug_mode, "preset": self.current_preset, "region": self.current_region,
+            "resume": getattr(self, "_resume", False),
+        }
         # P1 #57/#48/#47: optional pooled path (shared browser + new_context) vs classic per-instance persistent
         extra_headers = get_extra_http_headers()
 
-        # TLS Fingerprint spoofing (region-aware)
-        self.tls_manager = get_tls_manager("global", self.session.get("name"))
+        # TLS Fingerprint spoofing (region-aware) - now respects preset/region/debug (#281)
+        tls_region = self.current_region or "global"
+        self.tls_manager = get_tls_manager(tls_region, self.session.get("name"))
         self.tls_manager.log_fingerprint_choice()
         tls_args = self.tls_manager.get_launch_args()
 
@@ -241,6 +288,10 @@ class AgentBrowser:
         ua = p_over.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
         loc = p_over.get("locale", "en-US")
         tz = p_over.get("timezone_id", "America/New_York")
+
+        # P2: persona power-correlated hardware for deviceMemory / hardwareConcurrency in stealth script
+        persona_obj = getattr(self, "persona", None)
+        hw_fingerprint = persona_obj.device.get_hardware_fingerprint() if persona_obj and hasattr(persona_obj, "device") else {"hardwareConcurrency": 8, "deviceMemory": 8}
 
         # Proxy wiring (#14, #29): if caller pre-configured ProxyManager (e.g. create_decodo_config before launch),
         # pass the Playwright proxy dict (socks5 supported) so real traffic uses residential proxy.
@@ -294,7 +345,13 @@ class AgentBrowser:
         # - every navigation, reload, and subframe
         # This ensures stealth patches (canvas/Offscreen/WebGL/font) are re-applied after nav/reload (#150)
         # and use the per-session seed for stable but unique fp.
-        await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed))
+        stealth_script = get_stealth_script(fingerprint_seed=fp_seed, hardware=hw_fingerprint)
+        await self.browser.add_init_script(stealth_script)
+        if getattr(self, "debug_reporter", None):
+            try:
+                self.debug_reporter.record_patch("stealth_init_script", {"seed": fp_seed, "hardware": bool(hw_fingerprint), "length": len(stealth_script) if isinstance(stealth_script, str) else "n/a"})
+            except Exception:
+                pass
         
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
@@ -302,7 +359,8 @@ class AgentBrowser:
 
         # Create human behavior controller + orchestrator
         # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
-        self.human = HumanBehavior(self.page, rng=self.rng)
+        # Pass persona.device for device-aware scroll + future behavior (#244 P2)
+        self.human = HumanBehavior(self.page, rng=self.rng, device_profile=getattr(self.persona, "device", None))
         self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
 
         # Seed JS mouse tracker from Python last_pos for continuity (#24 #101).
@@ -315,6 +373,25 @@ class AgentBrowser:
         # Initialize audit logging
         self.logger = AuditLogger(self.session["name"])
         
+        # P2/P3 DX: enable debug reporter for fingerprint/headers/patches when debug=True (#265, supports health + MCP debug_report)
+        if getattr(self, "debug_mode", False):
+            try:
+                if hasattr(self.logger, "enable_debug_mode"):
+                    self.logger.enable_debug_mode()
+            except Exception:
+                pass
+            try:
+                from audit.logger import DebugReporter
+                extra_h = get_extra_http_headers()
+                self.debug_reporter = DebugReporter(self.logger, self.tls_manager, extra_h)
+                if self.tls_manager and hasattr(self.debug_reporter, "record_patch"):
+                    try:
+                        self.debug_reporter.record_patch("tls_profile_launch", self.tls_manager.get_profile())
+                    except Exception:
+                        pass
+            except Exception:
+                self.debug_reporter = None
+
         # Initialize scraper
         self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
         
@@ -402,7 +479,9 @@ class AgentBrowser:
 
             extra_headers = get_extra_http_headers()
 
-            self.tls_manager = get_tls_manager("global", self.session.get("name"))
+            # P2/P3: preserve current_region / preset for health/status continuity on rotation
+            tls_region = getattr(self, "current_region", "global") or "global"
+            self.tls_manager = get_tls_manager(tls_region, self.session.get("name"))
             self.tls_manager.log_fingerprint_choice()
             tls_args = self.tls_manager.get_launch_args()
 
@@ -418,6 +497,10 @@ class AgentBrowser:
             ua = p_over.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             loc = p_over.get("locale", "en-US")
             tz = p_over.get("timezone_id", "America/New_York")
+
+            # P2: persona power-correlated hardware (re-apply on rotation too)
+            persona_obj = getattr(self, "persona", None)
+            hw_fingerprint = persona_obj.device.get_hardware_fingerprint() if persona_obj and hasattr(persona_obj, "device") else {"hardwareConcurrency": 8, "deviceMemory": 8}
 
             # Proxy now reflects the rotated config (from recovery's create_decodo or rotate_proxy)
             proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
@@ -458,10 +541,11 @@ class AgentBrowser:
             # 5. Re-apply stealth init script on context + fp seed
             session_name = (self.session or {}).get("name", "default-session")
             fp_seed = f"agentic-{session_name}-canvas-v4"
-            await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed))
+            await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed, hardware=hw_fingerprint))
 
             # 6. Re-wire human/orchestrator/scraper for the *new* page (so clicks/scrolls etc work post-rotation)
-            self.human = HumanBehavior(self.page)
+            # Pass device for consistent scroll physics across rotation (#244)
+            self.human = HumanBehavior(self.page, device_profile=getattr(self.persona, "device", None))
             self.orchestrator = BehaviorOrchestrator(self.human)
             self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
 
@@ -593,8 +677,14 @@ class AgentBrowser:
             raise RuntimeError("Browser not launched.")
 
         async def _click():
+            # P2 thinking pause before the click action itself (#251)
+            if self.human:
+                await self.human.think_before_action("critical" if any(k in selector.lower() for k in ["submit","login","send","save","post","confirm","button"]) else "normal")
+                # occasional distraction before committing (#178)
+                if getattr(self.human, "_fatigue_factor", lambda: 0)() > 0.15 or self.rng.random() < 0.09:
+                    await self.human.simulate_distraction(0.35)
             await self.page.click(selector, timeout=10000)
-            await self.human.think(300, 800)
+            await self.human.think(300, 800) if self.human else asyncio.sleep(0.3)
 
         try:
             if self.recovery:
@@ -616,6 +706,8 @@ class AgentBrowser:
             raise RuntimeError("Browser not launched.")
 
         async def _type():
+            if self.human:
+                await self.human.think_before_action("normal")  # deliberate before committing text (#251)
             await self.human.type_like_human(selector, text)
 
         try:
@@ -903,6 +995,167 @@ class AgentBrowser:
         # Per-instance: target the sub-limiter for the given (or default) account
         dl = self.rate_limiter.get_limiter(account or "default")
         dl.set_limit(domain, config)
+
+    # --- P2/P3 DX / Observability methods (#281 health/status, #265 debug, #288 presets) ---
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """#281 High-value DX: Rich health & status snapshot (proxy usage, account state, block rate, etc).
+
+        Powers CLI `health`/`status` commands + MCP `stealth_health()` / `stealth_status()`.
+        Includes launched state, preset, TLS profile/region, current URL, cookie health,
+        recovery stats, approximate block rate, proxy info, account hints, metrics.
+        """
+        if not getattr(self, "browser", None) or not getattr(self, "page", None):
+            return {
+                "status": "not_launched",
+                "launched": False,
+                "preset": getattr(self, "current_preset", None),
+                "region": getattr(self, "current_region", "global"),
+                "message": "Browser not launched. Use launch() or async with AgentBrowser()",
+            }
+
+        # Current URL (best effort)
+        current_url = "unknown"
+        try:
+            if self.page:
+                current_url = getattr(self.page, "url", "unknown")
+        except Exception:
+            pass
+
+        # Cookie health
+        cookie_health = {"status": "no_manager"}
+        try:
+            cookie_health = await self.get_cookie_health()
+        except Exception:
+            pass
+
+        # TLS / fingerprint snapshot
+        tls_info = {"region": getattr(self, "current_region", "global")}
+        if self.tls_manager and hasattr(self.tls_manager, "get_profile"):
+            try:
+                prof = self.tls_manager.get_profile()
+                tls_info = {
+                    "region": getattr(self.tls_manager, "region", None),
+                    "name": prof.get("name") if isinstance(prof, dict) else None,
+                    "description": prof.get("description") if isinstance(prof, dict) else None,
+                }
+            except Exception:
+                pass
+
+        # Proxy usage / state
+        proxy_info = {"status": "unconfigured"}
+        try:
+            if hasattr(self.proxy_manager, "get_current_proxy_info"):
+                proxy_info = self.proxy_manager.get_current_proxy_info() or proxy_info
+            elif hasattr(self.proxy_manager, "current_config"):
+                cfg = self.proxy_manager.current_config
+                proxy_info = {"provider": getattr(cfg, "provider", None), "host": getattr(cfg, "host", None)}
+        except Exception:
+            pass
+
+        # Recovery / block stats (critical for block rate, account state)
+        recovery_info: Dict[str, Any] = {"available": bool(self.recovery)}
+        block_count = 0
+        try:
+            if self.recovery:
+                fc = getattr(self.recovery, "failure_counts", {}) or {}
+                recovery_info["failure_counts"] = fc
+                block_count = sum(fc.values()) if fc else getattr(self.recovery, "block_count", 0) or 0
+                last_block = getattr(self.recovery, "last_block_type", None)
+                if last_block:
+                    recovery_info["last_block"] = str(last_block)
+        except Exception:
+            pass
+
+        # Block rate from metrics + recovery (observability win)
+        block_rate = 0.0
+        requests = 0
+        try:
+            if hasattr(self.metrics, "counters"):
+                requests = self.metrics.counters.get("requests_total", 0) or 0
+            if requests > 0 and block_count > 0:
+                block_rate = round((block_count / max(requests, 1)) * 100, 2)
+            elif block_count > 0:
+                block_rate = 100.0  # degenerate but informative
+        except Exception:
+            pass
+
+        account_state = "healthy"
+        if recovery_info.get("last_block"):
+            account_state = f"degraded_after_{recovery_info['last_block']}"
+
+        return {
+            "status": "ok",
+            "launched": True,
+            "current_url": current_url,
+            "preset": getattr(self, "current_preset", None),
+            "region": getattr(self, "current_region", "global"),
+            "tls_profile": tls_info,
+            "proxy": proxy_info,
+            "cookies": cookie_health,
+            "recovery": recovery_info,
+            "block_rate_pct": block_rate,
+            "account_state": account_state,
+            "debug_mode": getattr(self, "debug_mode", False),
+            "metrics_sample": {
+                "requests_total": requests,
+                "blocks_observed": block_count,
+            },
+            "timestamp": time.time(),
+        }
+
+    async def debug_report(self, print_report: bool = False) -> Dict[str, Any]:
+        """#265: Full debug dump of TLS fingerprint, headers, stealth patches. Supports health flows too."""
+        if not self.debug_reporter:
+            try:
+                from audit.logger import DebugReporter
+                from stealth.headers import get_extra_http_headers
+                self.debug_reporter = DebugReporter(
+                    getattr(self, "logger", None),
+                    getattr(self, "tls_manager", None),
+                    get_extra_http_headers()
+                )
+            except Exception as e:
+                return {"status": "error", "message": f"DebugReporter unavailable: {e}"}
+
+        report = self.debug_reporter.full_debug_report()
+        if print_report:
+            try:
+                self.debug_reporter.print_human_report(report)
+            except Exception:
+                print(report)
+        return {"status": "success", "report": report}
+
+    async def apply_preset(self, name: str) -> Dict[str, Any]:
+        """#288: Runtime apply of platform preset (tunes recovery/behavior notes; TLS best on (re)launch)."""
+        try:
+            from stealth.presets import get_preset, list_presets
+            available = list_presets()
+            if name not in available:
+                return {"status": "error", "available": available, "message": f"Unknown preset '{name}'"}
+            preset = get_preset(name)
+            self.current_preset = name
+            if hasattr(preset, "tls_region"):
+                reg = preset.tls_region
+                self.current_region = reg.value if hasattr(reg, "value") else str(reg)
+            # Tune recovery tunables if exposed (non-breaking)
+            if self.recovery:
+                for attr, val in [
+                    ("max_retries", getattr(preset, "recovery_max_retries", None)),
+                    ("base_backoff_ms", getattr(preset, "recovery_base_backoff", None)),
+                ]:
+                    if val is not None and hasattr(self.recovery, attr):
+                        setattr(self.recovery, attr, val)
+            return {
+                "status": "success",
+                "preset": name,
+                "description": getattr(preset, "description", ""),
+                "notes": (getattr(preset, "notes", "") or "")[:300],
+                "tls_region": self.current_region,
+                "hint": "For full TLS effect on preset change, re-launch the browser instance.",
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     async def close(self):
         """Close the browser, page, and underlying Playwright instance.
