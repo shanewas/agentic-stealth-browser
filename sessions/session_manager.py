@@ -7,7 +7,7 @@ import json
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 
 
 class SessionManager:
@@ -61,3 +61,39 @@ class SessionManager:
             except Exception:
                 continue
         return sessions
+
+    def cleanup_session(self, name: str, remove_dir: bool = False) -> Dict[str, Any]:
+        """Mark or remove a session as compromised (addresses P1 #90 cookie/session cleanup on account restriction).
+
+        Prevents accidental reuse of stale/compromised cookies after ACCOUNT_RESTRICTION detection.
+        Default: marks the session meta with 'compromised' flag (safe, reversible).
+        With remove_dir=True: hard delete of the entire session directory (use with caution).
+        """
+        session_path = self.base_dir / name
+        if not session_path.exists():
+            return {"status": "not_found", "name": name}
+
+        meta_file = session_path / "meta.json"
+        marked = False
+        if meta_file.exists():
+            try:
+                with open(meta_file, "r") as f:
+                    meta = json.load(f)
+                meta["compromised"] = True
+                meta["cleaned_at"] = datetime.now(timezone.utc).isoformat()
+                meta["cleanup_reason"] = "account_restriction_or_compromise"
+                with open(meta_file, "w") as f:
+                    json.dump(meta, f, indent=2)
+                marked = True
+            except Exception:
+                pass
+
+        if remove_dir:
+            try:
+                import shutil
+                shutil.rmtree(session_path, ignore_errors=True)
+                return {"status": "removed", "name": name, "marked": marked}
+            except Exception as e:
+                return {"status": "partial", "name": name, "marked": marked, "error": str(e)}
+
+        return {"status": "marked_compromised", "name": name}
