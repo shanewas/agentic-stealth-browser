@@ -447,9 +447,11 @@ class SessionOrchestrator:
     in constructor and exposes create/export/import for tests + MCP wrappers.
     """
 
-    def __init__(self, session_manager: Optional[object] = None):
+    def __init__(self, session_manager: Optional[object] = None, cookie_manager: Optional["CookieManager"] = None):
         self.main_session_manager = session_manager
-        self.cm = CookieManager()
+        # Allow wiring a real CookieManager (with browser_context) instead of creating a disconnected one.
+        # This addresses part of the original duplication/broken state concerns in #30.
+        self.cm = cookie_manager or CookieManager()
         self.active_sessions: Dict[str, Dict] = {}
         # Compat aliases for existing MCP contract tests (#106)
         self.sessions = self.active_sessions
