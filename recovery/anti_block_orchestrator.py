@@ -2,6 +2,14 @@
 Anti-Block Orchestrator v2
 Smart, context-aware rate limit and block recovery for the Agentic Browser.
 Handles early detection, platform-specific strategies, and intelligent rotation.
+
+Phase 8 fixes:
+- Circuit breaker for rapid repeated failures per platform/domain (#130 P1)
+- Light detection mode (default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
+- Throttled / conditional heavy content analysis (only when light=False or force_heavy)
+- Deduped duplicate return in calculate_backoff
+- Cost awareness stub + escalation hooks for future (#252, #276, #283)
+- Better failure tracking and logging
 """
 
 import asyncio
@@ -40,6 +48,8 @@ class AntiBlockOrchestrator:
     """
     Central coordinator for detecting and recovering from blocks/rate limits.
     Much more aggressive and intelligent than basic try/except.
+
+    Phase 8 improvements focus on performance (avoid content() spam) and resilience (circuit breaker).
     """
 
     # Platform-specific recovery strategies
@@ -78,7 +88,7 @@ class AntiBlockOrchestrator:
         }
     }
 
-    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None):
+    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True):
         self.browser = browser          # usually the BrowserContext (for future use)
         self.session_manager = session_manager
         self.proxy_manager = proxy_manager
@@ -86,13 +96,51 @@ class AntiBlockOrchestrator:
         self.logger = AuditLogger("recovery")
         self.recovery_history: Dict[str, int] = {}  # platform -> consecutive recoveries
 
-    async def detect_block(self, context: RecoveryContext) -> BlockType:
+        # === Phase 8 Performance & Resilience ===
+        self.light_detection = light_detection  # default True -> huge perf win (skips content() most times)
+        self.circuit_breaker_threshold = 5
+        self.circuit_cooldown = 300  # seconds (5 min)
+        self.failure_counts: Dict[str, int] = {}
+        self.circuit_open_until: Dict[str, float] = {}
+        self.cost_tracker: Dict[str, float] = {}  # stub for #252 cost awareness
+
+    def _check_circuit_breaker(self, key: str) -> bool:
+        """Return True if circuit is currently open for this key (platform/domain). Addresses #130."""
+        now = time.time()
+        until = self.circuit_open_until.get(key, 0)
+        if now < until:
+            return True
+        return False
+
+    def _record_failure(self, key: str, cost: float = 1.0) -> None:
+        """Record failure and possibly trip circuit breaker."""
+        self.failure_counts[key] = self.failure_counts.get(key, 0) + 1
+        self.cost_tracker[key] = self.cost_tracker.get(key, 0.0) + cost
+        if self.failure_counts[key] >= self.circuit_breaker_threshold:
+            self.circuit_open_until[key] = time.time() + self.circuit_cooldown
+            self.logger.log_action("circuit_breaker_opened", {
+                "key": key,
+                "cooldown_sec": self.circuit_cooldown,
+                "failures": self.failure_counts[key],
+                "cost": self.cost_tracker.get(key)
+            })
+            # reset count after opening to allow eventual retry
+            self.failure_counts[key] = 0
+
+    def _reset_circuit(self, key: str) -> None:
+        self.failure_counts[key] = 0
+        if key in self.circuit_open_until:
+            del self.circuit_open_until[key]
+
+    async def detect_block(self, context: RecoveryContext, force_heavy: bool = False) -> BlockType:
         """
         Early detection of blocks using multiple signals:
         - HTTP status codes
-        - Response timing anomalies  
-        - Page content patterns (when browser context available)
+        - Response timing anomalies
+        - Page content patterns (HEAVY - only when not light_detection or force_heavy)  # perf fixes
         - Platform-specific heuristics
+
+        light_detection=True (default) avoids the expensive await page.content() on hot paths.
         """
         status = context.http_status
         response_time = context.response_time
@@ -140,9 +188,11 @@ class AntiBlockOrchestrator:
             if any(kw in error_lower for kw in amazon_blocks):
                 return BlockType.CAPTCHA
 
-        # === Browser content analysis (if page_getter available) ===
-        # BUG-04 fix: previously received Context which has no .content(); now use injected page getter
-        if self._get_page:
+        # === Browser content analysis (EXPENSIVE - gated by light_detection) ===
+        # Phase 8 perf fix: content() is called far too often in recovery paths.
+        # Only run when light_detection=False or explicitly forced (for deep debug / #273 explain).
+        do_heavy = force_heavy or (not getattr(self, 'light_detection', True))
+        if self._get_page and do_heavy:
             try:
                 page = self._get_page()
                 content_lower = ""
@@ -178,7 +228,7 @@ class AntiBlockOrchestrator:
         return self.PLATFORM_STRATEGIES["default"]
 
     def calculate_backoff(self, context: RecoveryContext) -> float:
-        """Exponential backoff with jitter"""
+        """Exponential backoff with jitter (duplicate return removed)"""
         strategy = self.get_strategy(context.platform)
         base = strategy["base_backoff"]
         max_backoff = strategy["max_backoff"]
@@ -186,7 +236,6 @@ class AntiBlockOrchestrator:
 
         backoff = min(base * (2 ** (context.attempt - 1)), max_backoff)
         jitter_amount = backoff * jitter * random.uniform(-1, 1)
-        return max(5.0, backoff + jitter_amount)
         return max(5.0, backoff + jitter_amount)
 
     def _safe_extract_base_user(self, proxy_username: str) -> str:
@@ -217,7 +266,18 @@ class AntiBlockOrchestrator:
         """
         Main recovery flow with actual proxy/session rotation.
         Returns True if we should continue retrying.
+        Now includes circuit breaker check (P1 #130).
         """
+        key = context.platform.lower()
+
+        # Circuit breaker guard (prevents hammering on hopeless cases)
+        if self._check_circuit_breaker(key):
+            self.logger.log_action("circuit_breaker_blocked_recovery", {
+                "platform": context.platform,
+                "attempt": context.attempt
+            })
+            return False
+
         block_type = await self.detect_block(context)
         context.block_type = block_type
 
@@ -235,7 +295,11 @@ class AntiBlockOrchestrator:
         )
 
         if block_type == BlockType.NONE:
+            self._reset_circuit(key)  # success path clears circuit
             return True
+
+        # Record failure for circuit breaker and cost tracking
+        self._record_failure(key, cost=1.0 + (0.5 if block_type in (BlockType.HARD_RATE_LIMIT, BlockType.ACCOUNT_RESTRICTION) else 0))
 
         # === Actual rotation logic ===
         should_rotate_session = context.attempt >= strategy.get("rotate_session_after", 3)
@@ -318,6 +382,11 @@ class AntiBlockOrchestrator:
             context.attempt = attempt
             start_time = time.time()
 
+            key = platform.lower()
+            if self._check_circuit_breaker(key):
+                self.logger.log_action("circuit_breaker_blocked_execute", {"platform": platform})
+                break
+
             try:
                 result = await func(**kwargs) if asyncio.iscoroutinefunction(func) else func(**kwargs)
                 context.response_time = time.time() - start_time
@@ -328,6 +397,7 @@ class AntiBlockOrchestrator:
 
                 block_type = await self.detect_block(context)
                 if block_type == BlockType.NONE:
+                    self._reset_circuit(key)
                     return result
 
                 # If we detect a block even on "success", treat it as failure
@@ -347,5 +417,7 @@ class AntiBlockOrchestrator:
 
 
 # Convenience function
-def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None):
-    return AntiBlockOrchestrator(browser, session_manager, proxy_manager, page_getter=page_getter)
+def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True):
+    return AntiBlockOrchestrator(
+        browser, session_manager, proxy_manager, page_getter=page_getter, light_detection=light_detection
+    )
