@@ -122,7 +122,6 @@ Then use tools:
 
 
 
-
 ## Architecture Overview
 
 ```mermaid
@@ -151,7 +150,7 @@ graph TD
     E --> S[Sticky Sessions]
     
     F --> T[Multi-Session Management]
-    G --> U[Cookie Loading/Refresh]
+    G --> U[Cookie Manager]
     
     V[Detection Testing] --> W[Fingerprint Scorecard]
     V --> X[Real Site Testing]
@@ -254,14 +253,13 @@ await browser.ensure_cookies_fresh(max_age_hours=6)
 
 
 
-
 ## API Reference
 
 ### Core Methods
 
 | Method                        | Description                              | Parameters |
 |-------------------------------|------------------------------------------|----------|
-| `launch(headless=True)`       | Launch browser with stealth              | `headless`, `slow_mo` |
+| `launch(..., light_mode=False)` | Launch browser with stealth (#174/#113: light_mode reduces launch/warm-up cost/latency) | `headless`, `slow_mo`, `light_mode`, `persona` |
 | `safe_goto(url, platform)`    | Navigate with recovery                   | `url`, `platform`, `warm_up` |
 | `load_cookies_from_file(path)`| Load cookies from real browser           | `cookies_path` |
 | `warm_up_before_work(intensity)` | Perform natural warm-up               | `intensity` ("light", "medium", "heavy") |
@@ -407,4 +405,3 @@ Use `preset="amazon_2026"`, light warm-up, residential proxy.
 Heavy stealth + TLS US, minimal behavior, multiple recovery retries built-in via safe_goto.
 
 See also: `examples/recipes/` (to be expanded) and `stealth/presets.py` for full list.
-
