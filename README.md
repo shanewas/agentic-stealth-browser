@@ -121,6 +121,52 @@ Then use tools:
 
 
 
+
+
+## Architecture Overview
+
+```mermaid
+graph TD
+    A[AgentBrowser] --> B[Stealth Layer]
+    A --> C[Human Behavior]
+    A --> D[Recovery Orchestrator]
+    A --> E[Proxy Manager]
+    A --> F[Session Manager]
+    A --> G[Cookie Manager]
+    
+    B --> H[TLS Fingerprinting]
+    B --> I[Advanced Stealth Script]
+    B --> J[Header Spoofing]
+    
+    C --> K[Mouse Movement]
+    C --> L[Typing Simulation]
+    C --> M[Scroll Patterns]
+    C --> N[Idle Behavior]
+    
+    D --> O[Block Detection]
+    D --> P[Backoff Strategy]
+    D --> Q[Session/Proxy Rotation]
+    
+    E --> R[Decodo Residential]
+    E --> S[Sticky Sessions]
+    
+    F --> T[Multi-Session Management]
+    G --> U[Cookie Loading/Refresh]
+    
+    V[Detection Testing] --> W[Fingerprint Scorecard]
+    V --> X[Real Site Testing]
+    
+    style A fill:#f9f,stroke:#333
+    style D fill:#bbf,stroke:#333
+```
+
+**Core Components:**
+- **Stealth Layer**: TLS fingerprinting + advanced script injection
+- **Human Behavior**: Natural mouse, typing, scrolling, idle patterns
+- **Recovery**: Intelligent block detection and automatic rotation
+- **Proxy/Session**: Residential proxy + resilient session management
+
+
 ## Usage Examples
 
 ### Basic Stealth Navigation
@@ -205,6 +251,41 @@ await browser.load_cookies_from_file("cookies.json")
 await browser.warm_up_before_work("heavy")
 await browser.ensure_cookies_fresh(max_age_hours=6)
 ```
+
+
+
+
+## API Reference
+
+### Core Methods
+
+| Method                        | Description                              | Parameters |
+|-------------------------------|------------------------------------------|----------|
+| `launch(headless=True)`       | Launch browser with stealth              | `headless`, `slow_mo` |
+| `safe_goto(url, platform)`    | Navigate with recovery                   | `url`, `platform`, `warm_up` |
+| `load_cookies_from_file(path)`| Load cookies from real browser           | `cookies_path` |
+| `warm_up_before_work(intensity)` | Perform natural warm-up               | `intensity` ("light", "medium", "heavy") |
+| `ensure_cookies_fresh(hours)` | Auto-refresh cookies if needed           | `max_age_hours` |
+
+### Human Behavior Methods
+
+| Method                        | Description                              |
+|-------------------------------|------------------------------------------|
+| `move_mouse_naturally(x, y)`  | Bézier curve mouse movement              |
+| `human_click(selector)`       | Natural click with micro-corrections     |
+| `type_like_human(selector, text)` | Human-like typing with mistakes      |
+| `scroll_naturally(pixels)`    | Variable speed scrolling                 |
+| `simulate_reading(seconds)`   | Reading simulation with re-reads         |
+| `fake_search_action(query)`   | Simulate search behavior                 |
+| `random_idle_behavior(seconds)` | Advanced idle patterns                 |
+
+### Recovery & Proxy
+
+| Method                        | Description                              |
+|-------------------------------|------------------------------------------|
+| `safe_goto` / `safe_click`    | Actions with automatic recovery          |
+| `ensure_fresh_cookies(hours)` | Auto cookie refresh                      |
+| `warm_up_session(intensity)`  | Session warm-up before work              |
 
 
 ## License
