@@ -295,3 +295,43 @@ Private repository. All rights reserved.
 ---
 
 *Last updated: May 2026*
+## Troubleshooting & Common Block Reasons (P1 #133)
+
+This section addresses the most frequent reasons accounts get blocked and concrete steps to resolve them.
+
+### Top Block Causes & Immediate Fixes
+1. **Missing or stale cookies** — Always load fresh cookies from a real browser profile for the target account. Use `load_cookies` + `warm_up_session`.
+2. **No warm-up** — Sites flag "cold" sessions. Call `warm_up_session(medium)` before any high-value action.
+3. **Too fast / robotic** — Use `human.think()`, natural mouse/typing/scroll everywhere. Never use `page.goto` directly.
+4. **Proxy / IP reputation** — Rotate residential proxies per account. Never share proxies across high-risk accounts.
+5. **TLS / fingerprint mismatch** — Always use region-aligned TLS profile via `set_region` or launch config.
+6. **Repeated failures on same domain** — The orchestrator now has circuit breaker (v2). Back off or rotate account.
+
+See also the new `recovery/explain_why_blocked` helper (added Phase 8) for automated diagnosis after a failure.
+
+## Anti-Patterns & Common Mistakes (P1 #209)
+
+**Never do these** (they are the #1 cause of blocks in the wild):
+
+- Launch browser → immediately `goto` target site with no warm-up or human simulation.
+- Use the same fingerprint / proxy / persona for 50+ accounts.
+- Ignore rate limit signals and hammer retries without backoff + rotation.
+- Call low-level Playwright methods (`page.click`, `page.fill`) bypassing the `human` and recovery layers.
+- Store raw unencrypted cookies or session state on disk with world-readable perms.
+- Run many concurrent browsers without resource backpressure or isolation (see performance guidance).
+- Skip the `AntiBlockOrchestrator` or `safe_*` wrappers for "speed".
+- Use datacenter proxies on LinkedIn/Amazon/Cloudflare-protected flows.
+- Forget to handle `context` vs `page` (fixed in Phase 7/8 but still common copy-paste error).
+
+**Recommended flow for any new platform (2026 LinkedIn example):**
+```python
+browser = AgentBrowser(...)
+await browser.launch(region="us", cookies_path="linkedin.json")
+await browser.warm_up_session("medium")
+await browser.safe_goto("https://www.linkedin.com/feed/")
+# then human.* actions + recovery-aware paths only
+```
+
+Following the patterns above + using the new debug/explain tools dramatically improves survival rates.
+
+*These docs close P1 documentation gaps #133 and #209.*
