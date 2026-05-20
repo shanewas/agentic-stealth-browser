@@ -28,6 +28,7 @@ from production.rate_limiter import domain_limiter, account_limiter
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
 
+
 class AgentBrowser:
     """
     High-undetectability browser for autonomous agents.
@@ -52,7 +53,7 @@ class AgentBrowser:
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
         self.persona = persona or DEFAULT_PERSONA  # Persona foundation integration
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None):
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: bool = False):
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -73,9 +74,11 @@ class AgentBrowser:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
+            light_mode: Skip heavy warm-up + human behavior for maximum speed (helps #174, #113, CI use)
         """
         if persona is not None:
             self.persona = persona
+        self.light_mode = light_mode
 
         pw = await async_playwright().start()
         
@@ -152,6 +155,12 @@ class AgentBrowser:
         # Store playwright instance for proper cleanup
         self._pw = pw
 
+        # Light mode for performance P1s (#174, #113): skip heavy warm-up and human behavior
+        if self.light_mode:
+            # Minimal stealth-only warm-up — big win for CI and high-volume use
+            await self.page.goto("about:blank", wait_until="domcontentloaded")
+            self.logger.log_action("launch", {"mode": "light", "note": "skipped heavy warm-up/human behavior for perf (#174)"})
+
         return self.browser
     
     async def goto(self, url: str, warm_up: bool = True, max_retries: int = 3):
@@ -217,7 +226,7 @@ class AgentBrowser:
     async def load_cookies(self, cookies_path: str):
         """
         [DEPRECATED] Legacy cookie loader.
-        Use load_cookies_from_file() + CookieManager instead (more resilient).
+        Use load_cookies_from_file(..., encryption_key=...) + CookieManager for resilient + secure (#82) loading.
         Kept for backward compatibility; fixed .context access (BUG-03).
         """
         import json
@@ -300,13 +309,16 @@ class AgentBrowser:
             await asyncio.sleep(1.5)
 
 
-    async def load_cookies_from_file(self, cookies_path: str) -> Dict[str, Any]:
-        """Load cookies using the resilient CookieManager."""
+    async def load_cookies_from_file(self, cookies_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Load cookies using the resilient CookieManager.
+
+        Supports encryption_key for P1 #82 secure (encrypted) cookie loads.
+        """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
 
         self.cookie_manager = CookieManager(self.browser)
-        result = await self.cookie_manager.load_cookies(cookies_path)
+        result = await self.cookie_manager.load_cookies(cookies_path, encryption_key=encryption_key)
 
         if result.get("status") == "success":
             # Also initialize session orchestrator
@@ -320,6 +332,37 @@ class AgentBrowser:
             return {"status": "no_manager", "message": "No cookie manager initialized"}
 
         return await self.cookie_manager.get_cookie_health()
+
+    def get_recovery_status(self) -> Dict[str, Any]:
+        """#130 + perf: Surface circuit breaker + recovery state for monitoring.
+        Quick high-impact observability for P1 circuit breaker and perf notes.
+        """
+        if not self.recovery:
+            return {"status": "no_recovery_configured"}
+        try:
+            return self.recovery.get_circuit_status()
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
+    async def save_cookies_to_file(self, cookies_path: str, encrypt: bool = False, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Save cookies to file (plain or encrypted) via CookieManager.
+
+        P1 #82: Use encrypt=True + any secret key for at-rest Fernet encryption + integrity protection.
+        Complements the #90 cleanup flow: store good sessions securely, auto-clean bad ones.
+        """
+        if not self.browser:
+            raise RuntimeError("Browser not launched. Call launch() first.")
+
+        if not self.cookie_manager:
+            self.cookie_manager = CookieManager(self.browser)
+        else:
+            # ensure latest context wiring for cookie ops
+            self.cookie_manager.browser_context = self.browser
+
+        return await self.cookie_manager.save_cookies_to_file(
+            cookies_path, encrypt=encrypt, encryption_key=encryption_key
+        )
 
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
@@ -354,6 +397,7 @@ class AgentBrowser:
         """Ensure cookies are fresh before long operations."""
         if not self.cookie_manager:
             return {"status": "no_manager"}
+        return await self.cookie_manager.refresh_cookies_if_needed(max_age_hours)
 
     async def cleanup_compromised_session(self, remove_dir: bool = False) -> Dict[str, Any]:
         """#90 P1: Invalidate current session cookies + mark as compromised.
@@ -369,8 +413,11 @@ class AgentBrowser:
                 result = self.session_manager.cleanup_session(name, remove_dir=remove_dir)
 
         if self.cookie_manager:
-            c = await self.cookie_manager.clear_cookies()
-            result["cookie_clear"] = c
+            try:
+                c = await self.cookie_manager.clear_cookies()
+                result["cookie_clear"] = c
+            except Exception as e:
+                result["cookie_clear"] = {"status": "error", "message": str(e)}
 
         # Direct clear on context too (defense in depth)
         if self.browser:
