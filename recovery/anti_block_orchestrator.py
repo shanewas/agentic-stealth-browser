@@ -5,8 +5,8 @@ Handles early detection, platform-specific strategies, and intelligent rotation.
 
 Phase 8 fixes:
 - Circuit breaker for rapid repeated failures per platform/domain (#130 P1)
-- Light detection mode (default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
-- Throttled / conditional heavy content analysis (only when light=False or force_heavy)
+- Light detection mode (default) + improved cheap title() signals to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
+- Throttled / conditional heavy content analysis (only when light=False or force_heavy); title() used as always-on lightweight signal
 - Deduped duplicate return in calculate_backoff
 - Cost awareness stub + escalation hooks for future (#252, #276, #283)
 - Better failure tracking and logging
@@ -102,9 +102,9 @@ class AntiBlockOrchestrator:
         # Support light_mode alias for #174/#92/#84 callers (improves light_mode paths)
         if light_mode is not None:
             light_detection = bool(light_mode)
-        self.light_detection = light_detection  # default True -> huge perf win (skips content() most times)
-        # ultra-narrow absolute final closer for ONLY #174 and #113 (recovery path): tie to .light_mode on passed browser obj if present
-        # lightweight, silent, fast, complements explicit light_mode kw; guarantees no heavy content() in recovery when flag set
+        self.light_detection = light_detection  # default True -> huge perf win (skips content() most times; #52 #53 #76)
+        # Safety net: if browser obj has .light_mode=True (perf opt-in), force light det even if caller overrode.
+        # Complements explicit kwarg; title() + gating ensures cheap detection by default regardless.
         if browser is not None:
             try:
                 if getattr(browser, "light_mode", False):
@@ -184,10 +184,12 @@ class AntiBlockOrchestrator:
         Early detection of blocks using multiple signals:
         - HTTP status codes
         - Response timing anomalies
-        - Page content patterns (HEAVY - only when not light_detection or force_heavy)  # perf fixes
-        - Platform-specific heuristics
+        - Error strings + platform heuristics
+        - Lightweight title() (ALWAYS, cheap signal-based detection for common blocks)
+        - Full page content patterns (HEAVY/lazy - only when not light_detection or force_heavy)  # P1 fixes
 
-        light_mode (light_detection=True default) avoids the expensive await page.content() on hot paths.
+        Defaults to light_detection=True (huge perf win). Full content() avoided on hot paths
+        for #52, #53, #76. Title() provides equivalent block signal value at far lower cost.
         """
         status = context.http_status
         response_time = context.response_time
@@ -235,17 +237,15 @@ class AntiBlockOrchestrator:
             if any(kw in error_lower for kw in amazon_blocks):
                 return BlockType.CAPTCHA
 
-        # === Browser content analysis (EXPENSIVE - gated by light_detection) ===
-        # Phase 8 perf fix: content() is called far too often in recovery paths.
-        # Only run when light_mode=False (light_detection=False) or explicitly forced (for deep debug / #273 explain).
-        # Ultra-narrow: direct attr (no getattr) + simple content() guard for final #174/#92/#84 close
-        do_heavy = force_heavy or (not self.light_detection)
-        if self._get_page and do_heavy:
+        # === Lightweight browser signal: page.title() (cheap, always-on for perf) ===
+        # Better signal-based detection: title() catches Cloudflare "Just a moment...", LinkedIn
+        # security pages, Amazon robot checks etc. at minimal cost vs full content().
+        # This + early returns means content() almost never called in default light mode.
+        # Addresses #52, #53, #76 directly (no expensive page.content() on almost every nav).
+        if self._get_page:
             try:
                 page = self._get_page()
-                content_lower = ""
                 if page:
-                    # Use lighter signals first (title) to avoid unnecessary page.content() calls (#92 #84)
                     try:
                         t = (await page.title() or "").lower()
                         if any(x in t for x in ["just a moment", "checking your browser", "challenge", "verify you are human"]):
@@ -255,7 +255,21 @@ class AntiBlockOrchestrator:
                         if "amazon" in platform and any(x in t for x in ["robot", "sorry", "captcha"]):
                             return BlockType.CAPTCHA
                     except Exception:
-                        pass  # lighter title signal unavailable, fall to content guard
+                        pass  # title unavailable; fall through (no content cost)
+            except Exception:
+                pass
+
+        # === Heavy browser content analysis (EXPENSIVE - gated; lazy/conditional) ===
+        # Only for deep analysis when explicitly requested (light_detection=False or force_heavy,
+        # e.g. debug/#273 explain). Title() above already provided the main value.
+        # Phase 8 + P1 audit: content() now truly rare on recovery paths.
+        do_heavy = force_heavy or (not self.light_detection)
+        if self._get_page and do_heavy:
+            try:
+                page = self._get_page()
+                content_lower = ""
+                if page:
+                    # Title already checked above for signals; content only for deeper keywords here
                     # Simple content() guard: only call if page looks usable (perf + safety)
                     if hasattr(page, "content"):
                         try:
@@ -343,8 +357,8 @@ class AntiBlockOrchestrator:
             })
             return False
 
-        # Simple guard for perf P1s (#84, #92 content() overuse + #174 latency):
-        # Avoid redundant detect_block (hence page.content() when not light_mode) in recovery paths.
+        # Simple guard for perf P1s (#52 #53 #76 #84 #92 content() overuse + #174 latency):
+        # Avoid redundant detect_block in recovery paths. (title() cheap; content gated)
         # The execute success path pre-sets context.block_type so this skips the call.
         if getattr(context, "block_type", BlockType.NONE) == BlockType.NONE:
             block_type = await self.detect_block(context)
@@ -534,7 +548,7 @@ class AntiBlockOrchestrator:
 
 # Convenience function
 def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None, rng: Optional[random.Random] = None):
-    # Support light_mode for callers (final light_mode path improvement for perf P1s)
+    # Support light_mode for callers (perf P1s #52 #53 #76: defaults keep light_detection=True for cheap title + no content())
     if light_mode is not None:
         light_detection = bool(light_mode)
     return AntiBlockOrchestrator(

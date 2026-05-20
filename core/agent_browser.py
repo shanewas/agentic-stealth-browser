@@ -74,7 +74,7 @@ class AgentBrowser:
         self.rate_limiter: AccountRateLimiter = rate_limiter or AccountRateLimiter()
         self.metrics: MetricsCollector = metrics_collector or MetricsCollector()
         self.account_id: Optional[str] = None
-        self.light_mode: bool = light_mode  # #174/#113/#92/#84 perf P1 final closer: light_mode now auto-wires to recovery so True reduces expensive content() calls + heavy detection
+        self.light_mode: bool = light_mode  # #174/#113 perf: skips heavy warm-ups etc. Recovery perf (#52 #53 #76) now default via light_detection (title signals + no content() by default); this flag's True still reinforces via safety net.
     
     async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None):
         """Launch browser with full stealth + human behavior.
@@ -178,13 +178,8 @@ class AgentBrowser:
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
-        
-<<<<<<< HEAD
-        # Create human behavior controller + orchestrator
-        # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
-=======
+
         # Create human behavior controller + orchestrator (with per-instance rng from #222)
->>>>>>> origin/master
         self.human = HumanBehavior(self.page, rng=self.rng)
         self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
 
@@ -206,12 +201,15 @@ class AgentBrowser:
         
         # Initialize Anti-Block Recovery Orchestrator (Phase 1 improvement)
         # BUG-04 fix: pass page getter so content-based block detection (CAPTCHA, LinkedIn security, etc.) works
+        # P1 audit (#52 #53 #76): do NOT pass light_mode= (which would be False by default and force heavy
+        # content() scans). Orchestrator __init__ defaults light_detection=True for cheap title() + gated content.
+        # When AgentBrowser(light_mode=True) the .light_mode attr on self.browser will still trigger the safety
+        # net inside orchestrator. This ensures recovery perf wins apply by default on all nav paths.
         self.recovery = AntiBlockOrchestrator(
             browser=self.browser,
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
             page_getter=lambda: self.page,
-            light_mode=getattr(self, "light_mode", None),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
             rng=self.rng  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
         )
 
