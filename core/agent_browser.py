@@ -117,10 +117,12 @@ class AgentBrowser:
         self.ai = AIHooks(provider="none")
         
         # Initialize Anti-Block Recovery Orchestrator (Phase 1 improvement)
+        # BUG-04 fix: pass page getter so content-based block detection (CAPTCHA, LinkedIn security, etc.) works
         self.recovery = AntiBlockOrchestrator(
             browser=self.browser,
             session_manager=self.session_manager,
-            proxy_manager=self.proxy_manager
+            proxy_manager=self.proxy_manager,
+            page_getter=lambda: self.page
         )
 
         return self.browser
