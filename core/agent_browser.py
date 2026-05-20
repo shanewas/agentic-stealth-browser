@@ -4,6 +4,8 @@ Combines stealth, human behavior, and session management
 """
 
 import asyncio
+import random
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, BrowserContext
@@ -43,6 +45,7 @@ class AgentBrowser:
         self.session_orchestrator = None
         self.context: Optional[BrowserContext] = None
         self.browser = None
+        self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
     
     async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False):
         """Launch browser with full stealth + human behavior.
@@ -250,8 +253,9 @@ class AgentBrowser:
         if self.human:
             await self.human.simulate_reading(duration_seconds)
         else:
-            # Fallback
-            await self.page.mouse.wheel(0, self.rng.randint(200, 400))
+            # Fallback (defensive after BUG-01 fix)
+            if self.page:
+                await self.page.mouse.wheel(0, self.rng.randint(200, 400))
             await asyncio.sleep(1.5)
 
 

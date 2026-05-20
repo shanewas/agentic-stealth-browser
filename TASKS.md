@@ -136,3 +136,57 @@
 ---
 
 **Next Step:** Pick the first task from Phase 1 and start implementing.
+
+---
+
+## Phase 7: Grok 2026 Code Review - Critical Bug Fixes & Integration Hardening (May 2026)
+
+**Source:** Full semantic review by Grok (REVIEW_GROK_2026.md)  
+**Goal:** Make the "flagship" paths (safe_*, warm_up, MCP tools) actually work without crashing. Fix correctness, naming, and basic hygiene so the project can be used in production agent loops.
+**Status:** In progress — fixing one-by-one with tests + commits.
+
+### 7.0 Immediate Blockers (from Critical Bugs)
+
+- [ ] **BUG-01** — Missing `self.rng` + `import time` in `AgentBrowser` (crashes warm_up, profile, screenshots, human_scroll fallback). Make warm-up methods defensive.
+  - Files: `core/agent_browser.py`
+  - Fix approach: Add imports + `self.rng = random.Random()` in `launch()` after human init; guard all `self.rng` usage.
+
+- [ ] **BUG-02** — MCP `stealth_scrape` / `linkedin_profile` completely broken: uses `self.browser.browser` (Context) instead of the real Page object.
+  - Files: `.hermes/skills/stealth-playwright-mcp/stealth_mcp.py`
+  - Also audit other accesses in mcp_tools/launch.
+
+- [ ] **BUG-03** — Legacy `load_cookies()` + recovery paths use wrong attributes (`.context`, `.url` on BrowserContext). Inconsistent naming (`self.browser` is Context, `self.page` is Page).
+  - Files: `core/agent_browser.py`
+  - Actions: Deprecate/fix legacy method, add clear properties or docstring, fix safe_click/safe_type.
+
+- [ ] **BUG-04** — `AntiBlockOrchestrator.detect_block` content analysis assumes `browser.content()` but receives Context (no such method). Silent failure.
+  - Files: `recovery/anti_block_orchestrator.py`, wiring in `core/agent_browser.py`
+  - Fix: Accept a page getter / current page ref; fall back gracefully.
+
+- [ ] **BUG-05** — `DomainRateLimiter.wait_if_needed` early-returns on limit/cooldown **without** recording the current request timestamp → under-counting / burst risk.
+  - Files: `production/rate_limiter.py`
+
+### 7.1 Short-Term Reliability (from Suggestions)
+
+- [ ] Replace broad `except:`, `except Exception: pass/continue` in behavior layer with logged, specific catches (use AuditLogger where available).
+  - Files: `behavior/human_behavior.py` (move_mouse, human_click, fake_search, viewport jitter, etc.)
+
+- [ ] Add a minimal regression test (no full browser needed for import/attribute checks + pure logic like rate limiter + recovery detection heuristics).
+  - New: `tests/test_grok_fixes.py` or extend existing.
+
+- [ ] Hygiene pass:
+  - Ensure `__pycache__` and `*.pyc` are properly gitignored (remove any committed ones if present).
+  - Replace deprecated `datetime.utcnow()` and `asyncio.get_event_loop().time()` in hot files.
+  - Add basic `__all__` and improve a few type hints.
+
+### 7.2 Follow-ups (Medium)
+
+- [ ] Centralize device/profile constants (viewport, UA, locale, timezone) into a `DeviceProfile` or region config.
+- [ ] Improve proxy docs + prefer HTTP proxies for Playwright compatibility.
+- [ ] Update README "Quick Start" and "API Reference" to mark which methods are now reliable post-fixes.
+- [ ] Wire a simple "smoke test" script that the MCP server and basic flows can execute in CI (headless).
+
+### Execution Rule for This Phase
+Fix **one bug at a time**, verify (import + targeted execution), write a short note in the commit, push immediately. Update checkboxes here as done.
+
+**Current focus:** Start with BUG-01 (foundational — unblocks warm-up and many tests).
