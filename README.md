@@ -69,6 +69,31 @@ This project has a **solid architectural base** but is not yet production-harden
 - Human mimicry is still relatively shallow
 - Proxy + recovery loop is not yet battle-hardened
 
+## Multi-Instance & Scalability Guidance (#87)
+
+**Strong multi-instance isolation warnings:**
+
+The namespace support + per-`AgentBrowser` private `AccountRateLimiter`/`MetricsCollector` (core/agent_browser.py) fix the original global-singleton pollution *within one process*.
+
+**However, cross-process / cross-host / fleet isolation is still absent:**
+- Every replica (docker, k8s pod, separate `python` worker) has its own independent in-memory rate windows.
+- N replicas can generate up to N× the configured request rate.
+- Without account sharding or an external shared limiter (Redis etc.), you will see blocks or bans at scale.
+
+**Basic guidance (AgentBrowser + session handling):**
+- Use unique `session_name` (SessionManager gives strong disk isolation for profiles/cookies/state — safe to share across replicas).
+- Default `AgentBrowser()` now isolates its rate limiter and metrics (good for co-located browsers in one proc).
+- For real parallel/multi-account production workloads: run one logical agent (or small account group) per OS process or container. Use the production/Dockerfile + docker-compose.
+- If sharing one process, pass a common rate_limiter object only when you *want* coordinated limits; otherwise let each get its private one.
+- The runtime guard in AgentBrowser.__init__ warns on multiple instances.
+
+Detailed warnings live in the module/class docstrings of `production/rate_limiter.py`, `core/agent_browser.py`, and `sessions/session_manager.py`.
+
+This (plus the code guard) completes the narrow documentation/UX side of P1 #87. Full distributed rate limiting remains future work.
+
+
+---
+
 ---
 
 ## Roadmap

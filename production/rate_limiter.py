@@ -3,9 +3,32 @@ from collections import defaultdict
 Rate Limiting per Domain/Account
 Prevents getting blocked by enforcing per-domain and per-account limits.
 
-Phase 8 P1 #87 (scalability): added optional namespace / fleet isolation support.
-Multiple AgentBrowser instances (or logical agents) can now safely share the
-module without cross-contamination of rate state when a namespace is provided.
+*** STRONG MULTI-INSTANCE ISOLATION WARNING (#87 Scalability P1) ***
+
+In-process isolation improvements (per-AgentBrowser AccountRateLimiter + MetricsCollector,
+plus namespace= support in the limiter classes) mitigate shared globals *within one process*.
+
+CRITICAL LIMITATIONS REMAIN:
+- No cross-process, cross-container, or cross-host coordination. Each Python interpreter / docker
+  replica maintains fully independent rate windows and counters.
+- Launching multiple replicas (for load, parallelism, or HA) multiplies your effective request rate
+  against sites unless accounts, sessions, and limits are explicitly partitioned.
+- Global singletons (domain_limiter, account_limiter) and direct imports continue to exist for
+  backward compat and tests; they are NOT isolated.
+- This is fundamentally a per-process facility. True fleet-scale rate limiting requires an
+  external shared store (Redis, database, or centralized service) or account sharding.
+
+Basic usage guidance:
+- Default AgentBrowser() now gives you an isolated limiter instance (recommended).
+- For explicit coordination inside one process, share the same AccountRateLimiter object or use
+  namespace= when calling the low-level wait_if_needed.
+- For production multi-instance deploys: one logical agent/account-group per container/process,
+  or accept reduced per-replica limits + external orchestration.
+
+Session disk isolation (via SessionManager) is orthogonal and generally safe to share across
+instances as long as session names are unique.
+
+See AgentBrowser class docs + README "Multi-Instance & Scalability (#87)" section.
 """
 
 import asyncio
@@ -26,6 +49,7 @@ class RateLimitConfig:
 class DomainRateLimiter:
     """Rate limiter per domain.
     Supports optional namespace for multi-instance / fleet isolation (#87).
+    See module docstring for strong caveats on cross-process limits.
     """
 
     def __init__(self):
@@ -94,6 +118,7 @@ class DomainRateLimiter:
 class AccountRateLimiter:
     """Rate limiter per account/username.
     Supports namespace isolation for scalability (#87).
+    See module-level warning for important multi-instance / cross-process limitations.
     """
 
     def __init__(self):
@@ -112,8 +137,9 @@ class AccountRateLimiter:
         return await limiter.wait_if_needed(domain, namespace=namespace)
 
 
-# Global instances (still work for single-process simple cases)
-# For multi-instance safe usage (#87) pass namespace= to wait_if_needed calls.
+# Global instances (still work for single-process simple cases and tests)
+# For multi-instance safe usage (#87) prefer per-AgentBrowser instances or explicit namespace.
+# Direct use of these provides ZERO cross-process isolation or coordination.
 domain_limiter = DomainRateLimiter()
 account_limiter = AccountRateLimiter()
 
