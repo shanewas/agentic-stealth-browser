@@ -234,6 +234,17 @@ class AntiBlockOrchestrator:
                 page = self._get_page()
                 content_lower = ""
                 if page:
+                    # Use lighter signals first (title) to avoid unnecessary page.content() calls (#92 #84)
+                    try:
+                        t = (await page.title() or "").lower()
+                        if any(x in t for x in ["just a moment", "checking your browser", "challenge", "verify you are human"]):
+                            return BlockType.CAPTCHA
+                        if "linkedin" in platform and any(x in t for x in ["security verification", "unusual activity"]):
+                            return BlockType.ACCOUNT_RESTRICTION
+                        if "amazon" in platform and any(x in t for x in ["robot", "sorry", "captcha"]):
+                            return BlockType.CAPTCHA
+                    except Exception:
+                        pass  # lighter title signal unavailable, fall to content guard
                     # Simple content() guard: only call if page looks usable (perf + safety)
                     if hasattr(page, "content"):
                         try:
