@@ -10,6 +10,7 @@ Phase 8 fixes:
 - Deduped duplicate return in calculate_backoff
 - Cost awareness stub + escalation hooks for future (#252, #276, #283)
 - Better failure tracking and logging
+- #90 P1: automatic session/cookie cleanup on ACCOUNT_RESTRICTION detection
 """
 
 import asyncio
@@ -42,6 +43,7 @@ class RecoveryContext:
     response_time: float = 0.0
     http_status: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    session_name: Optional[str] = None  # for #90 cleanup wiring
 
 
 class AntiBlockOrchestrator:
@@ -103,6 +105,13 @@ class AntiBlockOrchestrator:
         self.failure_counts: Dict[str, int] = {}
         self.circuit_open_until: Dict[str, float] = {}
         self.cost_tracker: Dict[str, float] = {}  # stub for #252 cost awareness
+
+        # #90 P1 cookie cleanup support
+        self.current_session_name: Optional[str] = None
+
+    def set_current_session_name(self, name: Optional[str]) -> None:
+        """Allow AgentBrowser to wire the active session for #90 auto-cleanup on restriction."""
+        self.current_session_name = name
 
     def _check_circuit_breaker(self, key: str) -> bool:
         """Return True if circuit is currently open for this key (platform/domain). Addresses #130."""
@@ -300,6 +309,19 @@ class AntiBlockOrchestrator:
 
         # Record failure for circuit breaker and cost tracking
         self._record_failure(key, cost=1.0 + (0.5 if block_type in (BlockType.HARD_RATE_LIMIT, BlockType.ACCOUNT_RESTRICTION) else 0))
+
+        # #90 P1: Immediately mark compromised session for cookie cleanup on ACCOUNT_RESTRICTION.
+        # Prevents accidental reuse of sessions that triggered account restrictions.
+        # Works even before session rotation threshold.
+        if block_type == BlockType.ACCOUNT_RESTRICTION and self.session_manager and self.current_session_name:
+            try:
+                cleanup_res = self.session_manager.cleanup_session(self.current_session_name)
+                self.logger.log_action("account_restriction_session_cleanup", {
+                    "session": self.current_session_name,
+                    "result": cleanup_res.get("status") if isinstance(cleanup_res, dict) else str(cleanup_res)
+                })
+            except Exception as e:
+                self.logger.log_error("account_restriction_cleanup_failed", str(e), {"session": self.current_session_name})
 
         # === Actual rotation logic ===
         should_rotate_session = context.attempt >= strategy.get("rotate_session_after", 3)

@@ -145,6 +145,10 @@ class AgentBrowser:
             page_getter=lambda: self.page
         )
 
+        # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
+        if self.recovery:
+            self.recovery.set_current_session_name(self.session.get("name") if self.session else None)
+
         # Store playwright instance for proper cleanup
         self._pw = pw
 
@@ -351,7 +355,34 @@ class AgentBrowser:
         if not self.cookie_manager:
             return {"status": "no_manager"}
 
-        return await self.cookie_manager.ensure_fresh_cookies(max_age_hours)
+    async def cleanup_compromised_session(self, remove_dir: bool = False) -> Dict[str, Any]:
+        """#90 P1: Invalidate current session cookies + mark as compromised.
+
+        Call this after ACCOUNT_RESTRICTION (or any detected compromise) to avoid
+        reusing tainted cookies. High-impact security/recovery hygiene.
+        """
+        name = None
+        result = {"status": "noop"}
+        if self.session:
+            name = self.session.get("name")
+            if self.session_manager:
+                result = self.session_manager.cleanup_session(name, remove_dir=remove_dir)
+
+        if self.cookie_manager:
+            c = await self.cookie_manager.clear_cookies()
+            result["cookie_clear"] = c
+
+        # Direct clear on context too (defense in depth)
+        if self.browser:
+            try:
+                await self.browser.clear_cookies()
+                result["context_direct_clear"] = True
+            except Exception:
+                pass
+
+        result["session"] = name
+        result["status"] = "cleaned"
+        return result
 
 
     async def screenshot_on_error(self, name: str = "error"):
