@@ -8,7 +8,7 @@ Production-grade, human-mimicking browser automation framework for autonomous ag
 
 ## Current Status (May 2026)
 
-**Maturity:** Early-to-Mid Implementation (Foundation + Core Stealth Layer)
+**Maturity:** Mid Implementation — Phase 8 P1 campaign largely complete (reliability, MCP, CI, recovery, persona foundation closed)
 
 This project has a **solid architectural base** but is not yet production-hardened. The main `AgentBrowser` class integrates stealth, human behavior, recovery, proxy, and sessions. Several critical pieces are implemented, while others remain partial or untested at scale.
 
@@ -47,14 +47,14 @@ This project has a **solid architectural base** but is not yet production-harden
 | Area                        | Status          | Notes |
 |----------------------------|-----------------|-------|
 | **Proxy Execution**        | Partial         | Manager exists but real connection testing + fallback logic is minimal |
-| **Recovery Integration**   | Partial         | Orchestrator defined but not deeply wired into `safe_goto()`, clicks, or navigation |
+| **Recovery Integration**   | Good (Phase 8)  | `safe_goto`, StealthScraper, MCP paths wired to AntiBlockOrchestrator + circuit breaker. #105 #130 etc closed |
 | **Human Behavior Depth**   | Basic           | Typing + think delays present. Missing realistic mouse trajectories, scroll heatmaps, viewport jitter, idle patterns |
 | **TLS Fingerprinting**     | Good start      | Launch args + profiles exist. True low-level ClientHello spoofing is limited in stock Playwright |
 | **Detection Testing**      | Manual          | Basic test scripts exist. No automated "detection score" runner against live protected sites |
-| **Cookie & Login Resilience** | Basic       | Loading works, but battle-tested flows for 2FA bypass / session restoration are missing |
+| **Cookie & Login Resilience** | Good        | load_cookies + warm_up + safe_goto examples + MCP support documented. Resilience improved (#145 #134) |
 | **Multi-Agent Orchestration** | Early      | SessionManager exists but high-level agent coordination / rotation is thin |
 | **Error Handling & Logging** | Moderate     | Audit logger present but not comprehensive across all failure paths |
-| **Documentation**          | Minimal         | Only high-level README. No architecture diagram, API reference, or usage examples |
+| **Documentation**          | Improved (Phase 8) | README has recipes, anti-patterns (#209 #133), API tables, cookie/warm-up flows (#118). More examples in progress |
 
 ### Overall Assessment
 
@@ -64,7 +64,7 @@ This project has a **solid architectural base** but is not yet production-harden
 - Recovery model is well thought out on paper
 
 **Risks / Gaps:**
-- Many components are initialized but not stress-tested together
+- Many P1s closed; remaining focus on perf/scalability and full E2E coverage (see open P1s)
 - Real-world survival rate against aggressive detectors (especially LinkedIn, Amazon JP, Cloudflare) is unknown
 - Human mimicry is still relatively shallow
 - Proxy + recovery loop is not yet battle-hardened
