@@ -1,8 +1,15 @@
 """
 TLS Fingerprint Spoofing Module
-Provides realistic, region-aligned TLS ClientHello profiles for anti-detection.
-Note: Full low-level TLS control in Playwright requires additional tooling.
-This module handles profile selection, logging, and launch arg recommendations.
+Provides realistic, region-aligned TLS ClientHello *profiles* (ciphers, extensions, curves, sig algos) for anti-detection.
+Wired into AgentBrowser launch via recommended_args + region selection.
+
+Limitation (resolves #114): Stock Playwright/Chromium does not allow direct control over the raw TLS ClientHello bytes on the wire.
+This module reduces entropy and aligns high-level signals via launch flags (e.g. --enable-quic, --tls13-variant) and profile data.
+It does NOT achieve bit-perfect wire-level ClientHello spoofing.
+For stronger guarantees, users should layer utls (Go) + custom proxy or patched Chromium builds.
+See also README table and https://github.com/shanewas/agentic-stealth-browser/issues/114
+
+This module handles profile selection, logging, and launch arg recommendations. High-quality profiles based on real Chrome 124+.
 """
 
 from typing import Dict, Any, Optional
@@ -234,6 +241,14 @@ class TLSFingerprintManager:
         elif "en-us" in locale or "en" in locale:
             return Region.US
         return Region.GLOBAL
+
+    def explain_limitations(self) -> str:
+        """Explicit documentation of TLS capabilities vs limits (for #114).
+        Call this in debug/audit flows for evidence.
+        """
+        return ("High-quality region-aligned cipher/extension/curve profiles + launch arg recommendations. "
+                "Does NOT provide true low-level ClientHello wire spoofing in stock Playwright. "
+                "See module docstring and issue #114 for details on utls/proxy options.")
 
 
 # Convenience function

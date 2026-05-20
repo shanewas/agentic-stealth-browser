@@ -332,6 +332,8 @@ class AgentBrowser:
         # P2: persona power-correlated hardware for deviceMemory / hardwareConcurrency in stealth script
         persona_obj = getattr(self, "persona", None)
         hw_fingerprint = persona_obj.device.get_hardware_fingerprint() if persona_obj and hasattr(persona_obj, "device") else {"hardwareConcurrency": 8, "deviceMemory": 8}
+        # #124 #198: persona screen profile for viewport+screen/DPR/orient variety & consistency
+        screen_profile = persona_obj.device.get_screen_profile() if persona_obj and hasattr(persona_obj, "device") and hasattr(persona_obj.device, "get_screen_profile") else {"width": 1920, "height": 1080, "availWidth": 1920, "availHeight": 1055, "colorDepth": 24, "pixelDepth": 24, "devicePixelRatio": 1.0, "orientation": "landscape-primary"}
 
         # #279 future-proofing: detect PW version + new signals, warn gracefully (no hard fail)
         try:
@@ -396,11 +398,11 @@ class AgentBrowser:
         # - every navigation, reload, and subframe
         # This ensures stealth patches (canvas/Offscreen/WebGL/font) are re-applied after nav/reload (#150)
         # and use the per-session seed for stable but unique fp.
-        stealth_script = get_stealth_script(fingerprint_seed=fp_seed, hardware=hw_fingerprint)
+        stealth_script = get_stealth_script(fingerprint_seed=fp_seed, hardware=hw_fingerprint, screen=screen_profile)
         await self.browser.add_init_script(stealth_script)
         if getattr(self, "debug_reporter", None):
             try:
-                self.debug_reporter.record_patch("stealth_init_script", {"seed": fp_seed, "hardware": bool(hw_fingerprint), "length": len(stealth_script) if isinstance(stealth_script, str) else "n/a"})
+                self.debug_reporter.record_patch("stealth_init_script", {"seed": fp_seed, "hardware": bool(hw_fingerprint), "screen": bool(screen_profile), "length": len(stealth_script) if isinstance(stealth_script, str) else "n/a"})
             except Exception:
                 pass
         

@@ -47,6 +47,15 @@ class DeviceProfile:
     hardware_concurrency: int = 8
     device_memory: int = 8  # GB, for future navigator.deviceMemory spoof
     power_level: str = "medium"  # "low"|"medium"|"high" -> correlates hardware for #255
+    # screen profile for #124 viewport variety + #198 screen/orient/DPR consistency (per-persona stable)
+    screen: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "width": 1920, "height": 1080,
+            "availWidth": 1920, "availHeight": 1055,
+            "colorDepth": 24, "pixelDepth": 24,
+            "devicePixelRatio": 1.0, "orientation": "landscape-primary"
+        }
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -61,6 +70,20 @@ class DeviceProfile:
             "high": {"hardwareConcurrency": 12, "deviceMemory": 16},
         }
         return mapping.get(getattr(self, "power_level", "medium"), mapping["medium"])
+
+    def get_screen_profile(self) -> Dict[str, Any]:
+        """Return screen/dpr/orient profile for #124 realistic viewport+screen variety per persona + #198.
+        Used by stealth injection for consistent screen.width/height, devicePixelRatio, orientation.
+        """
+        base = getattr(self, "screen", None)
+        if base is None:
+            base = {
+                "width": 1920, "height": 1080,
+                "availWidth": 1920, "availHeight": 1055,
+                "colorDepth": 24, "pixelDepth": 24,
+                "devicePixelRatio": 1.0, "orientation": "landscape-primary"
+            }
+        return base
 
     @classmethod
     def default(cls) -> "DeviceProfile":
@@ -114,7 +137,7 @@ DEFAULT_PERSONA = Persona(
     name="professional_us_desktop",
     device=DeviceProfile(
         name="win_chrome_124_desktop",
-        viewport={"width": 1366, "height": 768},
+        viewport={"width": 1920, "height": 1080},
         user_agent=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -125,6 +148,12 @@ DEFAULT_PERSONA = Persona(
         hardware_concurrency=8,
         device_memory=8,
         power_level="medium",
+        screen={
+            "width": 1920, "height": 1080,
+            "availWidth": 1920, "availHeight": 1055,
+            "colorDepth": 24, "pixelDepth": 24,
+            "devicePixelRatio": 1.0, "orientation": "landscape-primary"
+        },
     ),
     description="Baseline professional US desktop persona (2026 stealth default).",
     recommended_preset="linkedin_2026",
@@ -138,11 +167,20 @@ EU_PROFESSIONAL = Persona(
     name="professional_eu_desktop",
     device=DeviceProfile(
         name="win_chrome_124_eu",
-        viewport={"width": 1366, "height": 768},
+        viewport={"width": 1440, "height": 900},
         user_agent=DEFAULT_PERSONA.device.user_agent,
         locale="en-GB",
         timezone_id="Europe/London",
         platform="Win32",
+        hardware_concurrency=4,
+        device_memory=8,
+        power_level="low",
+        screen={
+            "width": 1440, "height": 900,
+            "availWidth": 1440, "availHeight": 860,
+            "colorDepth": 24, "pixelDepth": 24,
+            "devicePixelRatio": 1.25, "orientation": "landscape-primary"
+        },
     ),
     description="European professional desktop (en-GB + London TZ).",
     recommended_preset="general",
