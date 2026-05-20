@@ -43,8 +43,14 @@ class AgentBrowser:
         self.context: Optional[BrowserContext] = None
         self.browser = None
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0):
-        """Launch browser with full stealth + human behavior"""
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False):
+        """Launch browser with full stealth + human behavior.
+        
+        Args:
+            headless: Run without browser window (default True)
+            slow_mo: Slow down actions by milliseconds
+            headed: Force headed mode even if headless=True (for debugging)
+        """
         pw = await async_playwright().start()
         
         user_data = Path(self.session["user_data_dir"])
@@ -67,7 +73,7 @@ class AgentBrowser:
         
         self.browser = await pw.chromium.launch_persistent_context(
             user_data_dir=str(user_data),
-            headless=headless,
+            headless=not headed if headed else headless,
             slow_mo=slow_mo,
             viewport={"width": 1366, "height": 768},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -304,6 +310,40 @@ class AgentBrowser:
             return {"status": "no_manager"}
 
         return await self.cookie_manager.ensure_fresh_cookies(max_age_hours)
+
+
+    async def screenshot_on_error(self, name: str = "error"):
+        """Take screenshot on error for visual debugging."""
+        if not self.page:
+            return None
+        try:
+            import os
+            os.makedirs("screenshots", exist_ok=True)
+            filename = f"screenshots/{name}_{int(time.time())}.png"
+            await self.page.screenshot(path=filename, full_page=True)
+            return filename
+        except Exception as e:
+            print(f"Screenshot failed: {e}")
+            return None
+
+
+    async def profile_action(self, name: str, action_func):
+        """Profile the execution time of an action."""
+        start = time.time()
+        try:
+            result = await action_func()
+            duration = time.time() - start
+            
+            # Record in metrics if available
+            if hasattr(self, 'metrics'):
+                self.metrics.record_time(name, duration)
+            
+            print(f"[Profile] {name}: {duration:.2f}s")
+            return result
+        except Exception as e:
+            duration = time.time() - start
+            print(f"[Profile] {name} FAILED after {duration:.2f}s: {e}")
+            raise
 
     async def close(self):
         if self.browser:
