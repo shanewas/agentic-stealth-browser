@@ -178,7 +178,7 @@ class HumanBehavior:
             await self.page.mouse.wheel(0, amount)
 
             # Small realism improvement: ~8% chance of a tiny back scroll mid-sequence (human re-check)
-            if not did_back and self.rng.random() < 0.08 and i > 1 and i < steps-2:
+            if not did_back and self.rng.random() < 0.09 and i > 0 and i < steps-2:
                 back = int(amount * 0.3) if amount > 0 else int(amount * 0.25)
                 await asyncio.sleep(self.rng.uniform(0.15, 0.35))
                 await self.page.mouse.wheel(0, -back if amount > 0 else abs(back))
