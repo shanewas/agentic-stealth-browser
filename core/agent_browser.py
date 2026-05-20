@@ -31,6 +31,40 @@ from production.metrics import metrics, MetricsCollector
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
 
 
+# Lightweight library-specific exception hierarchy for #249 DX improvement.
+# Users can now do: from core.agent_browser import StealthBrowserError, LaunchError, ...
+# Base catches all library errors; specific ones for targeted handling.
+# Existing raw Playwright/RuntimeError paths remain for compat; new code prefers these.
+class StealthBrowserError(Exception):
+    """Base exception for all Agentic Stealth Browser library errors (DX #249)."""
+    pass
+
+
+class LaunchError(StealthBrowserError):
+    """Raised when browser launch or context creation fails (stealth, proxy, etc.)."""
+    pass
+
+
+class RecoveryError(StealthBrowserError):
+    """Raised or catchable during anti-block recovery orchestration."""
+    pass
+
+
+class BlockDetectedError(StealthBrowserError):
+    """Explicit signal that a block/challenge was detected (for user catch blocks)."""
+    def __init__(self, block_type: Optional[str] = None, platform: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+        self.block_type = block_type
+        self.platform = platform
+        self.details = details or {}
+        msg = f"Block detected: {block_type or 'unknown'} on {platform or 'unknown site'}"
+        super().__init__(msg)
+
+
+class RateLimitError(StealthBrowserError):
+    """Raised when rate limiter enforces a wait or limit (informational subclass)."""
+    pass
+
+
 class _BrowserPool:
     """
     Internal minimal optional shared Browser + Context pool (P1 #57/#48/#47).
@@ -562,8 +596,8 @@ class AgentBrowser:
 
             # 6. Re-wire human/orchestrator/scraper for the *new* page (so clicks/scrolls etc work post-rotation)
             # Pass device for consistent scroll physics across rotation (#244)
-            self.human = HumanBehavior(self.page, device_profile=getattr(self.persona, "device", None))
-            self.orchestrator = BehaviorOrchestrator(self.human)
+            self.human = HumanBehavior(self.page, rng=self.rng, device_profile=getattr(self.persona, "device", None))
+            self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
             self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
 
             # Re-init mouse tracker post-rotation for position continuity (#18 related)
@@ -1119,6 +1153,8 @@ class AgentBrowser:
                 "requests_total": requests,
                 "blocks_observed": block_count,
             },
+            "stealth_score": self.get_stealth_score(),
+            "replay_preview": self.get_replay_sequence(5),
             "timestamp": time.time(),
         }
 
@@ -1172,6 +1208,25 @@ class AgentBrowser:
                 "tls_region": self.current_region,
                 "hint": "For full TLS effect on preset change, re-launch the browser instance.",
             }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def get_stealth_score(self) -> Dict[str, Any]:
+        """#269 lightweight stealth score estimator."""
+        score = 62
+        p = str(getattr(self, "current_preset", "")).lower()
+        if "light" in p or "minimal" in p: score -= 5
+        elif p: score += 8
+        if getattr(self, "light_mode", False): score -= 6
+        score = max(28, min(94, score))
+        return {"stealth_score": score, "detectability_risk_pct": 100 - score, "advice": "launched config score"}
+
+    def get_replay_sequence(self, limit: int = 30) -> Dict[str, Any]:
+        """#253 basic replay from AuditLogger."""
+        if not getattr(self, "logger", None):
+            return {"status": "no_logger", "sequence": []}
+        try:
+            return {"status": "ok", "sequence": getattr(self.logger, "replay_sequence", lambda l: [])(limit), "count": 0}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 

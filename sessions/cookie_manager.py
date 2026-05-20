@@ -439,6 +439,85 @@ class CookieManager:
             "cookies_imported": len(cookies)
         }
 
+    async def rotate_encryption_key(
+        self,
+        *,
+        cookies_path: Optional[str] = None,
+        bundle_path: Optional[str] = None,
+        old_keys: List[Any] = None,
+        new_key: str = None,
+        target_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Rotate encryption key for a cookie file or session bundle (#270).
+
+        Re-encrypts under the new_key using old_keys (str or list) for decryption.
+        This is the supported way to perform key rotation without data loss.
+
+        - Provide cookies_path for .json cookie files (from save_cookies_to_file)
+        - Provide bundle_path for exported session bundles
+        - target_path optional: write rotated to different location (else in-place overwrite)
+        - All ops opt-in, secure (no key material logged)
+
+        Returns status + details. Does NOT auto-delete originals.
+        """
+        if not new_key:
+            return {"status": "error", "message": "new_key is required for rotation"}
+        old_keys = old_keys or []
+        paths_to_process = []
+        if cookies_path:
+            paths_to_process.append(("cookie", cookies_path))
+        if bundle_path:
+            paths_to_process.append(("bundle", bundle_path))
+
+        results = []
+        for kind, src_path in paths_to_process:
+            p = Path(src_path)
+            if not p.exists():
+                results.append({"path": src_path, "status": "not_found"})
+                continue
+            try:
+                with open(p) as f:
+                    data = json.load(f)
+                if not (isinstance(data, dict) and data.get("encrypted")):
+                    results.append({"path": src_path, "status": "not_encrypted"})
+                    continue
+
+                token = data["data"].encode()
+                decrypted = self._try_decrypt_with_keys(token, old_keys or [None])
+                if decrypted is None:
+                    results.append({"path": src_path, "status": "decrypt_failed"})
+                    continue
+
+                new_cipher = self._get_cipher( (old_keys[0] if old_keys else None) or new_key )  # fallback
+                if isinstance(old_keys, (list,tuple)) and old_keys:
+                    pass # already tried
+                new_cipher = self._get_cipher(new_key)
+                if new_cipher is None:
+                    results.append({"path": src_path, "status": "new_key_invalid"})
+                    continue
+                plain = decrypted if isinstance(decrypted, (bytes, bytearray)) else str(decrypted).encode("utf-8")
+                new_token = new_cipher.encrypt(plain)
+                new_payload = {
+                    "encrypted": True,
+                    "version": data.get("version", 1),
+                    "data": new_token.decode("utf-8"),
+                    "meta": data.get("meta", {}),
+                    "rotated_at": datetime.now(timezone.utc).isoformat(),
+                    "rotated_from": "key-rotation-#270",
+                }
+                out_p = Path(target_path or src_path)
+                out_p.parent.mkdir(parents=True, exist_ok=True)
+                with open(out_p, "w") as f:
+                    json.dump(new_payload, f, indent=2)
+                results.append({"path": str(out_p), "status": "rotated", "kind": kind})
+            except Exception as e:
+                results.append({"path": src_path, "status": "error", "message": str(e)})
+
+        return {
+            "status": "success" if any(r.get("status") == "rotated" for r in results) else "partial",
+            "results": results,
+        }
+
 
 class SessionOrchestrator:
     """High-level coordinator for multiple resilient sessions (MCP / agent use).
