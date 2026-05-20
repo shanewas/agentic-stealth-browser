@@ -167,8 +167,9 @@
   - Fix: Accept a page getter / current page ref; fall back gracefully.
   - **Done:** 2026-05 — commit 0fc34a0. page_getter now wired; DOM text detection (CAPTCHA etc.) actually executes.
 
-- [ ] **BUG-05** — `DomainRateLimiter.wait_if_needed` early-returns on limit/cooldown **without** recording the current request timestamp → under-counting / burst risk.
+- [x] **BUG-05** — `DomainRateLimiter.wait_if_needed` early-returns on limit/cooldown **without** recording the current request timestamp → under-counting / burst risk.
   - Files: `production/rate_limiter.py`
+  - **Done:** 2026-05 — commit 8d746df. Requests now recorded on the waited path using post-sleep timestamp.
 
 ### 7.1 Short-Term Reliability (from Suggestions)
 

@@ -69,7 +69,9 @@ class HumanBehavior:
             pos = await self.page.evaluate("() => ({x: window.mouseX || 500, y: window.mouseY || 350})")
             current_x = pos.get("x", 500)
             current_y = pos.get("y", 350)
-        except:
+        except Exception as e:
+            # BUG-06 / SUG-03: was silent except; now at least visible during dev
+            print(f"[HumanBehavior] mouse pos eval failed (non-fatal): {e}")
             current_x, current_y = 500, 350
 
         steps = self.rng.randint(22, 42) if speed == "normal" else self.rng.randint(10, 20)
@@ -100,8 +102,8 @@ class HumanBehavior:
                         target_x = box_info["x"] + box_info["width"] * self.rng.uniform(0.2, 0.8)
                         target_y = box_info["y"] + box_info["height"] * self.rng.uniform(0.2, 0.8)
                         await self.move_mouse_naturally(int(target_x), int(target_y))
-            except:
-                pass
+            except Exception as e:
+                print(f"[HumanBehavior] non-fatal error (was silent): {e}")  # improved from broad except (SUG-03)
         elif x is not None and y is not None:
             await self.move_mouse_naturally(x, y)
 
@@ -179,8 +181,8 @@ class HumanBehavior:
             if self.rng.random() < 0.4:
                 await asyncio.sleep(self.rng.uniform(3.5, 9))
                 await self.page.set_viewport_size({"width": w, "height": h})
-        except:
-            pass
+        except Exception as e:
+            print(f"[HumanBehavior] viewport_jitter non-fatal: {e}")  # SUG-03
 
     async def fake_search_action(self, query: str = None):
         """Simulate a natural search action"""
@@ -205,7 +207,8 @@ class HumanBehavior:
                         await self.page.keyboard.press("Enter")
                         await self.think(1200, 2400)
                         return True
-                except:
+                except Exception as e:
+                    print(f"[HumanBehavior] search selector try non-fatal: {e}")
                     continue
 
             await self.page.keyboard.type(query)
@@ -251,8 +254,8 @@ class HumanBehavior:
                 new_y = current.get("y", 400) + dy
 
                 await self.page.mouse.move(new_x, new_y)
-            except:
-                pass
+            except Exception as e:
+                print(f"[HumanBehavior] non-fatal error (was silent): {e}")  # improved from broad except (SUG-03)
 
             await asyncio.sleep(self.rng.uniform(0.35, 0.85))
 
