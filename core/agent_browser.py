@@ -24,12 +24,8 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-<<<<<<< HEAD
-from production.rate_limiter import domain_limiter, account_limiter  # see namespace support for #87 P1
-=======
 from production.rate_limiter import domain_limiter, account_limiter, DomainRateLimiter, AccountRateLimiter
 from production.metrics import metrics, MetricsCollector
->>>>>>> origin/perf/light-mode-174-113
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
@@ -167,7 +163,8 @@ class AgentBrowser:
             browser=self.browser,
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
-            page_getter=lambda: self.page
+            page_getter=lambda: self.page,
+            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls etc.)
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
