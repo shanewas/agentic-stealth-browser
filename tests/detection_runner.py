@@ -2,12 +2,17 @@
 """
 Detection Testing Suite for Agentic Stealth Browser (Phase 3)
 Tests stealth effectiveness against real protected sites.
+
+Addresses P1 crash (#100 / related to #256 E2E recovery): 
+  Previously used `browser.browser.content()` (wrong attr, Context has no content).
+  Now uses `browser.page.content()` with safe guards (post naming hygiene).
+  Also hardened finally close check.
 """
 
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -65,7 +70,7 @@ class DetectionTester:
         result = {
             "site": test_case["name"],
             "url": test_case["url"],
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "detected": False,
             "signals": [],
             "success": False,
@@ -75,7 +80,7 @@ class DetectionTester:
         try:
             await browser.launch(headless=True)
 
-            # Navigate with stealth
+            # Navigate with stealth + recovery (supports #256 E2E recovery scenarios)
             success = await browser.safe_goto(
                 test_case["url"],
                 platform=test_case["platform"],
@@ -88,26 +93,30 @@ class DetectionTester:
 
             await browser.human.think(1200, 2500)
 
-            # Check for detection signals
+            # Check for detection signals (fixed P1: use .page not .browser)
             try:
-                content = await browser.browser.content()
-                content_lower = content.lower()
+                page = getattr(browser, 'page', None)
+                if page:
+                    content = await page.content()
+                    content_lower = content.lower()
 
-                for signal in test_case["expected_signals"]:
-                    if signal.lower() in content_lower:
-                        result["signals"].append(signal)
-                        result["detected"] = True
+                    for signal in test_case["expected_signals"]:
+                        if signal.lower() in content_lower:
+                            result["signals"].append(signal)
+                            result["detected"] = True
 
-                # Additional generic checks
-                detection_keywords = [
-                    "captcha", "challenge", "verify", "unusual activity",
-                    "blocked", "robot", "security check", "access denied"
-                ]
+                    # Additional generic checks
+                    detection_keywords = [
+                        "captcha", "challenge", "verify", "unusual activity",
+                        "blocked", "robot", "security check", "access denied"
+                    ]
 
-                for keyword in detection_keywords:
-                    if keyword in content_lower and keyword not in result["signals"]:
-                        result["signals"].append(keyword)
-                        result["detected"] = True
+                    for keyword in detection_keywords:
+                        if keyword in content_lower and keyword not in result["signals"]:
+                            result["signals"].append(keyword)
+                            result["detected"] = True
+                else:
+                    result["error"] = "No page available for content analysis"
 
             except Exception as e:
                 result["error"] = f"Content analysis failed: {str(e)}"
@@ -126,8 +135,12 @@ class DetectionTester:
             print(f"  ❌ ERROR: {e}")
 
         finally:
-            if browser.browser:
-                await browser.close()
+            # Robust close (use .page or direct close; supports context manager too)
+            try:
+                if getattr(browser, 'page', None) or getattr(browser, 'browser', None):
+                    await browser.close()
+            except Exception:
+                pass  # best effort close in test runner
 
         self.scorecard["total_tests"] += 1
         self.results.append(result)
@@ -159,7 +172,7 @@ class DetectionTester:
             print("\n⚠️  Sites with detection signals:")
             for r in self.results:
                 if r["detected"]:
-                    print(f"  - {r['site']}: {r['signals']}")
+                    print(f"  - {r['site']:}: {r['signals']}")
 
         print("\n" + "=" * 60)
 
@@ -171,11 +184,11 @@ class DetectionTester:
             try:
                 with open(filepath, "r") as f:
                     history = json.load(f)
-            except:
+            except Exception:
                 history = []
 
         record = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "scorecard": self.scorecard,
             "results": self.results
         }
@@ -199,7 +212,7 @@ class DetectionTester:
             filepath = f"tests/detection_results_{timestamp}.json"
 
         output = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "scorecard": self.scorecard,
             "results": self.results
         }

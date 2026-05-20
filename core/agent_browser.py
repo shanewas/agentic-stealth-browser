@@ -8,9 +8,11 @@ DX improvements (Phase 8 / DX Agent):
 - get_health_status() + enhanced stealth_status MCP (#281)
 - apply_preset() and launch(preset=...) helpers
 - Integrated with AuditLogger + new DebugReporter
+- Persona / DeviceProfile foundation (#109 + #88)
 """
 
 import asyncio
+import os  # env + future screenshot etc (was missing; required for launch env wiring)
 import random
 import time
 from pathlib import Path
@@ -45,6 +47,11 @@ from stealth.presets import (
     PRESETS, list_presets, LINKEDIN_2026
 )
 
+# Persona/DeviceProfile foundation (#109, #88) - integration points start here
+from stealth.profiles import (
+    Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
+)
+
 
 class AgentBrowser:
     """
@@ -52,13 +59,13 @@ class AgentBrowser:
     Supports multiple isolated sessions and deep human mimicry.
 
     DX Features:
-        browser = AgentBrowser()
+        browser = AgentBrowser(persona=get_persona("us_professional"))
         await browser.launch(debug=True, preset="linkedin_2026")
         await browser.debug_report(print_report=True)   # dumps exact TLS + headers + patches
-        health = browser.get_health_status()
+        health = browser.get_health_status()  # now includes persona + device_profile
     """
     
-    def __init__(self, session_name: Optional[str] = None, anonymous: bool = False):
+    def __init__(self, session_name: Optional[str] = None, anonymous: bool = False, persona: Optional[Persona] = None):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
         self.proxy_manager = ProxyManager()
@@ -85,6 +92,10 @@ class AgentBrowser:
         self.tls_manager = None
         self._current_preset: Optional[PlatformPreset] = None
         self._launch_config: Dict[str, Any] = {}
+        self._resume: bool = False  # #208 resume light-warmup flag
+
+        # Persona / DeviceProfile (#109 foundation)
+        self.persona: Persona = persona or DEFAULT_PERSONA
     
     async def launch(
         self,
@@ -94,6 +105,8 @@ class AgentBrowser:
         debug: bool = False,
         preset: Optional[str] = None,
         region: Optional[str] = None,
+        resume: bool = False,  # for #208: light warm-up on session resume to avoid repeated full warm-ups
+        persona: Optional[Persona] = None,  # explicit override; also accepts via __init__
     ):
         """Launch browser with full stealth + human behavior + DX features.
 
@@ -101,8 +114,13 @@ class AgentBrowser:
             debug: Enable verbose fingerprint/headers/patches dumps (#265). Use with debug_report().
             preset: One of "linkedin_2026", "amazon", "upwork_2026", "cloudflare", "general" etc. (#288)
             region: Override TLS region ("us", "japan", "eu", "korea", "global")
+            resume: Use lighter warm-up for resuming a recent session on same account (addresses #208 wasteful repeated full warm-ups on known personas).
+            persona: Persona or DeviceProfile-driven launch (viewport, UA, locale, tz). Foundation for #109/#88.
 
-        See also: apply_preset(), get_health_status(), debug_report()
+        Persona passed here or at AgentBrowser(...) construction is stored in self.persona and used for
+        central device constants (no more scattered hardcodes).
+
+        See also: apply_preset(), get_health_status(), debug_report(), set_persona (future)
         """
         # Production/container env var wiring (#18)
         # Explicit call args take precedence; env provides friendly defaults for Docker / k8s / compose
@@ -142,6 +160,11 @@ class AgentBrowser:
         if region:
             tls_region_str = region
 
+        # #208: store resume flag (also honor light warm_up from preset)
+        self._resume = bool(resume)
+        if self._current_preset and getattr(self._current_preset, "warm_up", "medium") == "light":
+            self._resume = True
+
         # TLS Fingerprint spoofing (region-aware, now preset-aware)
         self.tls_manager = get_tls_manager(tls_region_str, self.session.get("name"))
         self.tls_manager.log_fingerprint_choice()
@@ -176,8 +199,28 @@ class AgentBrowser:
             launch_kwargs["proxy"] = proxy_settings
 
         
-        # Use the prepared launch_kwargs (includes proxy if set, and preset-driven locale/tz)
-        # Note: we set locale/tz in the dict using the computed values (preset-aware)
+        # === Persona / DeviceProfile foundation integration (#109 + #88) ===
+        # Store/override persona (explicit launch arg wins over constructor)
+        if persona is not None:
+            self.persona = persona
+        # Always have a solid default
+        if getattr(self, "persona", None) is None:
+            self.persona = DEFAULT_PERSONA
+
+        p_over = self.persona.to_launch_overrides()
+
+        # Apply persona device values (central source of truth going forward).
+        # Preset locale/tz already decided above and take priority when preset was used.
+        # When no preset, persona provides the realistic defaults.
+        launch_kwargs["viewport"] = p_over.get("viewport", launch_kwargs["viewport"])
+        launch_kwargs["user_agent"] = p_over.get("user_agent", launch_kwargs["user_agent"])
+
+        if not preset:
+            # No preset -> fully driven by persona (or constructor defaults)
+            locale = p_over.get("locale", locale)
+            tz = p_over.get("timezone_id", tz)
+
+        # Use the prepared launch_kwargs (includes proxy if set, and preset/persona-driven locale/tz)
         launch_kwargs["locale"] = locale
         launch_kwargs["timezone_id"] = tz
         self.browser = await pw.chromium.launch_persistent_context(**launch_kwargs)
@@ -215,7 +258,8 @@ class AgentBrowser:
             self.debug_reporter.dump_patches()
             self.logger.log_action("debug_mode_activated_on_launch", {
                 "preset": self._current_preset.name if self._current_preset else None,
-                "region": tls_region_str
+                "region": tls_region_str,
+                "persona": self.persona.name if self.persona else None,
             })
         
         # Initialize scraper
@@ -238,7 +282,8 @@ class AgentBrowser:
             self.logger.log_action("preset_applied", {
                 "preset": self._current_preset.name,
                 "recommended_retries": self._current_preset.recovery_max_retries,
-                "notes": self._current_preset.notes[:200]
+                "notes": self._current_preset.notes[:200],
+                "persona": getattr(self.persona, "name", None),
             })
 
         # Store playwright instance for proper cleanup
@@ -268,7 +313,8 @@ class AgentBrowser:
                 "name": preset.name,
                 "tls_region": preset.tls_region.value,
                 "behavior": preset.behavior_intensity,
-                "warm_up": preset.warm_up
+                "warm_up": preset.warm_up,
+                "persona": self.persona.name if self.persona else None,
             })
         
         # If we have a recovery orchestrator, we could dynamically adjust strategy (future)
@@ -284,12 +330,15 @@ class AgentBrowser:
         """
         Operator-friendly health / status snapshot (#281).
         Used by MCP stealth_status and for dashboards / debugging loops.
+        Now includes persona + device profile (#109 foundation).
         """
         status = {
             "launched": bool(self.browser and self.page),
             "session": self.session.get("name") if self.session else None,
             "debug_mode": self.debug_mode,
             "current_preset": self._current_preset.name if self._current_preset else None,
+            "persona": self.persona.name if self.persona else None,
+            "device_profile": self.persona.device.name if self.persona else None,
             "current_url": None,
             "tls_region": None,
             "fingerprint_profile": None,
@@ -377,9 +426,14 @@ class AgentBrowser:
         for attempt in range(max_retries):
             try:
                 if warm_up and "linkedin.com" in url and attempt == 0:
-                    await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
-                    await self.human.scroll_naturally(280)
-                    await self.human.think(900, 1600)
+                    # #208: lighter warm-up on resume or light preset to avoid waste on repeated sessions
+                    if getattr(self, "_resume", False):
+                        await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                        await self.human.think(300, 700)
+                    else:
+                        await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                        await self.human.scroll_naturally(280)
+                        await self.human.think(900, 1600)
                 
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 await self.human.think(500, 1200)
@@ -403,9 +457,14 @@ class AgentBrowser:
 
         async def _navigate():
             if warm_up and "linkedin.com" in url:
-                await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
-                await self.human.scroll_naturally(280)
-                await self.human.think(900, 1600)
+                # #208: lighter warm-up on resume or light preset (#208)
+                if getattr(self, "_resume", False):
+                    await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                    await self.human.think(300, 700)
+                else:
+                    await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                    await self.human.scroll_naturally(280)
+                    await self.human.think(900, 1600)
             
             response = await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await self.human.think(500, 1200)
@@ -429,7 +488,7 @@ class AgentBrowser:
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
 
-        with open(cookies_path, "r") as f:
+        with open(cookies_path, "r") as f):
             cookies = json.load(f)
 
         for cookie in cookies:
@@ -541,7 +600,7 @@ class AgentBrowser:
             if self.debug_reporter and self.debug_mode:
                 self.debug_reporter.record_patch("warm_up", {"intensity": intensity})
 
-            return {"status": "success", "intensity": intensity, "preset": self._current_preset.name if self._current_preset else None}
+            return {"status": "success", "intensity": intensity, "preset": self._current_preset.name if self._current_preset else None, "persona": self.persona.name if self.persona else None}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -651,7 +710,10 @@ class AgentBrowser:
 
 
 # Convenience: expose preset list at module level for docs / CLI
+# Also re-export Persona foundation symbols for easy `from core.agent_browser import ...`
 __all__ = [
     "AgentBrowser", "get_preset", "list_presets", "PlatformPreset", 
-    "LINKEDIN_2026", "PRESETS"
+    "LINKEDIN_2026", "PRESETS",
+    # Persona / DeviceProfile (#109 + #88)
+    "Persona", "DeviceProfile", "DEFAULT_PERSONA", "get_persona", "list_personas"
 ]
