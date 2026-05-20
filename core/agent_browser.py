@@ -44,12 +44,21 @@ class AgentBrowser:
         self.cookie_manager = None
         self.session_orchestrator = None
         self.context: Optional[BrowserContext] = None
-        self.browser = None
+        self.browser = None   # Playwright BrowserContext (persistent) — see launch() docstring
+        self.page = None      # Playwright Page (main) — use this for most page actions
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
     
     async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False):
         """Launch browser with full stealth + human behavior.
         
+        IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
+            - self.browser  -> Playwright BrowserContext (persistent context)
+            - self.page     -> Playwright Page (main page created after launch)
+            - self.context  -> alias for self.browser (for clarity in some paths)
+
+        Consumers (including MCP wrappers) must use self.page for page methods
+        (goto, content, inner_text, click, etc.). Never call them on self.browser.
+
         Args:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
@@ -89,6 +98,7 @@ class AgentBrowser:
         
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
+        self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
         
         # Inject advanced stealth on the page
         await self.page.add_init_script(get_stealth_script())
@@ -177,8 +187,9 @@ class AgentBrowser:
 
     async def load_cookies(self, cookies_path: str):
         """
-        Load cookies from a JSON file (exported from real browser).
-        This is the most reliable way to bypass login + Cloudflare on sites like Upwork.
+        [DEPRECATED] Legacy cookie loader.
+        Use load_cookies_from_file() + CookieManager instead (more resilient).
+        Kept for backward compatibility; fixed .context access (BUG-03).
         """
         import json
         if not self.browser:
@@ -194,7 +205,8 @@ class AgentBrowser:
                 if cookie["sameSite"] not in ["None", "Lax", "Strict"]:
                     cookie["sameSite"] = "None"
             try:
-                await self.browser.context.add_cookies([cookie])
+                # self.browser is the BrowserContext (naming kept for backward compat)
+                await self.browser.add_cookies([cookie])
             except Exception as e:
                 print(f"Warning: Could not add cookie {cookie.get('name')}: {e}")
 
@@ -216,7 +228,7 @@ class AgentBrowser:
                 await self.recovery.execute_with_recovery(
                     func=_click,
                     platform=platform,
-                    url=self.browser.url if hasattr(self.browser, 'url') else ""
+                    url=getattr(self.page, 'url', '') if self.page else ''
                 )
             else:
                 await _click()
@@ -238,7 +250,7 @@ class AgentBrowser:
                 await self.recovery.execute_with_recovery(
                     func=_type,
                     platform=platform,
-                    url=self.browser.url if hasattr(self.browser, 'url') else ""
+                    url=getattr(self.page, 'url', '') if self.page else ''
                 )
             else:
                 await _type()

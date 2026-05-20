@@ -147,13 +147,15 @@
 
 ### 7.0 Immediate Blockers (from Critical Bugs)
 
-- [ ] **BUG-01** — Missing `self.rng` + `import time` in `AgentBrowser` (crashes warm_up, profile, screenshots, human_scroll fallback). Make warm-up methods defensive.
+- [x] **BUG-01** — Missing `self.rng` + `import time` in `AgentBrowser` (crashes warm_up, profile, screenshots, human_scroll fallback). Make warm-up methods defensive.
   - Files: `core/agent_browser.py`
   - Fix approach: Add imports + `self.rng = random.Random()` in `launch()` after human init; guard all `self.rng` usage.
+  - **Done:** 2026-05 — commit aec9e22, pushed. rng now always present; warm_up no longer crashes on attr.
 
-- [ ] **BUG-02** — MCP `stealth_scrape` / `linkedin_profile` completely broken: uses `self.browser.browser` (Context) instead of the real Page object.
-  - Files: `.hermes/skills/stealth-playwright-mcp/stealth_mcp.py`
-  - Also audit other accesses in mcp_tools/launch.
+- [x] **BUG-02** — MCP `stealth_scrape` / `linkedin_profile` completely broken: uses `self.browser.browser` (Context) instead of the real Page object.
+  - Files: `.hermes/skills/stealth-playwright-mcp/stealth_mcp.py` (runtime integration, **not** part of this git repo)
+  - Fix applied directly to the Hermes skill (stealth_mcp.py:80,105 now use `.page`). Library-side naming cleanup tracked under BUG-03.
+  - **Done (runtime):** 2026-05 — edit applied to /root/.hermes/.../stealth_mcp.py. MCP content tools now functional once AgentBrowser has .page.
 
 - [ ] **BUG-03** — Legacy `load_cookies()` + recovery paths use wrong attributes (`.context`, `.url` on BrowserContext). Inconsistent naming (`self.browser` is Context, `self.page` is Page).
   - Files: `core/agent_browser.py`
