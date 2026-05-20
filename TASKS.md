@@ -103,10 +103,17 @@
 
 - [ ] Add metrics / observability (Prometheus compatible)
 - [ ] Implement rate limiting per domain / account
-- [ ] Add headless vs headed mode with visual debugging
+- [ ] **Headed vs Headless + visual debugging**
+  - Toggle between headless and headed mode at runtime
+  - Automatic screenshots on error / block detection
+  - Visual debugging overlay (mouse path, click highlights)
+  - Headed fallback when recovery is triggered
 - [ ] Create Docker image for easy deployment
-- [ ] Performance profiling and optimization
-
+- [ ] **Performance profiling and optimization**
+  - Profile navigation, typing, and recovery latency
+  - Identify bottlenecks in stealth injection and human behavior
+  - Optimize Playwright launch args and script injection
+  - Add timing metrics for safe_goto, safe_click, warm_up
 ---
 
 ## Quick Wins (Can be done in 1–2 days)
