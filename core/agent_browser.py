@@ -456,17 +456,27 @@ class AgentBrowser:
 
 
     async def screenshot_on_error(self, name: str = "error"):
-        """Take screenshot on error for visual debugging."""
+        """Take screenshot on error for visual debugging.
+        #149 fix: always log failure reason (via logger if available), fixed time.time() call, best-effort.
+        """
         if not self.page:
             return None
         try:
             import os
             os.makedirs("screenshots", exist_ok=True)
-            filename = f"screenshots/{name}_{int(time.time)}.png"
+            filename = f"screenshots/{name}_{int(time.time())}.png"
             await self.page.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
-            print(f"Screenshot failed: {e}")
+            # #149: never silent - log the exact failure (print fallback if no logger yet)
+            msg = f"Screenshot failed: {e}"
+            if getattr(self, "logger", None):
+                try:
+                    self.logger.log_error("screenshot_on_error_failed", str(e), {"name": name})
+                except Exception:
+                    print(msg)
+            else:
+                print(msg)
             return None
 
 
