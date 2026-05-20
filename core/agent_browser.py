@@ -151,8 +151,9 @@ class AgentBrowser:
         await self.page.add_init_script(get_stealth_script())
         
         # Create human behavior controller + orchestrator
-        self.human = HumanBehavior(self.page)
-        self.orchestrator = BehaviorOrchestrator(self.human)
+        # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
+        self.human = HumanBehavior(self.page, rng=self.rng)
+        self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
         
         # Initialize audit logging
         self.logger = AuditLogger(self.session["name"])
@@ -170,7 +171,8 @@ class AgentBrowser:
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
             page_getter=lambda: self.page,
-            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            light_mode=getattr(self, "light_mode", None),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            rng=self.rng  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION

@@ -14,9 +14,9 @@ from typing import Optional, Tuple
 class HumanBehavior:
     """Orchestrates realistic human-like actions"""
 
-    def __init__(self, page):
+    def __init__(self, page, rng: Optional["random.Random"] = None):
         self.page = page
-        self.rng = random.Random()
+        self.rng = rng or random.Random()
 
         # Python-side last known mouse position for reliable move chaining (fixes tracking bug where window.mouseX was never updated)
         # Small, high-impact realism fix for mouse paths starting from last instead of always ~center

@@ -14,9 +14,9 @@ class BehaviorOrchestrator:
     Use these instead of raw actions for better undetectability.
     """
     
-    def __init__(self, human_behavior):
+    def __init__(self, human_behavior, rng: Optional["random.Random"] = None):
         self.human = human_behavior
-        self.rng = random.Random()
+        self.rng = rng or random.Random()
     
     async def read_page_naturally(self, min_scrolls: int = 2, max_scrolls: int = 5):
         """Simulate reading a page like a human"""
