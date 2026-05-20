@@ -193,13 +193,14 @@ class AgentBrowser:
             return await self.goto(url, warm_up=warm_up)
 
         async def _navigate():
-            if warm_up and "linkedin.com" in url:
+            if warm_up and "linkedin.com" in url and not self.light_mode:
                 await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                 await self.human.scroll_naturally(280)
                 await self.human.think(900, 1600)
             
             response = await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await self.human.think(500, 1200)
+            if not self.light_mode:
+                await self.human.think(500, 1200)
             return response
 
         try:
