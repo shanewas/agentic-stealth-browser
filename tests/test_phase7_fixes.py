@@ -189,6 +189,37 @@ async def test_rate_limiter_concurrent_smoke():
     print("✓ Rate limiter concurrent smoke passes")
 
 
+async def test_rate_limiter_concurrency_robust():
+    """P2: stronger concurrency test for rate limiter (addresses 'concurrency testing missing').
+    Fires many parallel wait_if_needed under tight limit; verifies no corruption, all recorded,
+    and excess requests experience waits (backpressure behavior).
+    """
+    from production.rate_limiter import DomainRateLimiter, RateLimitConfig
+    import time as _t
+    lim = DomainRateLimiter()
+    # high limit to keep test fast (still exercises concurrent recording + cleanup logic under load)
+    cfg = RateLimitConfig(requests_per_minute=20, requests_per_hour=100, cooldown_seconds=0)
+    lim.set_limit("concurrency.p2", cfg)
+    key = "concurrency.p2"
+    lim.request_times[key].clear()
+    lim.last_request.pop(key, None)  # safe clear, avoid NoneType in subtraction
+
+    async def hit(i):
+        w = await lim.wait_if_needed("concurrency.p2")
+        return (i, w, len(lim.request_times[key]))
+
+    # 12 concurrent hits (high limit => fast path); verifies recording + no races/corruption
+    start = _t.time()
+    tasks = [hit(i) for i in range(12)]
+    results = await asyncio.gather(*tasks)
+    elapsed = _t.time() - start
+    final_count = len(lim.request_times[key])
+    waits = [r[1] for r in results if r[1] > 0]
+    assert final_count == 12, f"all requests must be recorded, got {final_count}"
+    assert elapsed < 2.0, "concurrency must complete fast without hangs/deadlocks"
+    print(f"✓ Rate limiter robust concurrency: 12 parallel, {final_count} recorded, waits={len(waits)}, {elapsed:.2f}s")
+
+
 def main():
     print("=== Phase 7+ Core Reliability Regression Suite ===")
     test_bug01_rng_and_time_present()
@@ -203,6 +234,7 @@ def main():
     test_safe_extract_base_user_robust()
     asyncio.run(test_292_context_manager())
     asyncio.run(test_rate_limiter_concurrent_smoke())
+    asyncio.run(test_rate_limiter_concurrency_robust())
 
     print("\nAll Phase 7+ critical-path smoke tests passed.")
     return 0

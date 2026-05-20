@@ -171,7 +171,7 @@ class AgentBrowser:
         self._using_pool: bool = False
         self._pooled_ctx_id: Optional[int] = None  # track for release
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None, use_pooled_context: Optional[bool] = None):  # #57/#48/#47 pooled scalability opt-in (also overridable here)
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None, use_pooled_context: Optional[bool] = None, resume: bool = False):  # #57/#48/#47 pooled + P2 resume for lighter warm-up
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -197,6 +197,7 @@ class AgentBrowser:
             use_pooled_context: If True, use shared _BrowserPool + new_context() for scalability (P1 #57/#48/#47).
                 Only effective when proxy rotation is not required (or handled by creating fresh pooled ctxs).
                 Default False for full backward compat + per-session disk persistence via launch_persistent_context.
+            resume: Opt-in P2 for warm-up rigidity: when True, forces light_mode=True for faster resume from saved sessions (skips rigid heavy warm-up sequences). Addresses "warm-up sequence too rigid".
             Proxy support: configure via self.proxy_manager.create_decodo_config(...) *before* calling launch()
             (or pass preconfigured ProxyManager in advanced usage); it is now wired into launch_persistent_context (#14, #29).
         """
@@ -207,6 +208,10 @@ class AgentBrowser:
         if use_pooled_context is not None:
             self.use_pooled_context = use_pooled_context
             self._using_pool = False  # reset; will set true if we take the pooled path
+        if resume:
+            self._resume = True
+            if not getattr(self, "light_mode", False):
+                self.light_mode = True  # opt-in P2: resume forces light warm-up path (makes sequence less rigid)
 
         # Support documented STEALTH_* environment variables (#34)
         # These are set in Dockerfile / docker-compose and referenced in README.
@@ -963,7 +968,8 @@ class AgentBrowser:
             # Default launch parameters — callers can still call launch() explicitly first
             await self.launch(
                 light_mode=getattr(self, "light_mode", None),
-                use_pooled_context=getattr(self, "use_pooled_context", None)  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+                use_pooled_context=getattr(self, "use_pooled_context", None),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+                resume=getattr(self, "_resume", False)  # P2 resume preservation
             )
         return self
 

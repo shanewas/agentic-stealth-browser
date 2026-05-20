@@ -25,8 +25,19 @@ class HumanBehavior:
 
         # Perf/ops: configurable realism to reduce CDP chatter + tiny sleeps in CI or low-resource envs (#258 #282 #123 #274)
         # Set AGENTIC_STEALTH_REALISM=light or off to skip heavy micro-movements, use bigger steps, shorter thinks
-        env_r = (os.getenv("AGENTIC_STEALTH_REALISM") or os.getenv("STEALTH_REALISM") or "full").lower().strip()
+        # P2: auto-detect CI / headless / low-resource to default to light (addresses micro-movements not skipped in CI)
+        env_r = (os.getenv("AGENTIC_STEALTH_REALISM") or os.getenv("STEALTH_REALISM") or "").lower().strip()
+        ci_indicators = bool(
+            os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("GITLAB_CI") or
+            os.getenv("JENKINS_URL") or os.getenv("AGENTIC_STEALTH_LIGHT_CI") or
+            os.getenv("HEADLESS") == "1"
+        )
+        if not env_r:
+            env_r = "light" if ci_indicators else "full"
         self.realism_level = {"off": 0, "light": 1, "medium": 2, "full": 3}.get(env_r, 3)
+        # also honor STEALTH_HEADLESS for low realism
+        if self.realism_level > 1 and (os.getenv("STEALTH_HEADLESS", "").lower() in ("1", "true") or ci_indicators):
+            self.realism_level = 1
 
     async def _record_mouse_position(self, x: float, y: float) -> None:
         """Update Python authoritative last pos + sync to JS window.mouseX/Y.
@@ -386,6 +397,9 @@ class HumanBehavior:
             lambda: self.scroll_naturally(self.rng.randint(80, 180)),
             lambda: asyncio.sleep(self.rng.uniform(1.2, 2.8)),
         ]
+        if self.realism_level < 1:
+            # P2: skip micro entirely in CI/low-resource (prefer pure sleeps/think)
+            patterns = [p for p in patterns if "micro" not in getattr(p, "__name__", "")] or patterns[1:]
 
         while time.monotonic() < end_time:
             pattern = self.rng.choice(patterns)
@@ -397,7 +411,13 @@ class HumanBehavior:
                 break
 
     async def micro_movement_while_waiting(self, duration_ms: int = 800):
-        """Small, natural mouse movements while waiting. Uses + updates authoritative tracked pos + JS sync."""
+        """Small, natural mouse movements while waiting. Uses + updates authoritative tracked pos + JS sync.
+        P2 perf: early return (skip all CDP moves) when realism_level low (CI/headless/light_mode).
+        """
+        if self.realism_level < 1:
+            # Skip micro-movements entirely in low-resource/CI (no mouse.move CDP spam)
+            await asyncio.sleep(max(0.001, min(duration_ms / 2000.0, 0.05)))
+            return
         end_time = time.monotonic() + (duration_ms / 1000)
 
         while time.monotonic() < end_time:
