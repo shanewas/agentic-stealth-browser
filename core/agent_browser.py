@@ -24,8 +24,8 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-from production.rate_limiter import domain_limiter, account_limiter, AccountRateLimiter  # #87: include classes for per-instance + namespace
-from production.metrics import MetricsCollector  # per-instance metrics for #79/#87
+from production.rate_limiter import domain_limiter, account_limiter, DomainRateLimiter, AccountRateLimiter
+from production.metrics import metrics, MetricsCollector
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
@@ -36,34 +36,9 @@ class AgentBrowser:
     High-undetectability browser for autonomous agents.
     Supports multiple isolated sessions and deep human mimicry.
 
-    P1 #79/#87 (scalability): Each instance carries its own rate_limiter (AccountRateLimiter)
-    and metrics by default. This gives basic in-process isolation vs the old globals.
-
-    *** STRONG MULTI-INSTANCE ISOLATION WARNING ***
-    - In-process: different AgentBrowser() objects now have separate limiter/metrics objects,
-      so concurrent sessions in *one* process no longer pollute each others' rate counters.
-    - Cross-process / fleet: STILL UNSAFE without additional care. Every Python process,
-      container, or server replica has completely independent rate limit state. N replicas =
-      up to N times the request rate against the target unless you shard accounts or
-      reduce per-replica limits.
-    - The namespace= feature inside the limiter classes can be used for further sub-division
-      inside a single limiter, but provides no magic for distributed cases.
-    - Browser launch (playwright contexts) + human behavior state are also per-instance and
-      expensive; many in one process will exhaust resources even if rate limits are "isolated".
-
-    Recommended for scalability (#87):
-    - One AgentBrowser (or small group of related accounts) per OS process / docker container.
-    - Use docker-compose / k8s with resource limits for horizontal scaling.
-    - Let SessionManager handle per-session persistent state (safe to share disk dirs across instances).
-    - For coordinated rate limiting across replicas, use an external system.
-
-    Pass an existing rate_limiter= or metrics_collector= into the constructor only when you
-    explicitly want *shared* policy across several browsers inside the same process.
-
-    A small runtime guard below emits a warning on >1 instance per process.
+    P1 #79/#87: Each instance now carries its own rate_limiter and metrics (isolated by default).
+    Pass shared AccountRateLimiter/MetricsCollector to constructor for coordinated "fleet" use.
     """
-
-    _instance_count: int = 0
 
     def __init__(
         self,
@@ -73,20 +48,6 @@ class AgentBrowser:
         rate_limiter: Optional[AccountRateLimiter] = None,
         metrics_collector: Optional[MetricsCollector] = None,
     ):
-        # Small code guard for #87 multi-instance awareness
-        AgentBrowser._instance_count += 1
-        if AgentBrowser._instance_count > 1:
-            import warnings
-            warnings.warn(
-                "Multiple AgentBrowser instances created in the same process (see #87 scalability). "
-                "Per-instance rate_limiter/metrics mitigate in-process sharing issues, but cross-process "
-                "replicas have independent state and total request volume scales with replica count. "
-                "Strongly prefer separate processes/containers for production multi-account or parallel workloads. "
-                "See production/rate_limiter.py docs and README multi-instance guidance.",
-                UserWarning,
-                stacklevel=2
-            )
-
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
         self.proxy_manager = ProxyManager()
@@ -202,7 +163,8 @@ class AgentBrowser:
             browser=self.browser,
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
-            page_getter=lambda: self.page
+            page_getter=lambda: self.page,
+            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls etc.)
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
@@ -253,13 +215,13 @@ class AgentBrowser:
             return await self.goto(url, warm_up=warm_up)
 
         async def _navigate():
-            if warm_up and "linkedin.com" in url and not getattr(self, 'light_mode', True):
+            if warm_up and "linkedin.com" in url and not self.light_mode:
                 await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                 await self.human.scroll_naturally(280)
                 await self.human.think(900, 1600)
             
             response = await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            if not getattr(self, 'light_mode', True):
+            if not self.light_mode:
                 await self.human.think(500, 1200)
             return response
 
@@ -273,7 +235,6 @@ class AgentBrowser:
         except Exception as e:
             self.logger.log_error("safe_goto_failed", str(e), {"url": url, "platform": platform})
             return False
-
 
 
     async def load_cookies(self, cookies_path: str):
