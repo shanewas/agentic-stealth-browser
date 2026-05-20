@@ -59,6 +59,12 @@ class AgentBrowser:
         Consumers (including MCP wrappers) must use self.page for page methods
         (goto, content, inner_text, click, etc.). Never call them on self.browser.
 
+        Preferred usage (issue #292):
+            async with AgentBrowser() as browser:
+                await browser.safe_goto(...)
+                ...
+            # automatic reliable cleanup even on exceptions
+
         Args:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
@@ -124,6 +130,9 @@ class AgentBrowser:
             proxy_manager=self.proxy_manager,
             page_getter=lambda: self.page
         )
+
+        # Store playwright instance for proper cleanup
+        self._pw = pw
 
         return self.browser
     
@@ -399,5 +408,52 @@ class AgentBrowser:
         domain_limiter.set_limit(domain, config)
 
     async def close(self):
-        if self.browser:
-            await self.browser.close()
+        """Close the browser, page, and underlying Playwright instance.
+
+        This method is idempotent and safe to call multiple times.
+        """
+        try:
+            if self.page:
+                try:
+                    await self.page.close()
+                except Exception:
+                    pass
+                self.page = None
+
+            if self.browser:
+                try:
+                    await self.browser.close()
+                except Exception:
+                    pass
+                self.browser = None
+                self.context = None
+
+            if hasattr(self, '_pw') and self._pw:
+                try:
+                    await self._pw.stop()
+                except Exception:
+                    pass
+                self._pw = None
+
+            # Best-effort cleanup of other resources
+            self.human = None
+            self.orchestrator = None
+            self.recovery = None
+        except Exception:
+            # Never let close() itself raise — we want reliable cleanup
+            pass
+
+    async def __aenter__(self):
+        """Support for `async with AgentBrowser(...) as browser:` usage.
+
+        This implements GitHub issue #292 (proper context manager for reliable cleanup).
+        """
+        if not self.browser:
+            # Default launch parameters — callers can still call launch() explicitly first
+            await self.launch()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Guarantee cleanup even if an exception occurs inside the `async with` block."""
+        await self.close()
+        return False  # do not suppress exceptions
