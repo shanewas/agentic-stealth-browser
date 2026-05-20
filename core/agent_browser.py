@@ -196,7 +196,8 @@ class AgentBrowser:
                     await self.human.think(900, 1600)
                 
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                await self.human.think(500, 1200)
+                if not getattr(self, "light_mode", False):  # absolute final polish for #174/#113 launch/warm-up cost: also skip post-goto think delay in legacy goto (now fully matches safe_goto light_mode behavior)
+                    await self.human.think(500, 1200)
                 return True
                 
             except Exception as e:
