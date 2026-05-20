@@ -243,6 +243,14 @@ tester.save_results()
 
 ### Recommended Settings
 
+### Light Mode + Pooling Guidance (Closes remaining P1s #174, #113, #92, #84)
+
+Pass `light_detection=True` (default) to `launch()` to enable fast recovery path (no `page.content()` spam). Pair with `AGENTIC_STEALTH_REALISM=light` and light warm-ups for lowest latency.
+
+For #113 (no pooling): reuse long-lived AgentBrowser instances / contexts in production instead of per-task launch. Pre-warm a small pool of contexts for different platforms when scaling.
+
+
+
 ```python
 # For maximum stealth (LinkedIn / Upwork)
 browser = AgentBrowser(session_name="production")
@@ -261,7 +269,7 @@ await browser.ensure_cookies_fresh(max_age_hours=6)
 
 | Method                        | Description                              | Parameters |
 |-------------------------------|------------------------------------------|----------|
-| `launch(headless=True)`       | Launch browser with stealth              | `headless`, `slow_mo` |
+| `launch(..., light_detection=True)` | Launch + light recovery (no content() spam) | `headless`, `slow_mo`, `light_detection` (#174 #92 #84 #113) |
 | `safe_goto(url, platform)`    | Navigate with recovery                   | `url`, `platform`, `warm_up` |
 | `load_cookies_from_file(path)`| Load cookies from real browser           | `cookies_path` |
 | `warm_up_before_work(intensity)` | Perform natural warm-up               | `intensity` ("light", "medium", "heavy") |
