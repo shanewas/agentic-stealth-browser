@@ -2,6 +2,7 @@
 Cookie & Session Resilience Module
 Handles cookie loading, validation, refresh, and multi-session management.
 Cleaned up for Phase 8: removed duplication with sessions/session_manager.py (#134),
+AgentBrowser legacy now delegates (full consolidation in core P2 cluster); 
 fixed broken SessionOrchestrator, added persist/resume + distributed bundle support (#236, #298).
 Phase 8 P1 #82: added optional at-rest encryption + integrity protection for cookie files and session bundles (Fernet).
 """
