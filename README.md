@@ -335,3 +335,76 @@ await browser.safe_goto("https://www.linkedin.com/feed/")
 Following the patterns above + using the new debug/explain tools dramatically improves survival rates.
 
 *These docs close P1 documentation gaps #133 and #209.*
+
+## Recommended Production Flow (P1 #118)
+
+For maximum success rate on protected sites (LinkedIn, Upwork, etc.) always use this pattern:
+
+```python
+from core.agent_browser import AgentBrowser
+
+async def production_flow():
+    browser = AgentBrowser(
+        session_name="linkedin-pro",
+        anonymous=False  # for cookie persistence
+    )
+    await browser.launch(headless=True, region="us", preset="linkedin_2026")
+
+    # 1. Load real cookies exported from your browser (critical!)
+    await browser.load_cookies_from_file("~/.linkedin/cookies.json")
+
+    # 2. Warm up the session with human-like behavior
+    await browser.warm_up_before_work(intensity="heavy")
+
+    # 3. Use safe navigation with built-in recovery
+    success = await browser.safe_goto(
+        "https://www.linkedin.com/in/target-profile",
+        platform="linkedin"
+    )
+    if not success:
+        # recovery already attempted internally
+        pass
+
+    # 4. Perform human-like actions
+    await browser.human.simulate_reading(12.0)
+    await browser.human.think(800, 2200)
+
+    # 5. Always clean up
+    await browser.close()
+```
+
+This flow (cookies + warm-up + safe_goto + recovery) dramatically improves survival rates.
+
+## Platform Recipes & Cookbook (P1 #189)
+
+### LinkedIn Profile Scrape (2026)
+```python
+browser = AgentBrowser(session_name="li")
+await browser.launch(preset="linkedin_2026")
+await browser.load_cookies_from_file("li_cookies.json")
+await browser.warm_up_before_work("heavy")
+await browser.safe_goto("https://www.linkedin.com/in/williamhgates", platform="linkedin")
+html = await browser.page.content()
+# ... parse
+await browser.close()
+```
+
+### Upwork Job Search
+```python
+browser = AgentBrowser(session_name="upwork")
+await browser.launch(preset="upwork_2026", region="us")
+await browser.load_cookies_from_file("upwork_cookies.json")
+await browser.warm_up_before_work("medium")
+await browser.safe_goto("https://www.upwork.com/nx/search/jobs/", platform="upwork")
+# interact with search, apply filters human-like
+await browser.close()
+```
+
+### Amazon Product Research (stealth)
+Use `preset="amazon_2026"`, light warm-up, residential proxy.
+
+### Cloudflare Bypass Flow
+Heavy stealth + TLS US, minimal behavior, multiple recovery retries built-in via safe_goto.
+
+See also: `examples/recipes/` (to be expanded) and `stealth/presets.py` for full list.
+

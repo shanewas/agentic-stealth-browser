@@ -303,7 +303,7 @@ async def test_e2e_recovery_flow_256():
     finally:
         try:
             if getattr(browser, "browser", None):
-                await browser.browser.close()
+                await browser.close()  # proper public API, aligns with page_getter fix for #106 MCP bug
         except Exception:
             pass
 
