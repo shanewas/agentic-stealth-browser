@@ -6,6 +6,7 @@ Combines stealth, human behavior, and session management
 import asyncio
 import random
 import time
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, BrowserContext
@@ -305,9 +306,19 @@ class AgentBrowser:
 
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
-        """Perform natural warm-up before real automation work."""
+        """Perform natural warm-up before real automation work.
+        Adaptive: honors AGENTIC_STEALTH_REALISM (light/off -> force light) and CI env (#258 #274).
+        """
         if not self.human:
             return {"status": "error", "message": "Human behavior not initialized"}
+
+        # Auto downgrade for CI / low-resource / explicit perf mode
+        ci_env = bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("JENKINS_URL"))
+        realism = getattr(self.human, "realism_level", 3)
+        if (ci_env or realism <= 1) and intensity == "heavy":
+            intensity = "light"
+        if realism == 0 and intensity != "light":
+            intensity = "light"
 
         try:
             if intensity == "light":
