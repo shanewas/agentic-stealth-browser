@@ -113,6 +113,30 @@ class AntiBlockOrchestrator:
         """Allow AgentBrowser to wire the active session for #90 auto-cleanup on restriction."""
         self.current_session_name = name
 
+    def _make_circuit_key(self, platform: str, url: Optional[str] = None) -> str:
+        """Create fine-grained circuit breaker key: platform + (registrable) domain.
+        Enables true per-platform/domain breakers for #130 P1 (as documented).
+        Falls back to platform-only if url parsing fails. Quick + high impact.
+        """
+        p = (platform or "unknown").lower().strip()
+        if not url:
+            return p
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(str(url))
+            host = (parsed.netloc or parsed.path or "").lower()
+            if host:
+                # registrable domain (last two labels)
+                parts = [x for x in host.split(".") if x]
+                if len(parts) >= 2:
+                    dom = ".".join(parts[-2:])
+                    return f"{p}:{dom}"
+                return f"{p}:{host}"
+        except Exception:
+            pass
+        return p
+
+
     def _check_circuit_breaker(self, key: str) -> bool:
         """Return True if circuit is currently open for this key (platform/domain). Addresses #130."""
         now = time.time()
@@ -277,7 +301,7 @@ class AntiBlockOrchestrator:
         Returns True if we should continue retrying.
         Now includes circuit breaker check (P1 #130).
         """
-        key = context.platform.lower()
+        key = self._make_circuit_key(context.platform, getattr(context, "url", None))
 
         # Circuit breaker guard (prevents hammering on hopeless cases)
         if self._check_circuit_breaker(key):
@@ -404,7 +428,7 @@ class AntiBlockOrchestrator:
             context.attempt = attempt
             start_time = time.time()
 
-            key = platform.lower()
+            key = self._make_circuit_key(platform, url)
             if self._check_circuit_breaker(key):
                 self.logger.log_action("circuit_breaker_blocked_execute", {"platform": platform})
                 break
