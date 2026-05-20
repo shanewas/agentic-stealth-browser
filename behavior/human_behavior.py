@@ -3,9 +3,11 @@ Human Behavior Orchestration Layer
 Makes browser actions feel natural and human
 """
 
+import os
 import random
 import asyncio
 import math
+import time
 from typing import Optional, Tuple
 
 
@@ -15,6 +17,11 @@ class HumanBehavior:
     def __init__(self, page):
         self.page = page
         self.rng = random.Random()
+
+        # Perf/ops: configurable realism to reduce CDP chatter + tiny sleeps in CI or low-resource envs (#258 #282 #123 #274)
+        # Set AGENTIC_STEALTH_REALISM=light or off to skip heavy micro-movements, use bigger steps, shorter thinks
+        env_r = (os.getenv("AGENTIC_STEALTH_REALISM") or os.getenv("STEALTH_REALISM") or "full").lower().strip()
+        self.realism_level = {"off": 0, "light": 1, "medium": 2, "full": 3}.get(env_r, 3)
 
     async def think(self, min_ms: int = 400, max_ms: int = 1400):
         """Simulate thinking / reading pause"""
@@ -74,7 +81,13 @@ class HumanBehavior:
             print(f"[HumanBehavior] mouse pos eval failed (non-fatal): {e}")
             current_x, current_y = 500, 350
 
-        steps = self.rng.randint(22, 42) if speed == "normal" else self.rng.randint(10, 20)
+        base_steps = 22 if speed == "normal" else 10
+        max_steps = 42 if speed == "normal" else 20
+        # Perf: fewer steps (fewer CDP mouse.move) when realism reduced for CI / throughput (#282 #258)
+        if self.realism_level <= 1:  # light or off
+            steps = self.rng.randint(max(3, base_steps//2), max(5, max_steps//2))
+        else:
+            steps = self.rng.randint(base_steps, max_steps)
         points = await self._bezier_curve((current_x, current_y), (x, y), steps)
 
         for px, py in points:
@@ -137,9 +150,9 @@ class HumanBehavior:
 
     async def simulate_reading(self, duration_seconds: float = 8.0):
         """Simulate a person reading a page"""
-        end_time = asyncio.get_event_loop().time() + duration_seconds
+        end_time = time.monotonic() + duration_seconds
 
-        while asyncio.get_event_loop().time() < end_time:
+        while time.monotonic() < end_time:
             scroll_amount = self.rng.randint(120, 280)
             await self.scroll_naturally(scroll_amount)
             await asyncio.sleep(self.rng.uniform(1.2, 3.8))
@@ -221,7 +234,7 @@ class HumanBehavior:
 
     async def random_idle_behavior(self, duration_seconds: float = 5.0):
         """Advanced random idle behavior with multiple patterns"""
-        end_time = asyncio.get_event_loop().time() + duration_seconds
+        end_time = time.monotonic() + duration_seconds
 
         patterns = [
             lambda: self.think(800, 2200),
@@ -230,7 +243,7 @@ class HumanBehavior:
             lambda: asyncio.sleep(self.rng.uniform(1.2, 2.8)),
         ]
 
-        while asyncio.get_event_loop().time() < end_time:
+        while time.monotonic() < end_time:
             pattern = self.rng.choice(patterns)
             if asyncio.iscoroutinefunction(pattern):
                 await pattern()
@@ -242,9 +255,9 @@ class HumanBehavior:
 
     async def micro_movement_while_waiting(self, duration_ms: int = 800):
         """Small, natural mouse movements while waiting"""
-        end_time = asyncio.get_event_loop().time() + (duration_ms / 1000)
+        end_time = time.monotonic() + (duration_ms / 1000)
 
-        while asyncio.get_event_loop().time() < end_time:
+        while time.monotonic() < end_time:
             try:
                 dx = self.rng.randint(-25, 25)
                 dy = self.rng.randint(-18, 18)
@@ -257,13 +270,15 @@ class HumanBehavior:
             except Exception as e:
                 print(f"[HumanBehavior] non-fatal error (was silent): {e}")  # improved from broad except (SUG-03)
 
-            await asyncio.sleep(self.rng.uniform(0.35, 0.85))
+            # Perf: shorter wait micro sleeps under low realism
+            sleep_base = 0.35 if self.realism_level >= 3 else (0.1 if self.realism_level >= 2 else 0.01)
+            await asyncio.sleep(self.rng.uniform(sleep_base, sleep_base + 0.1))
 
     async def idle_while_loading(self, max_wait_seconds: float = 4.0):
         """Natural idle behavior while loading"""
-        start = asyncio.get_event_loop().time()
+        start = time.monotonic()
 
-        while asyncio.get_event_loop().time() - start < max_wait_seconds:
+        while time.monotonic() - start < max_wait_seconds:
             behavior = self.rng.choice([
                 lambda: self.micro_movement_while_waiting(600),
                 lambda: asyncio.sleep(self.rng.uniform(0.6, 1.4)),

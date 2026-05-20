@@ -4,6 +4,7 @@ Safe page and image scraping with human-like behavior
 """
 
 import asyncio
+import time
 import random
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -38,7 +39,7 @@ class StealthScraper:
         
         result = {
             "url": url,
-            "timestamp": asyncio.get_event_loop().time(),
+            "timestamp": time.monotonic(),
             "content": content
         }
         
