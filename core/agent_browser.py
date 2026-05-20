@@ -180,7 +180,19 @@ class AgentBrowser:
         self.debug_reporter: Optional[Any] = None
         self._launch_options: Dict[str, Any] = {}  # for rotation relaunch preservation (incl. debug/preset/region)
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None, use_pooled_context: Optional[bool] = None, debug: bool = False, preset: Optional[str] = None, region: Optional[str] = None):  # #57/#48/#47 + P2/P3 DX: debug/preset/region for health/status (#281)
+    async def launch(
+        self,
+        headless: bool = True,
+        slow_mo: int = 0,
+        headed: bool = False,
+        persona: Optional[Persona] = None,
+        light_mode: Optional[bool] = None,
+        use_pooled_context: Optional[bool] = None,
+        resume: bool = False,  # P2: lighter warm-up when resuming from saved sessions
+        debug: bool = False,   # P2/P3 DX: enable DebugReporter (#265)
+        preset: Optional[str] = None,  # P2/P3: platform preset (#288)
+        region: Optional[str] = None,  # P2/P3: TLS region override
+    ):  # combined: #57/#48/#47 pooled + P2 resume + #351 health/debug/preset/region
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -206,6 +218,7 @@ class AgentBrowser:
             use_pooled_context: If True, use shared _BrowserPool + new_context() for scalability (P1 #57/#48/#47).
                 Only effective when proxy rotation is not required (or handled by creating fresh pooled ctxs).
                 Default False for full backward compat + per-session disk persistence via launch_persistent_context.
+            resume: Opt-in P2: when True, forces light_mode for faster resume from saved sessions (less rigid warm-up).
             debug: Enable debug mode (#265) - populates DebugReporter for fingerprint/headers/patches.
             preset: Platform preset e.g. "linkedin_2026" (#288) - sets region, behavior, recovery tuning.
             region: TLS region override ("us", "eu", "japan", "korea", "global").
@@ -219,6 +232,11 @@ class AgentBrowser:
         if use_pooled_context is not None:
             self.use_pooled_context = use_pooled_context
             self._using_pool = False  # reset; will set true if we take the pooled path
+
+        if resume:
+            self._resume = True
+            if not getattr(self, "light_mode", False):
+                self.light_mode = True  # P2: resume=True forces light warm-up (less rigid on session restore)
 
         # Support documented STEALTH_* environment variables (#34)
         # These are set in Dockerfile / docker-compose and referenced in README.
@@ -250,9 +268,9 @@ class AgentBrowser:
         self._launch_options = {
             "headless": headless, "slow_mo": slow_mo, "headed": headed,
             "light_mode": light_mode, "use_pooled_context": use_pooled_context,
-            "debug": self.debug_mode, "preset": self.current_preset, "region": self.current_region
+            "debug": self.debug_mode, "preset": self.current_preset, "region": self.current_region,
+            "resume": resume,
         }
-
         # P1 #57/#48/#47: optional pooled path (shared browser + new_context) vs classic per-instance persistent
         extra_headers = get_extra_http_headers()
 
@@ -1204,7 +1222,8 @@ class AgentBrowser:
             # Default launch parameters — callers can still call launch() explicitly first
             await self.launch(
                 light_mode=getattr(self, "light_mode", None),
-                use_pooled_context=getattr(self, "use_pooled_context", None)  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+                use_pooled_context=getattr(self, "use_pooled_context", None),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+                resume=getattr(self, "_resume", False)  # P2 resume preservation
             )
         return self
 

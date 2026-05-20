@@ -22,6 +22,7 @@ Keep this file dependency-free (no Playwright, no internal cycles).
 """
 
 from dataclasses import dataclass, field, asdict
+import functools
 from typing import Dict, Any, Optional
 
 
@@ -145,8 +146,11 @@ PERSONAS: Dict[str, Persona] = {
 }
 
 
+@functools.lru_cache(maxsize=64)
 def get_persona(name: str = "default") -> Persona:
-    """Lookup by short name / alias. Always returns a valid Persona (never None)."""
+    """Lookup by short name / alias. Always returns a valid Persona (never None).
+    Cached (P2 perf) for repeated lookups during fleet launches / device profile use.
+    """
     if not name:
         return DEFAULT_PERSONA
     key = name.lower().strip().replace("-", "_").replace(" ", "_")

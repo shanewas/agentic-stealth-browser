@@ -4,6 +4,7 @@ Production-grade fingerprint spoofing + anti-detection
 """
 
 import random
+import functools
 from typing import Dict, Any
 
 class StealthConfig:
@@ -36,12 +37,14 @@ class StealthConfig:
     ]
 
 
+@functools.lru_cache(maxsize=128)
 def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None) -> str:
     """
     Returns a comprehensive stealth injection script.
     Designed to be injected via browser.add_init_script()
 
     fingerprint_seed: per-session stable seed for canvas/WebGL/audio noise (addresses #94 static patches)
+    Caching (#P2 perf): avoids re-building large script string on repeated launches / many browsers.
     """
     
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
@@ -287,8 +290,11 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     return script.strip()
 
 
+@functools.lru_cache(maxsize=8)
 def get_behavior_script() -> str:
-    """Returns script for human-like behavior helpers"""
+    """Returns script for human-like behavior helpers
+    Caching (P2 perf): script is static; cache prevents rebuild on multi-browser launches.
+    """
     return """
     // Human behavior simulation helpers (injected)
     window.__human = {
