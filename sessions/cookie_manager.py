@@ -3,7 +3,7 @@ Cookie & Session Resilience Module
 Handles cookie loading, validation, refresh, and multi-session management.
 Cleaned up for Phase 8: removed duplication with sessions/session_manager.py (#134),
 fixed broken SessionOrchestrator, added persist/resume + distributed bundle support (#236, #298).
-Phase 8 P1 #82: added optional at-rest encryption + integrity protection for cookie files (Fernet).
+Phase 8 P1 #82: added optional at-rest encryption + integrity protection for cookie files and session bundles (Fernet).
 """
 
 import json
@@ -42,6 +42,30 @@ class CookieManager:
             digest = hashlib.sha256(k).digest()
             fkey = base64.urlsafe_b64encode(digest)
             return Fernet(fkey)
+        except Exception:
+            return None
+
+    def encrypt_data(self, data: bytes, key: Optional[str] = None) -> Optional[bytes]:
+        """Basic encrypt helper in CookieManager (#82).
+        Provides encrypt API for save/load flows including bundles.
+        """
+        cipher = self._get_cipher(key)
+        if cipher is None:
+            return None
+        try:
+            return cipher.encrypt(data)
+        except Exception:
+            return None
+
+    def decrypt_data(self, token: bytes, key: Optional[str] = None) -> Optional[bytes]:
+        """Basic decrypt helper in CookieManager (#82).
+        Provides decrypt API for save/load flows including bundles.
+        """
+        cipher = self._get_cipher(key)
+        if cipher is None:
+            return None
+        try:
+            return cipher.decrypt(token)
         except Exception:
             return None
 
@@ -297,8 +321,13 @@ class CookieManager:
 
         return self.sessions[session_name]
 
-    async def export_session_bundle(self, session_name: str, bundle_path: str) -> Dict[str, Any]:
-        """Export full session + cookies for backup / transfer."""
+    async def export_session_bundle(self, session_name: str, bundle_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Export full session + cookies for backup / transfer.
+        Supports optional encryption_key for Fernet-encrypted bundles (#82 P1).
+        Backward compatible (plain when no key).
+        """
+        # light_mode integration note: in AgentBrowser light_mode perf paths, omit encryption_key
+        # for zero crypto overhead on bundles; encryption only on explicit key for security-sensitive exports.
         if session_name not in getattr(self, "sessions", {}):
             return {"status": "error", "message": "Session not found"}
 
@@ -328,22 +357,64 @@ class CookieManager:
                 pass
 
         Path(bundle_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(bundle_path, "w") as f:
-            json.dump(bundle, f, indent=2)
 
-        return {
-            "status": "success",
-            "bundle": bundle_path,
-            "cookies_count": len(bundle.get("cookies", []))
-        }
+        cipher = self._get_cipher(encryption_key)
+        try:
+            if cipher:
+                plain = json.dumps(bundle, separators=(",", ":")).encode("utf-8")
+                token = cipher.encrypt(plain)
+                payload = {
+                    "encrypted": True,
+                    "version": 1,
+                    "data": token.decode("utf-8"),
+                    "meta": {"exported_at": bundle.get("exported_at"), "bundle_for": session_name},
+                }
+                with open(bundle_path, "w") as f:
+                    json.dump(payload, f, indent=2)
+                return {
+                    "status": "success",
+                    "bundle": bundle_path,
+                    "cookies_count": len(bundle.get("cookies", [])),
+                    "encrypted": True,
+                }
+            else:
+                with open(bundle_path, "w") as f:
+                    json.dump(bundle, f, indent=2)
+                return {
+                    "status": "success",
+                    "bundle": bundle_path,
+                    "cookies_count": len(bundle.get("cookies", [])),
+                }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
-    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None) -> Dict[str, Any]:
-        """Import a bundle and create/resume session."""
+    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Import a bundle and create/resume session.
+        Supports optional decryption when encryption_key provided (#82 P1).
+        Backward compatible with plain bundles.
+        """
         if not Path(bundle_path).exists():
             return {"status": "error", "message": "Bundle not found"}
 
-        with open(bundle_path) as f:
-            bundle = json.load(f)
+        try:
+            with open(bundle_path) as f:
+                data = json.load(f)
+
+            bundle = data
+            cipher = self._get_cipher(encryption_key)
+            if isinstance(data, dict) and data.get("encrypted") and cipher:
+                try:
+                    token = data["data"].encode()
+                    decrypted = cipher.decrypt(token)
+                    bundle = json.loads(decrypted)
+                except InvalidToken:
+                    return {"status": "error", "message": "Invalid encryption key or corrupted bundle file"}
+                except Exception as e:
+                    return {"status": "error", "message": f"Bundle decryption failed: {e}"}
+            elif isinstance(data, dict) and data.get("encrypted"):
+                return {"status": "error", "message": "Encrypted bundle but no encryption_key provided"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
         meta = bundle.get("meta", {})
         name = target_session_name or meta.get("name", f"imported-{datetime.now().strftime('%Y%m%d%H%M')}")
@@ -398,13 +469,13 @@ class SessionOrchestrator:
             await self.cm.load_cookies(cookies_path)
         return {"status": "started", "session": name}
 
-    async def export_session_bundle(self, session_name: str, bundle_path: str) -> Dict[str, Any]:
-        """Delegate for full MCP test / agent contract."""
-        return await self.cm.export_session_bundle(session_name, bundle_path)
+    async def export_session_bundle(self, session_name: str, bundle_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Delegate for full MCP test / agent contract. Forwards encryption_key for #82 bundle encryption."""
+        return await self.cm.export_session_bundle(session_name, bundle_path, encryption_key)
 
-    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None) -> Dict[str, Any]:
-        """Delegate for full MCP test / agent contract."""
-        return await self.cm.import_session_bundle(bundle_path, target_session_name)
+    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Delegate for full MCP test / agent contract. Forwards encryption_key for #82 bundle encryption."""
+        return await self.cm.import_session_bundle(bundle_path, target_session_name, encryption_key)
 
     async def export_all(self, out_dir: str) -> Dict[str, Any]:
         results = {}
