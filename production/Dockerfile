@@ -1,6 +1,9 @@
 # Production Docker image for Agentic Stealth Browser
 FROM python:3.12-slim
 
+# Create non-root user (security)
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
 WORKDIR /app
 
 # Install system dependencies
@@ -22,6 +25,13 @@ COPY . /app
 ENV PYTHONPATH=/app
 ENV STEALTH_HEADLESS=true
 ENV STEALTH_REGION=japan
+
+# Healthcheck (production requirement)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD python -c "import asyncio; from core.agent_browser import AgentBrowser; print('ok')" || exit 1
+
+# Run as non-root
+USER appuser
 
 # Default command
 CMD ["python", "-c", "print('Agentic Stealth Browser ready')"]
