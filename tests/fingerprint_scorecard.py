@@ -167,7 +167,7 @@ class FingerprintScorecard:
             battery = await self.page.evaluate('''
                 () => navigator.getBattery ? "available" : "not_available"
             ''')
-            return {"test": "battery_api", "value": battery, "spoofed": battery == "not_available"}
+            return {"test": "battery_api", "value": battery, "spoofed": battery != "not_available"}  # #103: now spoofed with realistic fake BatteryManager (presence + level)
         except Exception as e:
             return {"test": "battery_api", "error": str(e)}
 
@@ -188,7 +188,7 @@ class FingerprintScorecard:
                     });
                 }
             ''')
-            return {"test": "speech_voices", "value": voices, "spoofed": voices == 0 or voices < 5}
+            return {"test": "speech_voices", "value": voices, "spoofed": voices >= 5}  # #103: now spoofed with realistic 5+ common voices list (stable)
         except Exception as e:
             return {"test": "speech_voices", "error": str(e)}
 
@@ -198,7 +198,7 @@ class FingerprintScorecard:
             devices = await self.page.evaluate('''
                 () => navigator.mediaDevices ? navigator.mediaDevices.enumerateDevices().then(d => d.length) : 0
             ''')
-            return {"test": "media_devices", "value": devices, "spoofed": devices == 0 or devices < 3}
+            return {"test": "media_devices", "value": devices, "spoofed": devices >= 3}  # #103: now spoofed with 3 consistent fake audio devices (no video cam exposure)
         except Exception as e:
             return {"test": "media_devices", "error": str(e)}
 

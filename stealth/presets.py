@@ -62,7 +62,7 @@ LINKEDIN_2026 = PlatformPreset(
         "3. Never rapid-fire profile views — space with human.think(8-15s) + random idle.\n"
         "4. Use US East Coast TLS + locale for professional US personas. Rotate accounts every 20-30 actions.\n"
         "5. If 'unusual activity' appears, immediately trigger recovery with proxy/session rotation + 5+ min backoff.\n"
-        "6. Viewport 1366x768 + standard Windows Chrome fingerprint matches most office workers."
+        "6. Viewport now persona-varied (e.g. 1920x1080 US / 1440x900 EU) + screen/DPR/orient spoof for #124 #198. Matches real desktop variety."
     ),
     extra_patches=["linkedin_safe_scroll", "conservative_mouse_jitter"]
 )

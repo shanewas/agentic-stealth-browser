@@ -74,20 +74,22 @@ def check_stealth_compatibility() -> Dict[str, Any]:
 
 
 # lru_cache removed (hardware dict unhashable; fp_seed varies per session so hit rate low anyway)
-def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None, hardware: Dict[str, Any] = None) -> str:
+def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None, hardware: Dict[str, Any] = None, screen: Dict[str, Any] = None) -> str:
     """
     Returns a comprehensive stealth injection script.
     Designed to be injected via browser.add_init_script()
 
     fingerprint_seed: per-session stable seed for canvas/WebGL/audio noise (addresses #94 static patches)
     hardware: dict from persona.device.get_hardware_fingerprint() for #255 correlation
+    screen: dict from persona.device.get_screen_profile() for #124 viewport realism + #198 screen/DPR/orient
     (no lru due to variable hardware; build is cheap)
     """
     
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     hw = hardware or {"hardwareConcurrency": 8, "deviceMemory": 8}
+    scr = screen or {"width": 1920, "height": 1080, "availWidth": 1920, "availHeight": 1055, "colorDepth": 24, "pixelDepth": 24, "devicePixelRatio": 1.0, "orientation": "landscape-primary"}
     script = """
-    // === Advanced Agentic Stealth v0.4-p2 (canvas/Offscreen/WebGL2/font+measure #271 #95, hardware #255, __stealth marker, #279 compat) ===
+    // === Advanced Agentic Stealth v0.4-p2-cluster (battery/speech/media #103, audio osc #162, viewport/screen/DPR/orient #124 #198, fonts #191, TLS docs #114; builds on #352) ===
     
     // Core anti-detection (improved for #138)
     Object.defineProperty(navigator, 'webdriver', {
@@ -113,13 +115,40 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     Object.defineProperty(navigator, 'deviceMemory', { get: () => __DEV_MEM__ });
     Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
     
-    // P2: __stealth marker + realistic font list (for #271 measureText correlation + #279 detection)
+    // Battery, SpeechSynthesis, MediaDevices spoofing (#103) - realistic stable per-session/persona values
+    // getBattery returns fake BatteryManager; speech provides common real voices; mediaDevices returns consistent fake audio devices (no video cam to limit exposure)
+    navigator.getBattery = navigator.getBattery || (() => Promise.resolve({ charging: true, chargingTime: null, dischargingTime: null, level: 0.82 + (Math.random()*0.13), addEventListener:()=>{}, removeEventListener:()=>{} }));
+    (function spoofSpeech() {
+      const voices = [
+        {voiceURI:"Alex",name:"Alex",lang:"en-US",localService:true,default:true},
+        {voiceURI:"Samantha",name:"Samantha",lang:"en-US",localService:true,default:false},
+        {voiceURI:"Daniel",name:"Daniel",lang:"en-GB",localService:true,default:false},
+        {voiceURI:"Karen",name:"Karen",lang:"en-AU",localService:true,default:false},
+        {voiceURI:"Moira",name:"Moira",lang:"en-IE",localService:true,default:false}
+      ];
+      const synth = window.speechSynthesis || {};
+      synth.getVoices = () => voices;
+      if (typeof synth.onvoiceschanged === "function") { try { setTimeout(() => synth.onvoiceschanged(new Event("voiceschanged")), 5); } catch(e){} }
+      window.speechSynthesis = synth;
+    })();
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      const fakeDevs = [
+        {deviceId:"def1",kind:"audioinput",label:"Default - Microphone (Realtek High Definition Audio)",groupId:"g1"},
+        {deviceId:"def2",kind:"audiooutput",label:"Default - Speakers (Realtek High Definition Audio)",groupId:"g1"},
+        {deviceId:"com1",kind:"audioinput",label:"Communications - Microphone",groupId:"g2"}
+      ];
+      navigator.mediaDevices.enumerateDevices = () => Promise.resolve(fakeDevs);
+      const _origGUM = navigator.mediaDevices.getUserMedia;
+      navigator.mediaDevices.getUserMedia = async (c) => { if (c && c.video) throw new DOMException("Permission denied","NotAllowedError"); return _origGUM ? _origGUM.call(navigator.mediaDevices, c) : {getTracks:()=>[]}; };
+    }
+    
+    // P2: __stealth marker + realistic font list (for #271 measureText correlation + #279 detection; enhanced #191)
     // List chosen to match common Windows desktop; measurements jittered consistently via font-aware seed.
     // Full document.fonts replacement avoided (risk of side-effects); exposed list + patched measure suffice for correlation.
     window.__stealth = window.__stealth || {
-        version: "0.4-p2",
-        patched: ["webdriver","canvas","offscreen","webgl","webgl2","measureText","hardware","webrtc","fonts"],
-        fonts: ["Arial","Helvetica","Times New Roman","Courier New","Verdana","Georgia","Palatino Linotype","Garamond","Book Antiqua","Comic Sans MS","Trebuchet MS","Arial Black","Impact","Lucida Console","Segoe UI","Calibri","Cambria","Consolas","Tahoma"],
+        version: "0.4-p2-cluster",
+        patched: ["webdriver","canvas","offscreen","webgl","webgl2","measureText","hardware","webrtc","fonts","battery","speechSynthesis","mediaDevices","audio","screen","dpr","orientation"],
+        fonts: ["Arial","Helvetica","Times New Roman","Courier New","Verdana","Georgia","Palatino Linotype","Garamond","Book Antiqua","Comic Sans MS","Trebuchet MS","Arial Black","Impact","Lucida Console","Segoe UI","Calibri","Cambria","Consolas","Tahoma","Microsoft Sans Serif","Lucida Sans Unicode"],
         playwright_compat: "baseline-124+",
         ts: Date.now()
     };
@@ -240,7 +269,7 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
 
     })("__DYNAMIC_SEED_PLACEHOLDER__");
     // === End improved canvas patch ===
-    // AudioContext noise
+    // AudioContext noise + oscillator + sampleRate (#162 full coverage; builds on prior partial)
     const AudioC = window.AudioContext || window.webkitAudioContext;
     if (AudioC) {
         const origCreate = AudioC.prototype.createAnalyser;
@@ -256,6 +285,24 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
             };
             return a;
         };
+        // sampleRate fixed realistic (common 44100 defeats sampleRate fp)
+        try {
+            Object.defineProperty(AudioC.prototype, "sampleRate", { get: function() { return 44100; }, configurable: true });
+        } catch (e) {}
+        // basic oscillator spoof for frequency-based fingerprinting
+        const origOsc = AudioC.prototype.createOscillator;
+        if (origOsc) {
+            AudioC.prototype.createOscillator = function() {
+                const o = origOsc.call(this);
+                try {
+                    const f = o.frequency;
+                    if (f) {
+                        Object.defineProperty(f, "value", { get: () => 440 + ((Math.random() - 0.5) * 2), configurable: true });
+                    }
+                } catch (e) {}
+                return o;
+            };
+        }
     }
     
     // Permissions
@@ -325,9 +372,15 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
         }
     })();
     
-    // Screen consistency
-    Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
-    Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+    // Screen / viewport / DPR / orientation consistency (#124 #198) - injected from persona.screen for realistic variation
+    Object.defineProperty(screen, 'width', { get: () => __SCREEN_W__ });
+    Object.defineProperty(screen, 'height', { get: () => __SCREEN_H__ });
+    Object.defineProperty(screen, 'availWidth', { get: () => __SCREEN_AW__ });
+    Object.defineProperty(screen, 'availHeight', { get: () => __SCREEN_AH__ });
+    Object.defineProperty(screen, 'colorDepth', { get: () => __SCREEN_CD__ });
+    Object.defineProperty(screen, 'pixelDepth', { get: () => __SCREEN_PD__ });
+    Object.defineProperty(window, 'devicePixelRatio', { get: () => __DPR__ });
+    Object.defineProperty(screen, 'orientation', { get: () => ({ type: "__ORIENT__", angle: 0, onchange: null, addEventListener: () => {}, removeEventListener: () => {} }) });
     
     // === End Stealth ===
     """
@@ -338,6 +391,15 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     # P2: inject persona-correlated hardware (#255) + update placeholders
     script = script.replace("__HW_CONC__", str(hw.get("hardwareConcurrency", 8)))
     script = script.replace("__DEV_MEM__", str(hw.get("deviceMemory", 8)))
+    # #124 #198: screen/vp/DPR/orient placeholders from persona (realistic per-persona variety)
+    script = script.replace("__SCREEN_W__", str(scr.get("width", 1920)))
+    script = script.replace("__SCREEN_H__", str(scr.get("height", 1080)))
+    script = script.replace("__SCREEN_AW__", str(scr.get("availWidth", 1920)))
+    script = script.replace("__SCREEN_AH__", str(scr.get("availHeight", 1055)))
+    script = script.replace("__SCREEN_CD__", str(scr.get("colorDepth", 24)))
+    script = script.replace("__SCREEN_PD__", str(scr.get("pixelDepth", 24)))
+    script = script.replace("__DPR__", str(scr.get("devicePixelRatio", 1.0)))
+    script = script.replace("__ORIENT__", scr.get("orientation", "landscape-primary"))
     # also update any old hardcoded if present
     import re as _re
     script = _re.sub(r'\}\)\("agentic-[^"]*seed[^"]*"\);', '})("' + seed + '");', script)
