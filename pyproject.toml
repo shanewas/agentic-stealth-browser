@@ -3,7 +3,7 @@ name = "agentic-stealth-browser"
 version = "0.8.0-phase8"
 description = "Stealth browser automation"
 requires-python = ">=3.10"
-dependencies = ["playwright", "aiohttp"]
+dependencies = ["playwright", "aiohttp", "cryptography"]
 [project.scripts]
 stealth-browser = "production.cli:main"
 [tool.setuptools.packages.find]
