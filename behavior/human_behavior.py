@@ -18,8 +18,9 @@ class HumanBehavior:
         self.page = page
         self.rng = random.Random()
 
-        # Python-side last known mouse position for reliable move chaining (fixes tracking bug where window.mouseX was never updated)
-        # Small, high-impact realism fix for mouse paths starting from last instead of always ~center
+        # Authoritative Python-side last mouse pos (with JS sync) for reliable chaining.
+        # Every gesture (move, click, micro, correction) starts from previous end point.
+        # Combined with initialize + _record + tracker in stealth: fixes #24 #101 completely.
         self.last_mouse_pos = (self.rng.randint(450, 850), self.rng.randint(280, 620))
 
         # Perf/ops: configurable realism to reduce CDP chatter + tiny sleeps in CI or low-resource envs (#258 #282 #123 #274)
@@ -27,14 +28,54 @@ class HumanBehavior:
         env_r = (os.getenv("AGENTIC_STEALTH_REALISM") or os.getenv("STEALTH_REALISM") or "full").lower().strip()
         self.realism_level = {"off": 0, "light": 1, "medium": 2, "full": 3}.get(env_r, 3)
 
+    async def _record_mouse_position(self, x: float, y: float) -> None:
+        """Update Python authoritative last pos + sync to JS window.mouseX/Y.
+        This + stealth init + calls after every move fixes continuity (#24 #101).
+        Cursor no longer resets; gestures chain from real previous end point.
+        """
+        self.last_mouse_pos = (int(round(x)), int(round(y)))
+        try:
+            await self.page.evaluate(
+                f"window.mouseX = {self.last_mouse_pos[0]}; window.mouseY = {self.last_mouse_pos[1]};"
+            )
+        except Exception:
+            # JS sync best-effort (page may be navigating etc); Python state authoritative
+            pass
+
+    async def initialize_mouse_tracker(self) -> None:
+        """Call after page ready (e.g. in launch) to seed JS tracker from our Python last_pos.
+        Also installs a passive mousemove listener so real events (if any) keep JS in sync.
+        """
+        x, y = self.last_mouse_pos
+        try:
+            await self.page.evaluate(f"""
+                (function() {{
+                    if (typeof window.mouseX === 'undefined' || !window.mouseX) window.mouseX = {x};
+                    if (typeof window.mouseY === 'undefined' || !window.mouseY) window.mouseY = {y};
+                    if (!window._mouseTrackerInstalled) {{
+                        window._mouseTrackerInstalled = true;
+                        document.addEventListener('mousemove', function(e) {{
+                            window.mouseX = e.clientX;
+                            window.mouseY = e.clientY;
+                        }}, {{passive: true}});
+                    }}
+                }})();
+            """)
+        except Exception:
+            pass
+
     async def think(self, min_ms: int = 400, max_ms: int = 1400):
         """Simulate thinking / reading pause"""
         delay = self.rng.uniform(min_ms, max_ms) / 1000
         await asyncio.sleep(delay)
 
     async def type_like_human(self, selector: str, text: str, mistake_rate: float = 0.025):
-        """Type with realistic speed, variable rhythm, and occasional corrections"""
-        await self.page.click(selector)
+        """Type with realistic speed, variable rhythm, and occasional corrections.
+        Uses human_click for natural mouse approach to input (continuity + realism).
+        """
+        # Use human_click (which does tracked move + click) instead of direct page.click
+        # This ensures mouse pos updated and no teleport jump (#24 #101 continuity)
+        await self.human_click(selector)
         await asyncio.sleep(self.rng.uniform(0.08, 0.25))
 
         for i, char in enumerate(text):
@@ -96,7 +137,8 @@ class HumanBehavior:
 
     async def move_mouse_naturally(self, x: int, y: int, speed: str = "normal"):
         """Move mouse using improved Bézier curves with natural acceleration and micro-corrections.
-        Now uses internal last_mouse_pos for reliable chaining (major mouse realism win).
+        Uses authoritative self.last_mouse_pos + JS sync for true continuity across gestures.
+        No more reset on every call (#24, #101 fixed).
         """
         # Prefer tracked Python pos (reliable); fallback to JS or default
         current_x, current_y = self.last_mouse_pos
@@ -132,13 +174,15 @@ class HumanBehavior:
             final_x = x + self.rng.randint(-4, 4)
             final_y = y + self.rng.randint(-3, 3)
             await self.page.mouse.move(final_x, final_y)
-            # update tracked
-            self.last_mouse_pos = (final_x, final_y)
+            await self._record_mouse_position(final_x, final_y)
         else:
-            self.last_mouse_pos = (x, y)
+            await self._record_mouse_position(x, y)
 
     async def human_click(self, selector: str = None, x: int = None, y: int = None):
-        """Human-like click"""
+        """Human-like click. Always maintains mouse position continuity (no teleport to 0,0).
+        Uses tracked pos for bare clicks; records after action (#24 #101).
+        """
+        did_move = False
         if selector:
             try:
                 box = await self.page.query_selector(selector)
@@ -148,19 +192,29 @@ class HumanBehavior:
                         target_x = box_info["x"] + box_info["width"] * self.rng.uniform(0.2, 0.8)
                         target_y = box_info["y"] + box_info["height"] * self.rng.uniform(0.2, 0.8)
                         await self.move_mouse_naturally(int(target_x), int(target_y))
+                        did_move = True
             except Exception as e:
                 print(f"[HumanBehavior] non-fatal error (was silent): {e}")
         elif x is not None and y is not None:
             await self.move_mouse_naturally(x, y)
+            did_move = True
 
         await asyncio.sleep(self.rng.uniform(0.04, 0.12))
 
+        # Click at/near current tracked position (never hard 0,0 which broke continuity)
+        cx, cy = self.last_mouse_pos
         if self.rng.random() < 0.08:
-            await self.page.mouse.click(0, 0)
+            # occasional small natural offset for click variety (still continuous)
+            click_x = cx + self.rng.randint(-4, 4)
+            click_y = cy + self.rng.randint(-3, 3)
+            await self.page.mouse.click(click_x, click_y)
+            await self._record_mouse_position(click_x, click_y)
         else:
             await self.page.mouse.down()
             await asyncio.sleep(self.rng.uniform(0.03, 0.08))
             await self.page.mouse.up()
+            # position unchanged; ensure recorded (in case first bare click)
+            await self._record_mouse_position(cx, cy)
 
     async def scroll_naturally(self, total_pixels: int = 400, direction: str = "down"):
         """Scroll in small, human-like increments with occasional re-read backticks (realism)."""
@@ -288,7 +342,7 @@ class HumanBehavior:
                 break
 
     async def micro_movement_while_waiting(self, duration_ms: int = 800):
-        """Small, natural mouse movements while waiting. Now updates tracked pos."""
+        """Small, natural mouse movements while waiting. Uses + updates authoritative tracked pos + JS sync."""
         end_time = time.monotonic() + (duration_ms / 1000)
 
         while time.monotonic() < end_time:
@@ -296,12 +350,21 @@ class HumanBehavior:
                 dx = self.rng.randint(-25, 25)
                 dy = self.rng.randint(-18, 18)
 
-                current = await self.page.evaluate("() => ({x: window.mouseX || 600, y: window.mouseY || 400})")
-                new_x = current.get("x", 600) + dx
-                new_y = current.get("y", 400) + dy
+                # Prefer Python tracked for continuity; fallback JS or default
+                cx, cy = self.last_mouse_pos
+                try:
+                    jpos = await self.page.evaluate("() => ({x: window.mouseX || 0, y: window.mouseY || 0})")
+                    jx, jy = jpos.get("x", 0), jpos.get("y", 0)
+                    if jx > 50 and jy > 50:
+                        cx, cy = jx, jy
+                except Exception:
+                    pass
+
+                new_x = cx + dx
+                new_y = cy + dy
 
                 await self.page.mouse.move(new_x, new_y)
-                self.last_mouse_pos = (new_x, new_y)
+                await self._record_mouse_position(new_x, new_y)
             except Exception as e:
                 print(f"[HumanBehavior] non-fatal error (was silent): {e}")
 
@@ -333,10 +396,12 @@ class HumanBehavior:
         await asyncio.sleep(self.rng.uniform(0.05, 0.15))
         if self.rng.random() < 0.15 and self.realism_level >= 2:
             try:
-                await self.page.mouse.move(
-                    (x or 500) + self.rng.randint(-30, 30),
-                    (y or 400) + self.rng.randint(-20, 20)
-                )
+                # Use tracked pos + small correction move; record for continuity
+                base_x, base_y = self.last_mouse_pos
+                corr_x = base_x + self.rng.randint(-30, 30)
+                corr_y = base_y + self.rng.randint(-20, 20)
+                await self.page.mouse.move(corr_x, corr_y)
+                await self._record_mouse_position(corr_x, corr_y)
                 await asyncio.sleep(0.08)
                 if self.rng.random() < 0.4:
                     await self.page.keyboard.press("Escape")
@@ -377,22 +442,38 @@ class HumanBehavior:
         await self.think(600, 1400)
 
     async def mobile_in_spirit_interaction(self, action: str = "tap"):
-        """Approximate small-screen / mobile-like interaction patterns even on desktop (#291)"""
+        """Approximate small-screen / mobile-like interaction patterns even on desktop (#291).
+        Now uses and updates tracked mouse pos for continuity.
+        """
         if action == "tap":
             await asyncio.sleep(self.rng.uniform(0.15, 0.35))
             try:
-                pos = await self.page.evaluate("() => ({x: window.mouseX||500, y: window.mouseY||400})")
-                await self.page.mouse.move(
-                    pos.get("x", 500) + self.rng.randint(-12, 12),
-                    pos.get("y", 400) + self.rng.randint(-8, 8)
-                )
+                # Prefer tracked last pos (continuity) over stale JS default
+                base_x, base_y = self.last_mouse_pos
+                try:
+                    jpos = await self.page.evaluate("() => ({x: window.mouseX||0, y: window.mouseY||0})")
+                    jx = jpos.get("x", 0)
+                    jy = jpos.get("y", 0)
+                    if jx > 50 and jy > 50:
+                        base_x, base_y = jx, jy
+                except Exception:
+                    pass
+                tap_x = base_x + self.rng.randint(-12, 12)
+                tap_y = base_y + self.rng.randint(-8, 8)
+                await self.page.mouse.move(tap_x, tap_y)
+                await self._record_mouse_position(tap_x, tap_y)
                 await self.page.mouse.down()
                 await asyncio.sleep(0.08)
                 await self.page.mouse.up()
                 if self.rng.random() < 0.2:
                     await asyncio.sleep(0.12)
+                    tap2_x = tap_x + self.rng.randint(-5, 5)
+                    tap2_y = tap_y + self.rng.randint(-3, 3)
+                    await self.page.mouse.move(tap2_x, tap2_y)
+                    await self._record_mouse_position(tap2_x, tap2_y)
                     await self.page.mouse.down()
                     await asyncio.sleep(0.05)
                     await self.page.mouse.up()
+                    await self._record_mouse_position(tap2_x, tap2_y)
             except Exception:
                 pass

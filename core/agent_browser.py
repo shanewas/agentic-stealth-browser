@@ -106,6 +106,17 @@ class AgentBrowser:
         if light_mode is not None:
             self.light_mode = light_mode
 
+        # Support documented STEALTH_* environment variables (#34)
+        # These are set in Dockerfile / docker-compose and referenced in README.
+        env_headless = os.getenv("STEALTH_HEADLESS")
+        if env_headless is not None:
+            headless = str(env_headless).lower() not in ("0", "false", "no", "")
+
+        env_region = os.getenv("STEALTH_REGION")
+        if env_region:
+            # TLS manager will be (re)created below; store for selection
+            self._env_region = env_region.lower()
+
         pw = await async_playwright().start()
         
         user_data = Path(self.session["user_data_dir"])
