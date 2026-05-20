@@ -107,7 +107,7 @@
 **Next in stealth:** WebGL extensions (#218), TLS validation (#293 etc), fonts, more APIs.
 
 **Branch:** `fix/stealth-canvas-offscreen-webgl2-94-262-210`
-**Status:** Ready for commit + PR (Closes #94, #262, #210)
+**Status:** PR #304 open (https://github.com/shanewas/agentic-stealth-browser/pull/304)
 
 ### Overall Stealth Backlog
 52 open stealth-labeled issues. Grouping strategy:
@@ -119,3 +119,8 @@
 - Self-detection + maintenance
 
 Will open first PR after this update. Will batch 3-5 PRs before reporting final.
+
+### Batch 2 (quick follow-up): TLS documentation + basic target validation (#114, #246, #293)
+**Branch:** fix/stealth-tls-docs-validation-114-246-293
+**Changes:** Enhanced module docs explicitly calling out limitations (no real ClientHello, small regional diffs). Added `validate_profile_for_target()` helper that warns (via audit log) on obvious region/target mismatches. Small safe slice.
+**Status:** Committing now, will push + PR shortly.
