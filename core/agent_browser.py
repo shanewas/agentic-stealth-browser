@@ -10,7 +10,7 @@ import os  # for env vars in launch (also used by other methods)
 from pathlib import Path
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse
-from playwright.async_api import async_playwright, BrowserContext
+from playwright.async_api import async_playwright, BrowserContext, Browser
 
 from stealth.advanced_stealth import get_stealth_script, StealthConfig
 from stealth.tls_fingerprint import get_tls_manager
@@ -31,6 +31,93 @@ from production.metrics import metrics, MetricsCollector
 from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
 
 
+class _BrowserPool:
+    """
+    Internal minimal optional shared Browser + Context pool (P1 #57/#48/#47).
+    Opt-in via AgentBrowser(use_pooled_context=True) or launch(..., use_pooled_context=True).
+
+    Reuses ONE Playwright Browser process + cheap browser.new_context() calls.
+    Avoids repeated launch_persistent_context (expensive: full Chromium spawn + profile + stealth injection per instance).
+
+    - When proxy rotation NOT needed (or even when it is, for speed): massive win on startup/memory for 10-50+ concurrent agents.
+    - Pooled contexts are lightweight and isolated (own cookies/storage/proxy/viewport per context).
+    - NO automatic disk user_data persistence (unlike launch_persistent_context).
+      Use cookie load/save, storage_state(), or stick with default (pooled=False) for full profile persistence.
+    - Rotation paths in recovery still work: they release old ctx and obtain fresh one from pool.
+    - Shared browser stays alive until explicit pool shutdown or process exit.
+    - Fully backward compatible: default=False preserves exact prior behavior and persistence.
+
+    Single-process singleton pool (simple, no extra deps).
+    """
+    _instance: Optional["_BrowserPool"] = None
+
+    def __new__(cls) -> "_BrowserPool":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._pw = None
+            cls._instance._browser: Optional[Browser] = None
+            cls._instance._lock = asyncio.Lock()
+            cls._instance._active_contexts: set = set()
+            cls._instance._headless = True
+            cls._instance._launch_args: list = []
+        return cls._instance
+
+    async def ensure_browser(self, headless: bool = True, args: Optional[list] = None) -> Browser:
+        async with self._lock:
+            if self._browser is None:
+                if self._pw is None:
+                    self._pw = await async_playwright().start()
+                self._headless = headless
+                self._launch_args = args or []
+                self._browser = await self._pw.chromium.launch(
+                    headless=headless,
+                    args=self._launch_args,
+                    # proxy not at browser level; per-context below
+                )
+            return self._browser
+
+    async def create_context(self, **context_options) -> BrowserContext:
+        """Create (or conceptually obtain) a fresh isolated context on the shared browser."""
+        browser = await self.ensure_browser(
+            headless=getattr(self, "_headless", True),
+            args=getattr(self, "_launch_args", None),
+        )
+        # new_context is the cheap/fast path (vs launch_persistent_context)
+        ctx = await browser.new_context(**context_options)
+        self._active_contexts.add(id(ctx))  # use id since Context not hashable easily
+        # store weak? for simplicity track by id
+        return ctx
+
+    async def release_context(self, ctx: BrowserContext) -> None:
+        """Release a context back (close it; browser stays for reuse)."""
+        cid = id(ctx)
+        if cid in self._active_contexts:
+            self._active_contexts.discard(cid)
+        try:
+            await ctx.close()
+        except Exception:
+            pass
+
+    async def shutdown(self) -> None:
+        """Full shutdown of shared browser + playwright (call on app exit if using pool)."""
+        async with self._lock:
+            # close any remaining
+            for cid in list(self._active_contexts):
+                self._active_contexts.discard(cid)
+            if self._browser:
+                try:
+                    await self._browser.close()
+                except Exception:
+                    pass
+                self._browser = None
+            if self._pw:
+                try:
+                    await self._pw.stop()
+                except Exception:
+                    pass
+                self._pw = None
+
+
 class AgentBrowser:
     """
     High-undetectability browser for autonomous agents.
@@ -39,6 +126,10 @@ class AgentBrowser:
     P1 #79/#87: Each instance now carries its own rate_limiter and metrics (isolated by default).
     Pass shared AccountRateLimiter/MetricsCollector to constructor for coordinated "fleet" use.
     light_mode (#174/#113): reduces launch/warm-up cost/latency when True (skips heavy warm-ups + auto light downgrade in warm_up_before_work).
+
+    Scalability P1 #57/#48/#47: Optional use_pooled_context=True reuses a shared Browser process + cheap new_context()
+    instead of repeated launch_persistent_context. Ideal when proxy/session rotation is not (or rarely) needed.
+    Backward compatible: default False keeps full per-instance persistent contexts + disk profiles.
     """
 
     def __init__(
@@ -49,6 +140,7 @@ class AgentBrowser:
         rate_limiter: Optional[AccountRateLimiter] = None,
         metrics_collector: Optional[MetricsCollector] = None,
         light_mode: bool = False,
+        use_pooled_context: bool = False,  # P1 #57/#48/#47: opt-in for shared Browser + new_context reuse (when rotation not required)
     ):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
@@ -62,7 +154,7 @@ class AgentBrowser:
         self.cookie_manager = None
         self.session_orchestrator = None
         self.context: Optional[BrowserContext] = None
-        self.browser = None   # Playwright BrowserContext (persistent) — see launch() docstring
+        self.browser = None   # Playwright BrowserContext (persistent or pooled) — see launch() docstring
         self.page = None      # Playwright Page (main) — use this for most page actions
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
         self.persona = persona or DEFAULT_PERSONA  # Persona foundation integration
@@ -75,8 +167,11 @@ class AgentBrowser:
         self.metrics: MetricsCollector = metrics_collector or MetricsCollector()
         self.account_id: Optional[str] = None
         self.light_mode: bool = light_mode  # #174/#113/#92/#84 perf P1 final closer: light_mode now auto-wires to recovery so True reduces expensive content() calls + heavy detection
+        self.use_pooled_context: bool = use_pooled_context  # #57/#48/#47 scalability: when True, launch uses shared browser pool instead of per-instance launch_persistent_context
+        self._using_pool: bool = False
+        self._pooled_ctx_id: Optional[int] = None  # track for release
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None):
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None, use_pooled_context: Optional[bool] = None):  # #57/#48/#47 pooled scalability opt-in (also overridable here)
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -98,6 +193,10 @@ class AgentBrowser:
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
             light_mode: Enable light mode (#174/#113) to reduce launch/warm-up cost/latency (skips heavy warm-ups + auto-downgrades warm_up_before_work).
+            persona: Override persona.
+            use_pooled_context: If True, use shared _BrowserPool + new_context() for scalability (P1 #57/#48/#47).
+                Only effective when proxy rotation is not required (or handled by creating fresh pooled ctxs).
+                Default False for full backward compat + per-session disk persistence via launch_persistent_context.
             Proxy support: configure via self.proxy_manager.create_decodo_config(...) *before* calling launch()
             (or pass preconfigured ProxyManager in advanced usage); it is now wired into launch_persistent_context (#14, #29).
         """
@@ -105,6 +204,9 @@ class AgentBrowser:
             self.persona = persona
         if light_mode is not None:
             self.light_mode = light_mode
+        if use_pooled_context is not None:
+            self.use_pooled_context = use_pooled_context
+            self._using_pool = False  # reset; will set true if we take the pooled path
 
         # Support documented STEALTH_* environment variables (#34)
         # These are set in Dockerfile / docker-compose and referenced in README.
@@ -117,11 +219,7 @@ class AgentBrowser:
             # TLS manager will be (re)created below; store for selection
             self._env_region = env_region.lower()
 
-        pw = await async_playwright().start()
-        
-        user_data = Path(self.session["user_data_dir"])
-        user_data.mkdir(parents=True, exist_ok=True)
-        
+        # P1 #57/#48/#47: optional pooled path (shared browser + new_context) vs classic per-instance persistent
         extra_headers = get_extra_http_headers()
 
         # TLS Fingerprint spoofing (region-aware)
@@ -150,18 +248,41 @@ class AgentBrowser:
         proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
         launch_proxy = proxy_args if proxy_args else None
 
-        self.browser = await pw.chromium.launch_persistent_context(
-            user_data_dir=str(user_data),
-            headless=not headed if headed else headless,
-            slow_mo=slow_mo,
-            viewport=vp,
-            user_agent=ua,
-            locale=loc,
-            timezone_id=tz,
-            extra_http_headers=extra_headers,
-            args=all_args,
-            proxy=launch_proxy,
-        )
+        self._using_pool = bool(getattr(self, "use_pooled_context", False))
+        if self._using_pool:
+            # Scalability path: single shared Chromium + many cheap contexts. No per-instance user_data persistence.
+            user_data = Path(self.session["user_data_dir"])
+            user_data.mkdir(parents=True, exist_ok=True)  # keep dir for meta/cookies consistency
+            pool = _BrowserPool()
+            self._pool = pool
+            context_opts = {
+                "viewport": vp,
+                "user_agent": ua,
+                "locale": loc,
+                "timezone_id": tz,
+                "extra_http_headers": extra_headers,
+                "proxy": launch_proxy,
+                # browser-level args (tls/no-sandbox etc) applied at shared launch time
+            }
+            self.browser = await pool.create_context(**context_opts)
+        else:
+            # Classic (default, fully backward compatible): per-instance persistent context + own playwright
+            pw = await async_playwright().start()
+            self._pw = pw
+            user_data = Path(self.session["user_data_dir"])
+            user_data.mkdir(parents=True, exist_ok=True)
+            self.browser = await pw.chromium.launch_persistent_context(
+                user_data_dir=str(user_data),
+                headless=not headed if headed else headless,
+                slow_mo=slow_mo,
+                viewport=vp,
+                user_agent=ua,
+                locale=loc,
+                timezone_id=tz,
+                extra_http_headers=extra_headers,
+                args=all_args,
+                proxy=launch_proxy,
+            )
         
         # Per-session stable fingerprint seed (canvas/WebGL noise + fonts) for consistency across reloads
         # and variation between sessions. Addresses #150 (re-apply), #94, #210 etc.
@@ -178,13 +299,9 @@ class AgentBrowser:
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
-        
-<<<<<<< HEAD
+
         # Create human behavior controller + orchestrator
         # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
-=======
-        # Create human behavior controller + orchestrator (with per-instance rng from #222)
->>>>>>> origin/master
         self.human = HumanBehavior(self.page, rng=self.rng)
         self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
 
@@ -225,8 +342,11 @@ class AgentBrowser:
         if self.recovery:
             self.recovery._rotation_relaunch_hook = self._perform_rotation_relaunch
 
-        # Store playwright instance for proper cleanup
-        self._pw = pw
+        # Store playwright instance for proper cleanup (only in non-pooled classic path)
+        if not getattr(self, "_using_pool", False):
+            # pw is defined only in else branch
+            if 'pw' in locals():
+                self._pw = pw
 
         return self.browser
 
@@ -246,12 +366,14 @@ class AgentBrowser:
         Safety: does not recreate recovery (avoids reentrancy), preserves light_mode/persona/rate_limiter.
         Only called on recovery paths; headless defaults to True for recovery relaunches.
         """
-        if not getattr(self, "browser", None) or not getattr(self, "_pw", None):
+        # Updated guard for pooled mode (#57 etc): allow rotation if we have browser (pooled uses _pool not _pw)
+        has_launcher = bool(getattr(self, "browser", None)) and (bool(getattr(self, "_pw", None)) or bool(getattr(self, "_pool", None)) or getattr(self, "_using_pool", False))
+        if not has_launcher:
             return
 
         log = getattr(self, "logger", None)
         try:
-            # 1. Close old page + context (keep _pw for reuse; do not stop playwright)
+            # 1. Close old page + context (for pooled: release via pool to keep shared browser alive)
             if getattr(self, "page", None):
                 try:
                     await self.page.close()
@@ -260,7 +382,10 @@ class AgentBrowser:
                 self.page = None
             if getattr(self, "browser", None):
                 try:
-                    await self.browser.close()
+                    if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
+                        await self._pool.release_context(self.browser)
+                    else:
+                        await self.browser.close()
                 except Exception:
                     pass
                 self.browser = None
@@ -271,7 +396,7 @@ class AgentBrowser:
                 if self.recovery:
                     self.recovery.set_current_session_name(self.session.get("name"))
 
-            # 3. Recompute everything needed for a fresh launch_persistent_context (mirrors launch() logic, minimal dupe for isolated fix)
+            # 3. Recompute everything needed (mirrors launch logic)
             user_data = Path(self.session["user_data_dir"])
             user_data.mkdir(parents=True, exist_ok=True)
 
@@ -298,23 +423,34 @@ class AgentBrowser:
             proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
             launch_proxy = proxy_args if proxy_args else None
 
-            # 4. Relaunch persistent context with new proxy + (optionally) new profile dir
+            # 4. Relaunch: use pooled create_context if in pool mode, else classic persistent (using stored _pw)
             opts = getattr(self, "_launch_options", {"headless": True, "slow_mo": 0, "headed": False})
             h = opts.get("headless", True)
             sm = opts.get("slow_mo", 0)
             hd = opts.get("headed", False)
-            self.browser = await self._pw.chromium.launch_persistent_context(
-                user_data_dir=str(user_data),
-                headless=not hd if hd else h,
-                slow_mo=sm,
-                viewport=vp,
-                user_agent=ua,
-                locale=loc,
-                timezone_id=tz,
-                extra_http_headers=extra_headers,
-                args=all_args,
-                proxy=launch_proxy,
-            )
+            if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
+                context_opts = {
+                    "viewport": vp,
+                    "user_agent": ua,
+                    "locale": loc,
+                    "timezone_id": tz,
+                    "extra_http_headers": extra_headers,
+                    "proxy": launch_proxy,
+                }
+                self.browser = await self._pool.create_context(**context_opts)
+            else:
+                self.browser = await self._pw.chromium.launch_persistent_context(
+                    user_data_dir=str(user_data),
+                    headless=not hd if hd else h,
+                    slow_mo=sm,
+                    viewport=vp,
+                    user_agent=ua,
+                    locale=loc,
+                    timezone_id=tz,
+                    extra_http_headers=extra_headers,
+                    args=all_args,
+                    proxy=launch_proxy,
+                )
 
             self.page = await self.browser.new_page()
             self.context = self.browser
@@ -783,13 +919,21 @@ class AgentBrowser:
 
             if self.browser:
                 try:
-                    await self.browser.close()
+                    if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
+                        await self._pool.release_context(self.browser)
+                    else:
+                        await self.browser.close()
                 except Exception:
                     pass
                 self.browser = None
                 self.context = None
+                self._pooled_ctx_id = None
 
-            if hasattr(self, '_pw') and self._pw:
+            if getattr(self, "_using_pool", False):
+                # do not shutdown shared pool here; individual close only releases its ctx
+                # full shutdown via _pool.shutdown() on app exit if desired
+                pass
+            elif hasattr(self, '_pw') and self._pw:
                 try:
                     await self._pw.stop()
                 except Exception:
@@ -800,6 +944,12 @@ class AgentBrowser:
             self.human = None
             self.orchestrator = None
             self.recovery = None
+            if getattr(self, "logger", None):
+                try:
+                    self.logger.close()
+                except Exception:
+                    pass
+                self.logger = None
         except Exception:
             # Never let close() itself raise — we want reliable cleanup
             pass
@@ -811,7 +961,10 @@ class AgentBrowser:
         """
         if not self.browser:
             # Default launch parameters — callers can still call launch() explicitly first
-            await self.launch(light_mode=getattr(self, "light_mode", None))  # ultra-narrow absolute final closer for ONLY #174 and #113: explicit light_mode wiring on implicit launch() path guarantees launch/warm-up cost reduction applies for context-manager users
+            await self.launch(
+                light_mode=getattr(self, "light_mode", None),
+                use_pooled_context=getattr(self, "use_pooled_context", None)  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+            )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

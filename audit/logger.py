@@ -4,11 +4,17 @@ Production-grade logging for reliability and service offering
 
 Production update: container + AGENTIC_DATA_DIR aware paths (pairs with SessionManager).
 DX update: includes DebugReporter for #265 fingerprint/header/patch visibility.
+
+Perf: #44 - fully non-blocking via QueueHandler + QueueListener (stdlib) for .log writes
+and dedicated background thread + queue for JSONL audit writes. No more sync file I/O
+on hot log_action paths from recovery/behavior/etc.
 """
 
 import json
 import logging
+import logging.handlers
 import os
+import queue
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,32 +57,59 @@ class AuditLogger:
         # Human-readable log
         self.log_file = self.log_dir / f"{session_name}.log"
         
-        # Setup standard logger
+        # === Non-blocking queued writers for #44 P1 perf ===
+        # audit JSONL uses dedicated queue + background drainer thread (single writer, no per-call threads)
+        self._audit_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=5000)
+        self._shutdown = threading.Event()
+        self._writer_thread = threading.Thread(
+            target=self._drain_audit_queue,
+            daemon=True,
+            name=f"audit-writer-{session_name[:16]}"
+        )
+        self._writer_thread.start()
+
+        # Setup standard logger with QueueHandler + QueueListener (fully non-blocking writes to .log)
+        # Callers of log_action / log_error etc. never block on disk I/O.
         self.logger = logging.getLogger(f"agentic.{session_name}")
         self.logger.setLevel(logging.INFO)
-        
-        handler = logging.FileHandler(self.log_file)
+        # Clean any pre-existing handlers (defensive for re-instantiation in tests)
+        for h in list(self.logger.handlers):
+            self.logger.removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+
+        self._std_log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(maxsize=2000)
+        qhandler = logging.handlers.QueueHandler(self._std_log_queue)
+        self.logger.addHandler(qhandler)
+
+        file_handler = logging.FileHandler(self.log_file)
         formatter = logging.Formatter(
             '%(asctime)s | %(levelname)s | %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        
+        file_handler.setFormatter(formatter)
+        self._listener = logging.handlers.QueueListener(
+            self._std_log_queue, file_handler, respect_handler_level=True
+        )
+        self._listener.start()
+
         self._debug_enabled = False
         self._debug_log_file = self.log_dir / f"{session_name}_debug.jsonl"
     
     def enable_debug_mode(self):
         """Enable verbose debug logging for fingerprint/stealth analysis (DX #265)."""
         self._debug_enabled = True
-        # Ensure debug handler exists (idempotent)
-        if not any(isinstance(h, logging.FileHandler) and h.baseFilename.endswith('debug.jsonl') for h in self.logger.handlers):
+        # Ensure debug handler exists (idempotent). Note: when debug on, direct FileHandler on logger
+        # means its writes are sync (rare, non-hotpath for normal operation; debug is explicit DX).
+        if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith('debug.jsonl') for h in self.logger.handlers):
             debug_handler = logging.FileHandler(self._debug_log_file)
             debug_handler.setFormatter(logging.Formatter('%(message)s'))
             self.logger.addHandler(debug_handler)
     
     def log_action(self, action: str, details: Optional[Dict] = None, level: str = "info"):
-        """Log a browser action with structured data"""
+        """Log a browser action with structured data (non-blocking for #44)"""
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "session": self.session_name,
@@ -84,17 +117,14 @@ class AuditLogger:
             "details": details or {},
         }
         
-        # Write to JSONL audit trail (offloaded to daemon thread to avoid blocking event loop / hot paths)
-        # Addresses #102 sync I/O perf bottleneck under high action volume (mouse moves, etc.)
-        def _audit_write():
-            try:
-                with open(self.audit_file, "a") as f:
-                    f.write(json.dumps(entry) + "\n")
-            except Exception:
-                pass  # never let audit I/O crash caller
-        threading.Thread(target=_audit_write, daemon=True).start()
+        # Queue the audit JSONL entry (drained by background thread; never blocks caller)
+        try:
+            self._audit_queue.put_nowait(entry)
+        except queue.Full:
+            # Extremely high volume: drop (never block hot path or OOM)
+            pass
         
-        # Also log to human-readable log (still sync but lighter; stdlib logging is optimized)
+        # Stdlib log goes through QueueHandler -> non-blocking (listener drains to FileHandler)
         msg = f"{action}"
         if details:
             msg += f" | {details}"
@@ -121,7 +151,7 @@ class AuditLogger:
         }, level="warning")
     
     def get_recent_actions(self, limit: int = 50) -> list:
-        """Read recent audit entries"""
+        """Read recent audit entries (sync read is acceptable; only called from debug/report paths)"""
         if not self.audit_file.exists():
             return []
         
@@ -132,6 +162,63 @@ class AuditLogger:
                     entries.append(json.loads(line))
         
         return entries[-limit:]
+
+    def _drain_audit_queue(self) -> None:
+        """Background thread: drain audit queue and perform the actual (blocking) JSONL appends.
+        Single writer thread eliminates the N-threads-per-action problem and keeps callers unblocked (#44).
+        """
+        while not self._shutdown.is_set():
+            try:
+                entry = self._audit_queue.get(timeout=0.25)
+                if entry is None:
+                    self._audit_queue.task_done()
+                    continue
+                try:
+                    with open(self.audit_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass  # never crash writer
+                finally:
+                    self._audit_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception:
+                continue
+        # Best-effort flush on shutdown
+        try:
+            while True:
+                entry = self._audit_queue.get_nowait()
+                try:
+                    with open(self.audit_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                self._audit_queue.task_done()
+        except queue.Empty:
+            pass
+
+    def close(self) -> None:
+        """Graceful shutdown of background writers and listeners (call from cleanup paths)."""
+        try:
+            self._shutdown.set()
+            # Stop the stdlib queue listener (flushes its handler)
+            if hasattr(self, "_listener") and self._listener:
+                try:
+                    self._listener.stop()
+                except Exception:
+                    pass
+            # Give writer thread a moment
+            if hasattr(self, "_writer_thread") and self._writer_thread.is_alive():
+                self._writer_thread.join(timeout=1.0)
+        except Exception:
+            pass
+
+    def __del__(self):
+        # Best effort
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class DebugReporter:
