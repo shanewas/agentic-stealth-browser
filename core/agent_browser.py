@@ -217,7 +217,7 @@ class AgentBrowser:
         Navigate with full anti-block recovery.
         Uses the AntiBlockOrchestrator for intelligent detection and recovery.
         Recommended for production / high-reliability use.
-        Respects self.light_mode to skip warm-ups per #174.
+        Respects self.light_mode to skip warm-ups per #174/#113 (launch/warm-up cost reduction).  # ultra-narrow absolute final closer for ONLY #174 and #113
         """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
