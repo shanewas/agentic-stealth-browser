@@ -54,6 +54,10 @@ class DomainRateLimiter:
             wait_time = (self.request_times[domain][0] + timedelta(minutes=1) - now).total_seconds()
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
+                # BUG-05 fix: record the request at the time it is actually issued (after waiting)
+                now = datetime.now()
+                self.request_times[domain].append(now)
+                self.last_request[domain] = now
                 return wait_time
 
         # Check cooldown
@@ -62,9 +66,13 @@ class DomainRateLimiter:
             if time_since_last < config.cooldown_seconds:
                 wait_time = config.cooldown_seconds - time_since_last
                 await asyncio.sleep(wait_time)
+                # BUG-05 fix: record post-wait so the window/cooldown is accurate
+                now = datetime.now()
+                self.request_times[domain].append(now)
+                self.last_request[domain] = now
                 return wait_time
 
-        # Record this request
+        # Record this request (happy path, no wait)
         self.request_times[domain].append(now)
         self.last_request[domain] = now
 

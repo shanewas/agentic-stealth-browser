@@ -162,9 +162,10 @@
   - Actions: Deprecate/fix legacy method, add clear properties or docstring, fix safe_click/safe_type.
   - **Done:** 2026-05 — commit ad37196. Added .context alias, fixed bad accesses, strong docstring, deprecated old loader. MCP consumers now have safe .page to use.
 
-- [ ] **BUG-04** — `AntiBlockOrchestrator.detect_block` content analysis assumes `browser.content()` but receives Context (no such method). Silent failure.
+- [x] **BUG-04** — `AntiBlockOrchestrator.detect_block` content analysis assumes `browser.content()` but receives Context (no such method). Silent failure.
   - Files: `recovery/anti_block_orchestrator.py`, wiring in `core/agent_browser.py`
   - Fix: Accept a page getter / current page ref; fall back gracefully.
+  - **Done:** 2026-05 — commit 0fc34a0. page_getter now wired; DOM text detection (CAPTCHA etc.) actually executes.
 
 - [ ] **BUG-05** — `DomainRateLimiter.wait_if_needed` early-returns on limit/cooldown **without** recording the current request timestamp → under-counting / burst risk.
   - Files: `production/rate_limiter.py`
