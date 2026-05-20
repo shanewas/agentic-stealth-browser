@@ -19,6 +19,7 @@ from stealth.headers import get_extra_http_headers
 from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
+from sessions.cookie_manager import CookieManager, SessionOrchestrator
 
 
 class AgentBrowser:
@@ -37,6 +38,8 @@ class AgentBrowser:
         self.scraper = None
         self.ai = None
         self.recovery = None
+        self.cookie_manager = None
+        self.session_orchestrator = None
         self.context: Optional[BrowserContext] = None
         self.browser = None
     
@@ -243,6 +246,28 @@ class AgentBrowser:
             # Fallback
             await self.page.mouse.wheel(0, self.rng.randint(200, 400))
             await asyncio.sleep(1.5)
+
+
+    async def load_cookies_from_file(self, cookies_path: str) -> Dict[str, Any]:
+        """Load cookies using the resilient CookieManager."""
+        if not self.browser:
+            raise RuntimeError("Browser not launched. Call launch() first.")
+
+        self.cookie_manager = CookieManager(self.browser)
+        result = await self.cookie_manager.load_cookies(cookies_path)
+
+        if result.get("status") == "success":
+            # Also initialize session orchestrator
+            self.session_orchestrator = SessionOrchestrator()
+
+        return result
+
+    async def get_cookie_health(self) -> Dict[str, Any]:
+        """Check health of current cookies."""
+        if not self.cookie_manager:
+            return {"status": "no_manager", "message": "No cookie manager initialized"}
+
+        return await self.cookie_manager.get_cookie_health()
 
     async def close(self):
         if self.browser:
