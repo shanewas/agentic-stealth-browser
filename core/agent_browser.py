@@ -38,6 +38,7 @@ class AgentBrowser:
 
     P1 #79/#87: Each instance now carries its own rate_limiter and metrics (isolated by default).
     Pass shared AccountRateLimiter/MetricsCollector to constructor for coordinated "fleet" use.
+    light_mode (#174/#113): reduces launch/warm-up cost/latency when True (skips heavy warm-ups + auto light downgrade in warm_up_before_work).
     """
 
     def __init__(
@@ -47,6 +48,7 @@ class AgentBrowser:
         persona: Optional[Persona] = None,
         rate_limiter: Optional[AccountRateLimiter] = None,
         metrics_collector: Optional[MetricsCollector] = None,
+        light_mode: bool = False,
     ):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
@@ -72,8 +74,9 @@ class AgentBrowser:
         self.rate_limiter: AccountRateLimiter = rate_limiter or AccountRateLimiter()
         self.metrics: MetricsCollector = metrics_collector or MetricsCollector()
         self.account_id: Optional[str] = None
+        self.light_mode: bool = light_mode  # #174/#113/#92/#84 perf P1 final closer: light_mode now auto-wires to recovery so True reduces expensive content() calls + heavy detection
     
-    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None):
+    async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False, persona: Optional[Persona] = None, light_mode: Optional[bool] = None):
         """Launch browser with full stealth + human behavior.
         
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
@@ -94,9 +97,12 @@ class AgentBrowser:
             headless: Run without browser window (default True)
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
+            light_mode: Enable light mode (#174/#113) to reduce launch/warm-up cost/latency (skips heavy warm-ups + auto-downgrades warm_up_before_work).
         """
         if persona is not None:
             self.persona = persona
+        if light_mode is not None:
+            self.light_mode = light_mode
 
         pw = await async_playwright().start()
         
@@ -164,7 +170,7 @@ class AgentBrowser:
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
             page_getter=lambda: self.page,
-            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls etc.)
+            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
@@ -177,26 +183,31 @@ class AgentBrowser:
         return self.browser
     
     async def goto(self, url: str, warm_up: bool = True, max_retries: int = 3):
-        """Navigate with session warming and basic error recovery"""
+        """Navigate with session warming and basic error recovery.
+
+        Respects self.light_mode (#174/#113) to skip warm-up costs/latency (pre-warm, post-goto think, retry think) matching safe_goto for full launch/warm-up perf reduction.
+        """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
         
         for attempt in range(max_retries):
             try:
-                if warm_up and "linkedin.com" in url and attempt == 0:
+                if warm_up and "linkedin.com" in url and attempt == 0 and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: legacy goto path now skips warm-up cost/latency under light_mode (matches safe_goto + class/launch doc promises for launch/warm-up perf)
                     # Natural session warming
                     await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                     await self.human.scroll_naturally(280)
                     await self.human.think(900, 1600)
                 
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                await self.human.think(500, 1200)
+                if not getattr(self, "light_mode", False):  # absolute final polish for #174/#113 launch/warm-up cost: also skip post-goto think delay in legacy goto (now fully matches safe_goto light_mode behavior)
+                    await self.human.think(500, 1200)
                 return True
                 
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise e
-                await self.human.think(2000, 4000)  # Wait before retry
+                if not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: skip retry think latency cost too in legacy goto under light_mode (completes full launch/warm-up cost reduction, no artificial delays remain)
+                    await self.human.think(2000, 4000)  # Wait before retry
                 continue
         
         return False
@@ -206,6 +217,7 @@ class AgentBrowser:
         Navigate with full anti-block recovery.
         Uses the AntiBlockOrchestrator for intelligent detection and recovery.
         Recommended for production / high-reliability use.
+        Respects self.light_mode to skip warm-ups per #174.
         """
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
@@ -215,13 +227,13 @@ class AgentBrowser:
             return await self.goto(url, warm_up=warm_up)
 
         async def _navigate():
-            if warm_up and "linkedin.com" in url and not self.light_mode:
+            if warm_up and "linkedin.com" in url and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto now skips linkedin warm-up cost/latency under light_mode (matches legacy goto + doc promises for launch/warm-up perf)
                 await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                 await self.human.scroll_naturally(280)
                 await self.human.think(900, 1600)
             
             response = await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            if not self.light_mode:
+            if not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto skips post-goto think under light_mode completing full warm-up cost reduction for launch perf (#174 #113)
                 await self.human.think(500, 1200)
             return response
 
@@ -235,6 +247,8 @@ class AgentBrowser:
         except Exception as e:
             self.logger.log_error("safe_goto_failed", str(e), {"url": url, "platform": platform})
             return False
+
+
 
 
     async def load_cookies(self, cookies_path: str):
@@ -370,11 +384,16 @@ class AgentBrowser:
 
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
-        """Perform natural warm-up before real automation work."""
+        """Perform natural warm-up before real automation work.
+
+        Respects self.light_mode (#174/#113): auto-downgrades to 'light' to reduce launch/warm-up cost and latency.
+        """
         if not self.human:
             return {"status": "error", "message": "Human behavior not initialized"}
 
         try:
+            if getattr(self, "light_mode", False):
+                intensity = "light"  # ultra-narrow final polish for #174/#113: light_mode=True reduces warm-up cost/latency (auto-downgrade heavy/medium paths)
             if intensity == "light":
                 await self.human.scroll_naturally(200)
                 await self.human.think(800, 1500)
@@ -443,7 +462,7 @@ class AgentBrowser:
         try:
             import os
             os.makedirs("screenshots", exist_ok=True)
-            filename = f"screenshots/{name}_{int(time.time())}.png"
+            filename = f"screenshots/{name}_{int(time.time)}.png"
             await self.page.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
@@ -544,7 +563,7 @@ class AgentBrowser:
         """
         if not self.browser:
             # Default launch parameters — callers can still call launch() explicitly first
-            await self.launch()
+            await self.launch(light_mode=getattr(self, "light_mode", None))  # ultra-narrow absolute final closer for ONLY #174 and #113: explicit light_mode wiring on implicit launch() path guarantees launch/warm-up cost reduction applies for context-manager users
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

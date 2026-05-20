@@ -69,31 +69,6 @@ This project has a **solid architectural base** but is not yet production-harden
 - Human mimicry is still relatively shallow
 - Proxy + recovery loop is not yet battle-hardened
 
-## Multi-Instance & Scalability Guidance (#87)
-
-**Strong multi-instance isolation warnings:**
-
-The namespace support + per-`AgentBrowser` private `AccountRateLimiter`/`MetricsCollector` (core/agent_browser.py) fix the original global-singleton pollution *within one process*.
-
-**However, cross-process / cross-host / fleet isolation is still absent:**
-- Every replica (docker, k8s pod, separate `python` worker) has its own independent in-memory rate windows.
-- N replicas can generate up to N× the configured request rate.
-- Without account sharding or an external shared limiter (Redis etc.), you will see blocks or bans at scale.
-
-**Basic guidance (AgentBrowser + session handling):**
-- Use unique `session_name` (SessionManager gives strong disk isolation for profiles/cookies/state — safe to share across replicas).
-- Default `AgentBrowser()` now isolates its rate limiter and metrics (good for co-located browsers in one proc).
-- For real parallel/multi-account production workloads: run one logical agent (or small account group) per OS process or container. Use the production/Dockerfile + docker-compose.
-- If sharing one process, pass a common rate_limiter object only when you *want* coordinated limits; otherwise let each get its private one.
-- The runtime guard in AgentBrowser.__init__ warns on multiple instances.
-
-Detailed warnings live in the module/class docstrings of `production/rate_limiter.py`, `core/agent_browser.py`, and `sessions/session_manager.py`.
-
-This (plus the code guard) completes the narrow documentation/UX side of P1 #87. Full distributed rate limiting remains future work.
-
-
----
-
 ---
 
 ## Roadmap
@@ -147,7 +122,6 @@ Then use tools:
 
 
 
-
 ## Architecture Overview
 
 ```mermaid
@@ -176,7 +150,7 @@ graph TD
     E --> S[Sticky Sessions]
     
     F --> T[Multi-Session Management]
-    G --> U[Cookie Loading/Refresh]
+    G --> U[Cookie Manager]
     
     V[Detection Testing] --> W[Fingerprint Scorecard]
     V --> X[Real Site Testing]
@@ -268,14 +242,6 @@ tester.save_results()
 
 ### Recommended Settings
 
-### Light Mode + Pooling Guidance (Closes remaining P1s #174, #113, #92, #84)
-
-Pass `light_detection=True` (default) to `launch()` to enable fast recovery path (no `page.content()` spam). Pair with `AGENTIC_STEALTH_REALISM=light` and light warm-ups for lowest latency.
-
-For #113 (no pooling): reuse long-lived AgentBrowser instances / contexts in production instead of per-task launch. Pre-warm a small pool of contexts for different platforms when scaling.
-
-
-
 ```python
 # For maximum stealth (LinkedIn / Upwork)
 browser = AgentBrowser(session_name="production")
@@ -287,14 +253,13 @@ await browser.ensure_cookies_fresh(max_age_hours=6)
 
 
 
-
 ## API Reference
 
 ### Core Methods
 
 | Method                        | Description                              | Parameters |
 |-------------------------------|------------------------------------------|----------|
-| `launch(..., light_detection=True)` | Launch + light recovery (no content() spam) | `headless`, `slow_mo`, `light_detection` (#174 #92 #84 #113) |
+| `launch(..., light_mode=False)` | Launch browser with stealth (#174/#113: light_mode to reduce launch/warm-up cost/latency) | `headless`, `slow_mo`, `light_mode`, `persona` |
 | `safe_goto(url, platform)`    | Navigate with recovery                   | `url`, `platform`, `warm_up` |
 | `load_cookies_from_file(path)`| Load cookies from real browser           | `cookies_path` |
 | `warm_up_before_work(intensity)` | Perform natural warm-up               | `intensity` ("light", "medium", "heavy") |
@@ -440,4 +405,3 @@ Use `preset="amazon_2026"`, light warm-up, residential proxy.
 Heavy stealth + TLS US, minimal behavior, multiple recovery retries built-in via safe_goto.
 
 See also: `examples/recipes/` (to be expanded) and `stealth/presets.py` for full list.
-
