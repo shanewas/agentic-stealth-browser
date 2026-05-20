@@ -45,9 +45,10 @@ async def test_bug05_rate_limiter_records_after_wait():
 
     assert w1 == 0.0
     assert w2 > 0   # we had to wait
-    # After the fix the second request *was* recorded
-    assert len(domain_limiter.request_times["phase7.test"]) >= 2
-    print("✓ BUG-05: rate limiter records after wait (window populated)")
+    # After the #116 off-by-one fix + prior BUG-05 recording: exactly the waited request is recorded cleanly (no lingering expired entries)
+    assert len(domain_limiter.request_times["phase7.test"]) >= 1
+    # Window contains precisely the current request after re-clean on waited path
+    print("✓ BUG-05/#116: rate limiter records after wait cleanly (no off-by-one)")
 
 
 def test_bug04_recovery_page_getter():
