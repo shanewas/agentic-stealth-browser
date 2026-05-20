@@ -272,7 +272,6 @@ class AgentBrowser:
 
 
 
-
     async def safe_click(self, selector: str, platform: str = "unknown"):
         """Click with recovery logic."""
         if not self.browser:
@@ -381,6 +380,8 @@ class AgentBrowser:
             return {"status": "error", "message": "Human behavior not initialized"}
 
         try:
+            if getattr(self, "light_mode", False):
+                intensity = "light"  # ultra-narrow final polish for #174/#113: light_mode=True reduces warm-up cost/latency (auto-downgrade heavy/medium paths)
             if intensity == "light":
                 await self.human.scroll_naturally(200)
                 await self.human.think(800, 1500)
