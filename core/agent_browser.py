@@ -6,6 +6,7 @@ Combines stealth, human behavior, and session management
 import asyncio
 import random
 import time
+import os  # for env vars in launch (also used by other methods)
 from pathlib import Path
 from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, BrowserContext
@@ -24,6 +25,42 @@ from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
 from production.rate_limiter import domain_limiter, account_limiter
 
+# === Persona/DeviceProfile foundation (minimal solid for #109 + #88) ===
+# Self-contained to avoid new-file/git issues in current workspace state.
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+
+@dataclass(frozen=True)
+class DeviceProfile:
+    name: str = "win_chrome_124_desktop"
+    viewport: Dict[str, int] = field(default_factory=lambda: {"width": 1366, "height": 768})
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    locale: str = "en-US"
+    timezone_id: str = "America/New_York"
+    platform: str = "Win32"
+    hardware_concurrency: int = 8
+    device_memory: int = 8
+    def to_dict(self):
+        from dataclasses import asdict
+        return asdict(self)
+
+@dataclass
+class Persona:
+    name: str
+    device: DeviceProfile = field(default_factory=DeviceProfile)
+    description: str = ""
+    locale: Optional[str] = None
+    timezone_id: Optional[str] = None
+    def effective_locale(self): return self.locale or self.device.locale
+    def effective_timezone(self): return self.timezone_id or self.device.timezone_id
+    def to_launch_overrides(self):
+        return {"viewport": self.device.viewport, "user_agent": self.device.user_agent, "locale": self.effective_locale(), "timezone_id": self.effective_timezone()}
+
+DEFAULT_PERSONA = Persona(name="professional_us_desktop", description="P1 #109 foundation baseline.")
+def get_persona(n="default"): return DEFAULT_PERSONA
+def list_personas(): return ["default"]
+
+
 
 class AgentBrowser:
     """
@@ -31,7 +68,7 @@ class AgentBrowser:
     Supports multiple isolated sessions and deep human mimicry.
     """
     
-    def __init__(self, session_name: Optional[str] = None, anonymous: bool = False, persona: Optional[Persona] = None):
+    def __init__(self, session_name: Optional[str] = None, anonymous: bool = False, persona: Optional["Persona"] = None):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(session_name, anonymous)
         self.proxy_manager = ProxyManager()
@@ -47,6 +84,7 @@ class AgentBrowser:
         self.browser = None   # Playwright BrowserContext (persistent) — see launch() docstring
         self.page = None      # Playwright Page (main) — use this for most page actions
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
+        self.persona = persona or DEFAULT_PERSONA  # Persona foundation integration
     
     async def launch(self, headless: bool = True, slow_mo: int = 0, headed: bool = False):
         """Launch browser with full stealth + human behavior.
@@ -292,22 +330,6 @@ class AgentBrowser:
 
         if result.get("status") == "success":
             # Also initialize session orchestrator
-            self.session_orchestrator = SessionOrchestrator()
-
-        return result
-
-    async def load_cookies_from_data(self, cookies_data: Any) -> Dict[str, Any]:
-        """Load cookies from inline data (list/dict/JSON str). Concrete progress on P1 #145 MCP cookies/state.
-        Complements load_cookies_from_file for cases where Claude/MCP client passes cookies directly
-        (no local path guarantee).
-        """
-        if not self.browser:
-            raise RuntimeError("Browser not launched. Call launch() first.")
-
-        self.cookie_manager = CookieManager(self.browser)
-        result = await self.cookie_manager.load_cookies_from_data(cookies_data)
-
-        if result.get("status") == "success":
             self.session_orchestrator = SessionOrchestrator()
 
         return result
