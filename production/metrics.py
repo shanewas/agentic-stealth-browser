@@ -5,7 +5,7 @@ Phase 8 #87: added get_metrics_for_namespace helper for safe multi-instance isol
 """
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -13,14 +13,17 @@ from collections import defaultdict
 
 @dataclass
 class MetricsCollector:
-    """Lightweight metrics collector."""
+    """Lightweight metrics collector.
+    P2 perf + deprecation fix (#104 #58): use monotonic for uptime (avoids naive datetime),
+    timezone-aware for error timestamps.
+    """
 
     def __init__(self):
         self.counters: Dict[str, int] = defaultdict(int)
         self.timers: Dict[str, float] = {}
         self.gauges: Dict[str, float] = {}
         self.errors: list = []
-        self.start_time = datetime.now()
+        self.start_time = time.monotonic()  # P2: monotonic for reliable elapsed (perf/compat)
 
     def increment(self, name: str, value: int = 1):
         """Increment a counter."""
@@ -39,7 +42,7 @@ class MetricsCollector:
         self.errors.append({
             "type": error_type,
             "message": message,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()  # P2 #104: aware utc
         })
         self.increment(f"errors_{error_type}")
 
@@ -66,7 +69,7 @@ class MetricsCollector:
 
     def get_summary(self) -> Dict[str, Any]:
         """Return human-readable summary."""
-        uptime = (datetime.now() - self.start_time).total_seconds()
+        uptime = time.monotonic() - self.start_time  # P2 #104/#58: monotonic delta (no datetime sub)
 
         return {
             "uptime_seconds": round(uptime, 1),

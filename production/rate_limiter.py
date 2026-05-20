@@ -32,7 +32,7 @@ See AgentBrowser class docs + README "Multi-Instance & Scalability (#87)" sectio
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 from dataclasses import dataclass, field
 
@@ -73,8 +73,10 @@ class DomainRateLimiter:
     async def wait_if_needed(self, domain: str, namespace: Optional[str] = None) -> float:
         """Wait if rate limit would be exceeded. Returns wait time in seconds.
         Pass namespace for isolated multi-agent usage (#87 P1).
+        P2 deprecation/compat fix (#104, #67, #58): timezone-aware utc datetimes.
         """
-        now = datetime.now()
+
+        now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware (no naive/deprecated patterns)
         config = self._get_config(domain, namespace)
         key = self._key(domain, namespace)
 
@@ -92,7 +94,7 @@ class DomainRateLimiter:
             wait_time = (self.request_times[key][0] + timedelta(minutes=1) - now).total_seconds()
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
-                now = datetime.now()
+                now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware
                 # Re-clean after sleep so the waited request is recorded without off-by-one (expired entries linger otherwise)
                 # Fixes #116 while preserving exact namespace isolation and per-account logic
                 minute_ago = now - timedelta(minutes=1)
@@ -110,7 +112,7 @@ class DomainRateLimiter:
             if time_since_last < config.cooldown_seconds:
                 wait_time = config.cooldown_seconds - time_since_last
                 await asyncio.sleep(wait_time)
-                now = datetime.now()
+                now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware
                 # Re-clean after sleep so the waited request is recorded without off-by-one (expired entries linger otherwise)
                 # Fixes #116 while preserving exact namespace isolation and per-account logic
                 minute_ago = now - timedelta(minutes=1)

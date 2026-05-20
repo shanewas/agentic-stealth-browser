@@ -837,6 +837,9 @@ class AgentBrowser:
         """Perform natural warm-up before real automation work.
 
         Respects self.light_mode (#174/#113): auto-downgrades to 'light' to reduce launch/warm-up cost and latency.
+        P2 #146: for pooled contexts (#166) or light jobs, prefer intensity=light or set light_mode=True
+        to keep warm-up short (avoids serial blocking feel for concurrent agents). Warm-up remains
+        intentionally human-paced for realism on real work; use quick paths for one-off scrapes.
         Now uses profile_action around mouse/click/hover/scroll actions for timing + visibility (#169).
         Best-effort: sub-failures logged (via profile + AuditLogger) but do not silently claim full success
         if critical warm-up gestures all failed. Returns partial/degraded status when needed.
@@ -891,7 +894,7 @@ class AgentBrowser:
                     await _run_step("random_idle", lambda: self.human.random_idle_behavior(3.0))
 
             elif intensity == "heavy":
-                await _run_step("simulate_reading", lambda: self.human.simulate_reading(6.0))
+                await _run_step("simulate_reading", lambda: self.human.simulate_reading(6.0, content_factor=1.3))  # P2 #131 variable read time
                 await _run_step("viewport_jitter", lambda: self.human.apply_viewport_jitter())
                 if self.rng.random() < 0.5:
                     await _run_step("fake_search", lambda: self.human.fake_search_action())

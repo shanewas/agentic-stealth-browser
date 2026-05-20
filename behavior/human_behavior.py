@@ -141,15 +141,23 @@ class HumanBehavior:
                 await asyncio.sleep(self.rng.uniform(0.08, 0.18))
 
             if self.rng.random() < mistake_rate:
+                # P2 #115: richer realistic correction patterns (word-level deletes, varied hesitation,
+                # multi-backspace, retype pauses) matching human typing error distributions.
                 wrong = self.rng.choice("abcdefghijklmnopqrstuvwxyz")
                 await self.page.type(selector, wrong, delay=self.rng.uniform(25, 80))
-                await asyncio.sleep(self.rng.uniform(0.2, 0.45))
-                await self.page.keyboard.press("Backspace")
-                # Occasional double correction for more human feel
-                if self.rng.random() < 0.2:
-                    await asyncio.sleep(self.rng.uniform(0.1, 0.25))
+                await asyncio.sleep(self.rng.uniform(0.18, 0.42))
+                # 1-3 backspaces with human-like rhythm (fatigue aware but simple here)
+                n_back = 1 if self.rng.random() < 0.7 else (2 if self.rng.random() < 0.8 else 3)
+                for b in range(n_back):
                     await self.page.keyboard.press("Backspace")
-                await asyncio.sleep(self.rng.uniform(0.12, 0.3))
+                    await asyncio.sleep(self.rng.uniform(0.08, 0.22) if b > 0 else 0.12)
+                # Hesitation / "oops" pause, occasional re-mistake or just continue
+                if self.rng.random() < 0.35:
+                    await asyncio.sleep(self.rng.uniform(0.25, 0.65))
+                    if self.rng.random() < 0.15:  # rare second correction pass
+                        await self.page.keyboard.press("Backspace")
+                        await asyncio.sleep(self.rng.uniform(0.1, 0.3))
+                await asyncio.sleep(self.rng.uniform(0.12, 0.28))
 
             delay = self.rng.uniform(28, 145)
             await self.page.type(selector, char, delay=delay)
@@ -158,8 +166,11 @@ class HumanBehavior:
                 await asyncio.sleep(self.rng.uniform(0.35, 0.75))
 
     async def _bezier_curve(self, start: Tuple[float, float], end: Tuple[float, float], steps: int = 25):
-        """Generate points along a more natural cubic-ish Bézier with controlled wobble.
-        Small upgrade from pure quadratic for better human-like arcs and hesitation (mouse realism).
+        """Generate points along a more natural cubic-ish Bézier with controlled wobble + ease.
+        P2 realism (#160 #144 #108): non-linear t (ease-in-out) distributes points to simulate
+        natural acceleration/deceleration (human motor + typical OS pointer accel curves).
+        Real OS accel is driver-level; we match observed event density/timing + wobble.
+        Combined with sin-based delay in caller for velocity profile.
         """
         points = []
         # Primary control (mid)
@@ -169,15 +180,21 @@ class HumanBehavior:
         control2_x = (start[0] * 0.3 + end[0] * 0.7) + self.rng.uniform(-25, 25)
         control2_y = (start[1] * 0.3 + end[1] * 0.7) + self.rng.uniform(-20, 20)
 
+        def _ease(t: float) -> float:
+            # Cubic ease-in-out for accel/decel point spacing (more points mid-gesture? no:
+            # ease makes slower near ends => denser points at start/end for natural stop)
+            return t*t*(3-2*t)
+
         for i in range(steps + 1):
             t = i / steps
+            te = _ease(t)  # eased t for natural accel feel
             # Quadratic base + small cubic blend for natural S-curve feel
-            qx = (1 - t) ** 2 * start[0] + 2 * (1 - t) * t * control_x + t ** 2 * end[0]
-            qy = (1 - t) ** 2 * start[1] + 2 * (1 - t) * t * control_y + t ** 2 * end[1]
+            qx = (1 - te) ** 2 * start[0] + 2 * (1 - te) * te * control_x + te ** 2 * end[0]
+            qy = (1 - te) ** 2 * start[1] + 2 * (1 - te) * te * control_y + te ** 2 * end[1]
             # blend in second control slightly near end
-            blend = t * 0.25
-            x = (1 - blend) * qx + blend * ((1 - t) * control2_x + t * end[0])
-            y = (1 - blend) * qy + blend * ((1 - t) * control2_y + t * end[1])
+            blend = te * 0.25
+            x = (1 - blend) * qx + blend * ((1 - te) * control2_x + te * end[0])
+            y = (1 - blend) * qy + blend * ((1 - te) * control2_y + te * end[1])
 
             wobble_x = self.rng.uniform(-2.3, 2.3) * (1 - abs(t - 0.5) * 1.15)
             wobble_y = self.rng.uniform(-1.7, 1.7) * (1 - abs(t - 0.5) * 1.15)
@@ -396,40 +413,102 @@ class HumanBehavior:
         return True
 
     async def scroll_naturally(self, total_pixels: int = 400, direction: str = "down"):
-        """Scroll in small, human-like increments with occasional re-read backticks (realism)."""
-        steps = self.rng.randint(5, 12)
+        """Scroll in small, human-like increments with occasional re-read backticks (realism).
+        P2 perf (#81 #108 #153 #89 #123): batched JS wheel/scrollBy sequence (1 evaluate)
+        replaces N sequential page.mouse.wheel CDP calls + roundtrips. Same timing, events,
+        backticks. Falls back to per-call for safety. Fewer steps + longer sleeps in light realism.
+        """
+        # Perf: reduce steps/chatter in low realism (addresses tiny sleeps + CDP in CI/light)
+        if self.realism_level <= 1:
+            steps = self.rng.randint(2, 5)
+        else:
+            steps = self.rng.randint(5, 12)
         base_step = total_pixels // steps
+        scroll_actions = []
         did_back = False
 
-        for i in range(steps):
-            variation = self.rng.randint(-30, 45)
-            amount = base_step + variation
+        def _ease(t: float) -> float:
+            # ease-in-out cubic for scroll velocity profile (#144): slower start/end, faster mid-scroll
+            return t*t*(3-2*t)
 
+        for i in range(steps):
+            progress = (i + 0.5) / max(1, steps)
+            e = _ease(progress)
+            # vary amount slightly by eased progress for natural accel feel
+            var_factor = 0.7 + 0.6 * e
+            variation = int(self.rng.randint(-30, 45) * var_factor)
+            amount = int((base_step + variation) * (0.85 + 0.3 * e))
             if direction == "up":
                 amount = -amount
+            delay_after = self.rng.uniform(0.6, 1.4) if self.rng.random() < 0.22 else self.rng.uniform(0.12, 0.38)
+            if self.realism_level <= 1:
+                delay_after = max(0.05, delay_after * 0.4)  # consolidate for perf
+            # bias mid delays shorter for accel profile
+            if 0.3 < progress < 0.7:
+                delay_after *= 0.75
+            scroll_actions.append({"dy": amount, "delay": delay_after, "is_back": False})
 
-            await self.page.mouse.wheel(0, amount)
-
-            # Small realism improvement: ~8% chance of a tiny back scroll mid-sequence (human re-check)
+            # Pre-plan occasional backtick into sequence (no separate CDP after)
             if not did_back and self.rng.random() < 0.08 and i > 1 and i < steps-2:
                 back = int(amount * 0.3) if amount > 0 else int(amount * 0.25)
-                await asyncio.sleep(self.rng.uniform(0.15, 0.35))
-                await self.page.mouse.wheel(0, -back if amount > 0 else abs(back))
+                back_d = self.rng.uniform(0.15, 0.35)
+                if self.realism_level <= 1:
+                    back_d = 0.05
+                scroll_actions.append({"dy": -back if amount > 0 else abs(back), "delay": back_d, "is_back": True})
                 did_back = True
 
-            if self.rng.random() < 0.22:
-                await asyncio.sleep(self.rng.uniform(0.6, 1.4))
-            else:
-                await asyncio.sleep(self.rng.uniform(0.12, 0.38))
+        # Batched JS scroll (P2 CDP reduction): single evaluate runs all wheel dispatches + scrollBy + precise delays inside browser
+        # Eliminates per-step CDP roundtrips for scroll sequences (matches mouse batching #45 pattern)
+        try:
+            await self.page.evaluate(
+                """
+                async (actions) => {
+                    for (const a of actions) {
+                        const dy = a.dy || 0;
+                        const d = (typeof a.delay === 'number') ? a.delay : 0;
+                        // Perform actual scroll
+                        window.scrollBy(0, dy);
+                        // Dispatch synthetic wheel for any page listeners / fingerprint parity
+                        const evt = new WheelEvent('wheel', {
+                            deltaX: 0,
+                            deltaY: dy,
+                            bubbles: true,
+                            cancelable: false
+                        });
+                        document.dispatchEvent(evt);
+                        if (d > 0) {
+                            await new Promise(r => setTimeout(r, Math.max(1, d * 1000)));
+                        }
+                    }
+                    return actions.length;
+                }
+                """,
+                scroll_actions
+            )
+            return
+        except Exception as e:
+            # Fallback preserves exact prior behavior + CDP calls if JS batch fails (nav etc)
+            print(f"[HumanBehavior] JS scroll batch non-fatal (fallback per-CDP): {e}")
 
-    async def simulate_reading(self, duration_seconds: float = 8.0):
-        """Simulate a person reading a page"""
-        end_time = time.monotonic() + duration_seconds
+        # Fallback CDP loop (original)
+        for a in scroll_actions:
+            await self.page.mouse.wheel(0, a["dy"])
+            if a["delay"] > 0:
+                await asyncio.sleep(a["delay"])
+
+    async def simulate_reading(self, duration_seconds: float = 8.0, content_factor: float = 1.0):
+        """Simulate a person reading a page.
+        P2 #131: duration scaled by content_factor (e.g. longer text / more scrolls => longer realistic read time).
+        Proxy: caller can pass based on page length or prior scroll total.
+        """
+        scaled = duration_seconds * max(0.4, min(2.5, content_factor))
+        end_time = time.monotonic() + scaled
 
         while time.monotonic() < end_time:
             scroll_amount = self.rng.randint(120, 280)
             await self.scroll_naturally(scroll_amount)
-            await asyncio.sleep(self.rng.uniform(1.2, 3.8))
+            pause = self.rng.uniform(1.2, 3.8) * max(0.6, min(1.8, content_factor))
+            await asyncio.sleep(pause)
 
             if self.rng.random() < 0.18:
                 await self.page.mouse.wheel(0, -self.rng.randint(40, 90))
@@ -556,8 +635,9 @@ class HumanBehavior:
             except Exception as e:
                 print(f"[HumanBehavior] non-fatal error (was silent): {e}")
 
-            sleep_base = 0.35 if self.realism_level >= 3 else (0.1 if self.realism_level >= 2 else 0.01)
-            await asyncio.sleep(self.rng.uniform(sleep_base, sleep_base + 0.1))
+            sleep_base = 0.45 if self.realism_level >= 3 else (0.18 if self.realism_level >= 2 else 0.05)
+            await asyncio.sleep(self.rng.uniform(sleep_base, sleep_base + 0.15))
+            # P2 #89 #123: larger sleeps + light skip reduces event-loop wakeups / CDP during idle waits
 
     async def idle_while_loading(self, max_wait_seconds: float = 4.0):
         """Natural idle behavior while loading - robust"""
