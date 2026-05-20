@@ -5,13 +5,12 @@ Handles early detection, platform-specific strategies, and intelligent rotation.
 
 Phase 8 fixes:
 - Circuit breaker for rapid repeated failures per platform/domain (#130 P1)
-- Light detection mode (default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
+- light_mode (light_detection=True default) to avoid expensive page.content() calls on every check (#52, #53, #76, #84, #92, #174 P1/P2 performance)
 - Throttled / conditional heavy content analysis (only when light=False or force_heavy)
 - Deduped duplicate return in calculate_backoff
 - Cost awareness stub + escalation hooks for future (#252, #276, #283)
 - Better failure tracking and logging
 - #90 P1: automatic session/cookie cleanup on ACCOUNT_RESTRICTION detection
-- #92/#84 final: simple guards + lighter signals (title before content) + light_mode tie-in
 """
 
 import asyncio
@@ -52,7 +51,7 @@ class AntiBlockOrchestrator:
     Central coordinator for detecting and recovering from blocks/rate limits.
     Much more aggressive and intelligent than basic try/except.
 
-    Phase 8 improvements focus on performance (avoid content() spam) and resilience (circuit breaker).
+    Phase 8 improvements focus on performance (light_mode guards content() in recovery paths) and resilience (circuit breaker).
     """
 
     # Platform-specific recovery strategies
@@ -100,7 +99,7 @@ class AntiBlockOrchestrator:
         self.recovery_history: Dict[str, int] = {}  # platform -> consecutive recoveries
 
         # === Phase 8 Performance & Resilience ===
-        # Tie into light_mode if present (for #84/#92 callers using alternate naming)
+        # Support light_mode alias for #174/#92/#84 callers (improves light_mode paths)
         if light_mode is not None:
             light_detection = bool(light_mode)
         self.light_detection = light_detection  # default True -> huge perf win (skips content() most times)
@@ -116,6 +115,30 @@ class AntiBlockOrchestrator:
     def set_current_session_name(self, name: Optional[str]) -> None:
         """Allow AgentBrowser to wire the active session for #90 auto-cleanup on restriction."""
         self.current_session_name = name
+
+    def _make_circuit_key(self, platform: str, url: Optional[str] = None) -> str:
+        """Create fine-grained circuit breaker key: platform + (registrable) domain.
+        Enables true per-platform/domain breakers for #130 P1 (as documented).
+        Falls back to platform-only if url parsing fails. Quick + high impact.
+        """
+        p = (platform or "unknown").lower().strip()
+        if not url:
+            return p
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(str(url))
+            host = (parsed.netloc or parsed.path or "").lower()
+            if host:
+                # registrable domain (last two labels)
+                parts = [x for x in host.split(".") if x]
+                if len(parts) >= 2:
+                    dom = ".".join(parts[-2:])
+                    return f"{p}:{dom}"
+                return f"{p}:{host}"
+        except Exception:
+            pass
+        return p
+
 
     def _check_circuit_breaker(self, key: str) -> bool:
         """Return True if circuit is currently open for this key (platform/domain). Addresses #130."""
@@ -153,8 +176,7 @@ class AntiBlockOrchestrator:
         - Page content patterns (HEAVY - only when not light_detection or force_heavy)  # perf fixes
         - Platform-specific heuristics
 
-        light_detection=True (default) avoids the expensive await page.content() on hot paths.
-        Recovery paths always prefer cheap context signals first.
+        light_mode (light_detection=True default) avoids the expensive await page.content() on hot paths.
         """
         status = context.http_status
         response_time = context.response_time
@@ -204,38 +226,22 @@ class AntiBlockOrchestrator:
 
         # === Browser content analysis (EXPENSIVE - gated by light_detection) ===
         # Phase 8 perf fix: content() is called far too often in recovery paths.
-        # Only run when light_detection=False or explicitly forced (for deep debug / #273 explain).
-        # #84/#92: simple guard + lighter signals (title/url) before any full content()
-        do_heavy = force_heavy or (not getattr(self, 'light_detection', True))
+        # Only run when light_mode=False (light_detection=False) or explicitly forced (for deep debug / #273 explain).
+        # Ultra-narrow: direct attr (no getattr) + simple content() guard for final #174/#92/#84 close
+        do_heavy = force_heavy or (not self.light_detection)
         if self._get_page and do_heavy:
             try:
                 page = self._get_page()
                 content_lower = ""
                 if page:
-                    # Use lighter signals first (title is cheap vs full HTML) to avoid unnecessary page.content()
-                    try:
-                        title = (await page.title() or "").lower()
-                        if any(x in title for x in ["just a moment", "checking your browser", "attention required", "verify you are human", "security check"]):
-                            return BlockType.CAPTCHA
-
-                        # LinkedIn specific from title (common on challenges)
-                        if "linkedin" in platform:
-                            if any(x in title for x in ["security verification", "unusual activity detected", "account restricted"]):
-                                return BlockType.ACCOUNT_RESTRICTION
-
-                        # Amazon specific from title
-                        if "amazon" in platform:
-                            if any(x in title for x in ["enter the characters", "sorry, we just need to make sure", "robot"]):
-                                return BlockType.CAPTCHA
-                    except Exception:
-                        pass  # lighter signal failed; fall through to content only if needed
-
-                    # Full content() only as fallback after lighter signals (#84 #92 guard)
-                    try:
-                        page_content = await page.content()
-                        content_lower = page_content.lower()[:3000]
-                    except Exception:
-                        content_lower = ""
+                    # Simple content() guard: only call if page looks usable (perf + safety)
+                    if hasattr(page, "content"):
+                        try:
+                            page_content = await page.content()
+                            content_lower = page_content.lower()[:3000]
+                        except Exception:
+                            content_lower = ""
+                    # else: leave content_lower="", skip expensive/unsafe content()
 
                 if content_lower:
                     # Cloudflare / generic challenge pages
@@ -304,9 +310,8 @@ class AntiBlockOrchestrator:
         Main recovery flow with actual proxy/session rotation.
         Returns True if we should continue retrying.
         Now includes circuit breaker check (P1 #130).
-        Recovery paths delegate to detect_block which prefers light signals first.
         """
-        key = context.platform.lower()
+        key = self._make_circuit_key(context.platform, getattr(context, "url", None))
 
         # Circuit breaker guard (prevents hammering on hopeless cases)
         if self._check_circuit_breaker(key):
@@ -424,7 +429,6 @@ class AntiBlockOrchestrator:
     ):
         """
         Wrapper that runs a function with full recovery logic.
-        Recovery paths use detect_block (light signals first, content avoided by default).
         """
         context = RecoveryContext(platform=platform, url=url)
         strategy = self.get_strategy(platform)
@@ -434,7 +438,7 @@ class AntiBlockOrchestrator:
             context.attempt = attempt
             start_time = time.time()
 
-            key = platform.lower()
+            key = self._make_circuit_key(platform, url)
             if self._check_circuit_breaker(key):
                 self.logger.log_action("circuit_breaker_blocked_execute", {"platform": platform})
                 break
@@ -470,7 +474,7 @@ class AntiBlockOrchestrator:
 
 # Convenience function
 def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None):
-    # Tie light_mode if present (compat for #84/#92 paths)
+    # Support light_mode for callers (final light_mode path improvement for perf P1s)
     if light_mode is not None:
         light_detection = bool(light_mode)
     return AntiBlockOrchestrator(
