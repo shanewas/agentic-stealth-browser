@@ -1,6 +1,41 @@
 """
 Session Manager for Agentic Browser
 Supports named sessions, anonymous sessions, and isolation
+
+#87 (multi-instance isolation):
+  Each session *name* provides fully independent on-disk state:
+    - user_data/   (full browser profile: cache, localStorage, IndexedDB, etc.)
+    - cookies.json
+    - state.json
+    - meta.json
+
+  This delivers strong *filesystem-level* isolation for different logical
+  agents, accounts, or fleet members.
+
+**STRONG MULTI-INSTANCE WARNINGS (P1 #87):**
+
+  Rate limiters, metrics collectors, stealth profiles, and other
+  process-global singletons remain SHARED across ALL sessions that live
+  inside the same Python interpreter / process.
+
+  Merely using distinct session names inside one process does NOT isolate:
+    - rate limiting state (risk of one account's traffic affecting another's)
+    - metrics (cross-contamination of counters/gauges)
+    - certain in-memory caches or fingerprint state
+
+  Running multiple AgentBrowser (or equivalent) instances that target
+  different accounts/identities from within a SINGLE PROCESS is unsafe
+  and can cause blocks, account linkage, or incorrect observability.
+
+  FOR ANY REAL MULTI-AGENT / MULTI-ACCOUNT / PARALLEL WORKLOADS:
+    Use SEPARATE PROCESSES or separate containers (Docker, etc.).
+    This is the only reliable way to achieve end-to-end isolation today.
+
+  Recommendation: one dedicated OS process (or container) per session/account.
+  Threads / concurrent asyncio tasks inside one interpreter are insufficient.
+
+  Always pick stable, unique, human-meaningful names per identity
+  (e.g. "linkedin-alice", "twitter-bob-prod").
 """
 
 import json
@@ -11,14 +46,22 @@ from typing import Optional, Dict, List, Any
 
 
 class SessionManager:
-    """Manages browser sessions with isolation"""
+    """Manages browser sessions with isolation (#87: see module header for strong multi-instance warnings)"""
     
     def __init__(self, base_dir: str = "~/.agentic-browser/sessions"):
         self.base_dir = Path(base_dir).expanduser()
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
     def create_session(self, name: Optional[str] = None, anonymous: bool = False) -> Dict:
-        """Create a new isolated session"""
+        """Create a new isolated session.
+
+        When a name is supplied it is used verbatim (caller is responsible
+        for uniqueness across accounts). Anonymous sessions receive random
+        names.
+
+        See module docstring for critical #87 multi-instance isolation
+        warnings and the process/container separation requirement.
+        """
         if name is None:
             name = f"session-{uuid.uuid4().hex[:12]}"
         
@@ -97,3 +140,27 @@ class SessionManager:
                 return {"status": "partial", "name": name, "marked": marked, "error": str(e)}
 
         return {"status": "marked_compromised", "name": name}
+
+
+# Basic isolation helper for #87 (additive, zero breaking changes)
+def create_isolated_session(
+    name: Optional[str] = None,
+    anonymous: bool = False,
+    base_dir: str = "~/.agentic-browser/sessions",
+) -> Dict:
+    """Basic isolation helper targeting P1 #87.
+
+    Returns session metadata for a dedicated on-disk profile
+    (user_data + cookies + state). This is the supported way to obtain
+    filesystem isolation for distinct logical agents.
+
+    All the strong multi-instance warnings from the module docstring apply:
+    use separate processes/containers for true safety when operating
+    multiple accounts in parallel.
+
+    This helper exists so callers can be explicit about isolation intent
+    without needing to construct SessionManager themselves.
+    """
+    return SessionManager(base_dir=base_dir).create_session(
+        name=name, anonymous=anonymous
+    )
