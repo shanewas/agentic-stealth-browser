@@ -160,8 +160,9 @@ class AgentBrowser:
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
         
         # Create human behavior controller + orchestrator
-        self.human = HumanBehavior(self.page)
-        self.orchestrator = BehaviorOrchestrator(self.human)
+        # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
+        self.human = HumanBehavior(self.page, rng=self.rng)
+        self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
         
         # Initialize audit logging
         self.logger = AuditLogger(self.session["name"])
@@ -179,7 +180,8 @@ class AgentBrowser:
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
             page_getter=lambda: self.page,
-            light_mode=getattr(self, "light_mode", None)  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            light_mode=getattr(self, "light_mode", None),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            rng=self.rng  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
@@ -581,17 +583,27 @@ class AgentBrowser:
 
 
     async def screenshot_on_error(self, name: str = "error"):
-        """Take screenshot on error for visual debugging."""
+        """Take screenshot on error for visual debugging.
+        #149 fix: always log failure reason (via logger if available), fixed time.time() call, best-effort.
+        """
         if not self.page:
             return None
         try:
             import os
             os.makedirs("screenshots", exist_ok=True)
-            filename = f"screenshots/{name}_{int(time.time)}.png"
+            filename = f"screenshots/{name}_{int(time.time())}.png"
             await self.page.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
-            print(f"Screenshot failed: {e}")
+            # #149: never silent - log the exact failure (print fallback if no logger yet)
+            msg = f"Screenshot failed: {e}"
+            if getattr(self, "logger", None):
+                try:
+                    self.logger.log_error("screenshot_on_error_failed", str(e), {"name": name})
+                except Exception:
+                    print(msg)
+            else:
+                print(msg)
             return None
 
 
@@ -618,8 +630,14 @@ class AgentBrowser:
         if domain is None:
             try:
                 domain = urlparse(url).netloc
-            except:
+            except Exception as e:
+                # #126 fix: narrow bare except; log (if available) so parse errors are not hidden
                 domain = "unknown"
+                if getattr(self, "logger", None):
+                    try:
+                        self.logger.log_error("safe_goto_with_rate_limit_domain_parse_failed", str(e), {"url": url})
+                    except Exception:
+                        pass  # never let logging break the path
 
         # Use *this instance's* rate limiter (isolated from other AgentBrowser instances)
         rl = self.rate_limiter
