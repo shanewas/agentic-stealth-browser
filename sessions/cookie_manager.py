@@ -3,13 +3,25 @@ Cookie & Session Resilience Module
 Handles cookie loading, validation, refresh, and multi-session management.
 Cleaned up for Phase 8: removed duplication with sessions/session_manager.py (#134),
 fixed broken SessionOrchestrator, added persist/resume + distributed bundle support (#236, #298).
+P1 fixes: #90 automatic cleanup of compromised sessions/cookies on ACCOUNT_RESTRICTION;
+#82 at-rest encryption (Fernet authenticated encryption + integrity/HMAC) for cookie files.
 """
 
 import json
 import asyncio
+import base64
+import hashlib
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, timezone
+
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+    Fernet = None
+    InvalidToken = Exception
 
 
 class CookieManager:
@@ -20,16 +32,55 @@ class CookieManager:
         self.cookies: List[Dict] = []
         self.last_refresh: Optional[datetime] = None
 
-    async def load_cookies(self, cookies_path: str) -> Dict[str, Any]:
-        """Load cookies from JSON file (Playwright format or simple list)."""
+    def _get_fernet(self, key: str):
+        """Derive/use Fernet instance for authenticated encryption (enc + HMAC integrity)."""
+        if not HAS_CRYPTO:
+            raise RuntimeError(
+                "cryptography is required for encrypted cookie storage (P1 #82). "
+                "Install with: pip install cryptography"
+            )
+        if not key:
+            raise ValueError("encryption_key must be provided for secure storage")
+        key_bytes = key.encode("utf-8") if isinstance(key, str) else key
+        # Fernet expects 32-byte urlsafe_b64 key (44 chars). Derive via SHA-256 if arbitrary secret provided.
+        if len(key_bytes) != 44:
+            digest = hashlib.sha256(key_bytes).digest()
+            key_bytes = base64.urlsafe_b64encode(digest)
+        return Fernet(key_bytes)
+
+    async def load_cookies(self, cookies_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+        """Load cookies from JSON file (plain or Fernet-encrypted for P1 #82 security).
+
+        If encryption_key provided, attempts authenticated decrypt first (provides confidentiality + integrity).
+        Falls back to plain JSON for backward compatibility if no key or decrypt fails.
+        """
         path = Path(cookies_path)
         if not path.exists():
             return {"status": "error", "message": f"Cookies file not found: {cookies_path}"}
 
         try:
-            with open(path) as f:
-                data = json.load(f)
-            
+            raw = path.read_bytes()
+            data = None
+            used_encryption = False
+
+            if encryption_key and HAS_CRYPTO:
+                try:
+                    f = self._get_fernet(encryption_key)
+                    decrypted = f.decrypt(raw)
+                    data = json.loads(decrypted.decode("utf-8"))
+                    used_encryption = True
+                except (InvalidToken, Exception):
+                    # wrong key or not encrypted -> fall back to plain
+                    pass
+
+            if data is None:
+                # plain text JSON
+                try:
+                    text = raw.decode("utf-8")
+                    data = json.loads(text)
+                except Exception:
+                    data = json.loads(raw) if raw else []
+
             # Support both direct list and wrapped formats
             if isinstance(data, list):
                 self.cookies = data
@@ -38,13 +89,13 @@ class CookieManager:
             else:
                 self.cookies = []
 
-            if self.browser_context:
+            if self.browser_context and self.cookies:
                 try:
                     await self.browser_context.add_cookies(self.cookies)
                 except Exception as e:
-                    return {"status": "partial", "loaded": len(self.cookies), "error": str(e)}
+                    return {"status": "partial", "loaded": len(self.cookies), "encrypted": used_encryption, "error": str(e)}
 
-            return {"status": "success", "cookies_loaded": len(self.cookies)}
+            return {"status": "success", "cookies_loaded": len(self.cookies), "encrypted": used_encryption}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -114,6 +165,26 @@ class CookieManager:
             "note": "Cookie refresh typically requires re-login or token refresh flows outside this manager."
         }
 
+    async def clear_cookies(self) -> Dict[str, Any]:
+        """#90 P1: Clear all in-memory cookies and from the Playwright BrowserContext.
+        Called during compromised session invalidation to prevent reuse of tainted auth.
+        """
+        count = len(self.cookies)
+        self.cookies = []
+        cleared_context = False
+        if self.browser_context:
+            try:
+                await self.browser_context.clear_cookies()
+                cleared_context = True
+            except Exception as e:
+                return {"status": "partial", "cleared_memory": count, "error": str(e)}
+        self.last_refresh = datetime.now(timezone.utc)
+        return {
+            "status": "success",
+            "cleared_memory": count,
+            "cleared_context": cleared_context,
+        }
+
     async def get_cookie_health(self) -> Dict[str, Any]:
         """Return detailed health snapshot of current cookies."""
         if not self.cookies:
@@ -151,3 +222,203 @@ class CookieManager:
             "last_check": now.isoformat()
         }
 
+    async def ensure_fresh_cookies(self, max_age_hours: int = 8) -> Dict[str, Any]:
+        """Check/report cookie freshness (compatibility wrapper).
+
+        Used by AgentBrowser.ensure_cookies_fresh and documented APIs.
+        Delegates to the core refresh check.
+        """
+        return await self.refresh_cookies_if_needed(max_age_hours)
+
+    async def save_cookies_to_file(
+        self, cookies_path: str, encrypt: bool = False, encryption_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Save current cookies (pulled from context or tracked list) to disk.
+
+        Addresses P1 #82: optional at-rest encryption using Fernet (AES + HMAC integrity protection).
+        - encrypt=False (default): plain JSON for backward compat.
+        - encrypt=True + encryption_key: stores authenticated ciphertext (confidentiality + tamper detection).
+        Any string secret works as key (internally derived to Fernet format).
+        """
+        # Pull latest from context when available (defense-in-depth)
+        if self.browser_context:
+            try:
+                fresh = await self.browser_context.cookies()
+                if fresh:
+                    self.cookies = fresh
+            except Exception:
+                pass
+
+        cookies_list = self.cookies or []
+        path = Path(cookies_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if encrypt:
+            if not encryption_key:
+                return {"status": "error", "message": "encryption_key required when encrypt=True (P1 #82 secure cookie storage)"}
+            if not HAS_CRYPTO:
+                return {
+                    "status": "error",
+                    "message": "cryptography package missing. `pip install cryptography` to enable encrypted cookies (#82).",
+                }
+            try:
+                f = self._get_fernet(encryption_key)
+                payload = json.dumps(cookies_list, separators=(",", ":")).encode("utf-8")
+                token = f.encrypt(payload)
+                with open(path, "wb") as fh:
+                    fh.write(token)
+                return {
+                    "status": "success",
+                    "saved": len(cookies_list),
+                    "encrypted": True,
+                    "path": str(path),
+                }
+            except Exception as e:
+                return {"status": "error", "message": f"Encryption save failed: {str(e)}"}
+        else:
+            with open(path, "w") as fh:
+                json.dump(cookies_list, fh, indent=2)
+            return {"status": "success", "saved": len(cookies_list), "encrypted": False, "path": str(path)}
+
+    def create_resilient_session(self, session_name: str) -> Dict[str, Any]:
+        """Create or get a resilient session record."""
+        if not hasattr(self, "sessions"):
+            self.sessions = {}
+            self.cookie_managers = {}
+
+        if session_name not in self.sessions:
+            self.sessions[session_name] = {
+                "name": session_name,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "cookies_count": 0,
+                "last_used": datetime.now(timezone.utc).isoformat(),
+            }
+            self.cookie_managers[session_name] = CookieManager()
+
+        return self.sessions[session_name]
+
+    async def export_session_bundle(self, session_name: str, bundle_path: str) -> Dict[str, Any]:
+        """Export full session + cookies for backup / transfer."""
+        if session_name not in self.sessions:
+            return {"status": "error", "message": "Session not found"}
+
+        session = self.sessions[session_name]
+        bundle = {
+            "meta": session,
+            "cookies": [],
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "version": "1.0",
+        }
+
+        if session_name in self.cookie_managers:
+            cm = self.cookie_managers[session_name]
+            if cm.browser_context:
+                try:
+                    cookies = await cm.browser_context.cookies()
+                    bundle["cookies"] = cookies
+                except Exception as e:
+                    bundle["cookies_error"] = str(e)
+
+        cookies_file = session.get("cookies_file")
+        if cookies_file and Path(cookies_file).exists():
+            try:
+                with open(cookies_file) as f:
+                    bundle["cookies_file_content"] = json.load(f)
+            except Exception:
+                pass
+
+        Path(bundle_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(bundle_path, "w") as f:
+            json.dump(bundle, f, indent=2)
+
+        return {
+            "status": "success",
+            "bundle": bundle_path,
+            "cookies_count": len(bundle.get("cookies", []))
+        }
+
+    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None) -> Dict[str, Any]:
+        """Import a bundle and create/resume session."""
+        if not Path(bundle_path).exists():
+            return {"status": "error", "message": "Bundle not found"}
+
+        with open(bundle_path) as f:
+            bundle = json.load(f)
+
+        meta = bundle.get("meta", {})
+        name = target_session_name or meta.get("name", f"imported-{datetime.now().strftime('%Y%m%d%H%M')}")
+        cookies = bundle.get("cookies", []) or bundle.get("cookies_file_content", [])
+
+        session = self.create_resilient_session(name)
+        session["imported_from"] = bundle_path
+        session["imported_at"] = datetime.now(timezone.utc).isoformat()
+
+        if cookies and name in self.cookie_managers:
+            cm = self.cookie_managers[name]
+            cm.cookies = cookies
+            if cm.browser_context:
+                try:
+                    await cm.browser_context.add_cookies(cookies)
+                except Exception as e:
+                    session["import_cookie_error"] = str(e)
+
+        return {
+            "status": "success",
+            "session": name,
+            "cookies_imported": len(cookies)
+        }
+
+
+class SessionOrchestrator:
+    """High-level coordinator for multiple resilient sessions (MCP / agent use).
+
+    Updated for MCP contract compatibility (#106 hygiene): accepts session_manager
+    in constructor and exposes create/export/import for tests + MCP wrappers.
+    """
+
+    def __init__(self, session_manager: Optional[object] = None):
+        self.main_session_manager = session_manager
+        self.cm = CookieManager()
+        self.active_sessions: Dict[str, Dict] = {}
+        # Compat aliases for existing MCP contract tests (#106)
+        self.sessions = self.active_sessions
+        self.cookie_managers: Dict[str, Any] = {}
+
+    def create_resilient_session(self, session_name: str) -> Dict[str, Any]:
+        """Create session (MCP hygiene / contract compat). Delegates to cm."""
+        sess = self.cm.create_resilient_session(session_name)
+        self.active_sessions[session_name] = sess
+        self.cookie_managers[session_name] = self.cm
+        return sess
+
+    async def start_session(self, name: str, cookies_path: Optional[str] = None) -> Dict[str, Any]:
+        sess = self.cm.create_resilient_session(name)
+        self.active_sessions[name] = sess
+        if cookies_path:
+            await self.cm.load_cookies(cookies_path)
+        return {"status": "started", "session": name}
+
+    async def export_session_bundle(self, session_name: str, bundle_path: str) -> Dict[str, Any]:
+        """Delegate for full MCP test / agent contract."""
+        return await self.cm.export_session_bundle(session_name, bundle_path)
+
+    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None) -> Dict[str, Any]:
+        """Delegate for full MCP test / agent contract."""
+        return await self.cm.import_session_bundle(bundle_path, target_session_name)
+
+    async def export_all(self, out_dir: str) -> Dict[str, Any]:
+        results = {}
+        for name in list(self.active_sessions.keys()):
+            path = f"{out_dir}/{name}_bundle.json"
+            results[name] = await self.cm.export_session_bundle(name, path)
+        return results
+
+    async def save_cookies_to_file(
+        self, session_name: str, cookies_path: str, encrypt: bool = False, encryption_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """#82: Delegate secure/plain cookie save for orchestrator users (MCP/agents)."""
+        if session_name not in self.cookie_managers:
+            # fallback: use main cm
+            return await self.cm.save_cookies_to_file(cookies_path, encrypt, encryption_key)
+        cm = self.cookie_managers.get(session_name) or self.cm
+        return await cm.save_cookies_to_file(cookies_path, encrypt, encryption_key)
