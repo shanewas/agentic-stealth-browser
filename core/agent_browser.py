@@ -269,6 +269,37 @@ class AgentBrowser:
 
         return await self.cookie_manager.get_cookie_health()
 
+
+    async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
+        """Perform natural warm-up before real automation work."""
+        if not self.human:
+            return {"status": "error", "message": "Human behavior not initialized"}
+
+        try:
+            if intensity == "light":
+                await self.human.scroll_naturally(200)
+                await self.human.think(800, 1500)
+
+            elif intensity == "medium":
+                await self.human.scroll_naturally(350)
+                await self.human.think(1200, 2200)
+                await self.human.micro_movement_while_waiting(600)
+
+            elif intensity == "heavy":
+                await self.human.simulate_reading(6.0)
+                await self.human.apply_viewport_jitter()
+
+            return {"status": "success", "intensity": intensity}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    async def ensure_cookies_fresh(self, max_age_hours: int = 8) -> Dict[str, Any]:
+        """Ensure cookies are fresh before long operations."""
+        if not self.cookie_manager:
+            return {"status": "no_manager"}
+
+        return await self.cookie_manager.ensure_fresh_cookies(max_age_hours)
+
     async def close(self):
         if self.browser:
             await self.browser.close()

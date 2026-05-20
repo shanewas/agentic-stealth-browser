@@ -278,3 +278,69 @@ class SessionOrchestrator:
         new_name = f"{session_name}-rotated-{session['rotation_count']}"
         new_session = self.create_resilient_session(new_name)
         return new_session
+
+
+    async def ensure_fresh_cookies(self, max_age_hours: int = 8, force: bool = False) -> Dict[str, Any]:
+        """Ensure cookies are fresh. Auto-refresh if older than max_age_hours or forced."""
+        if not self.last_refresh:
+            self.last_refresh = datetime.now()
+            return {"status": "initialized"}
+
+        age_hours = (datetime.now() - self.last_refresh).total_seconds() / 3600
+
+        if force or age_hours > max_age_hours:
+            refresh_result = await self.refresh_cookies(max_age_hours)
+            return {
+                "status": "refreshed",
+                "age_hours": round(age_hours, 1),
+                "result": refresh_result
+            }
+
+        return {
+            "status": "fresh",
+            "age_hours": round(age_hours, 1)
+        }
+
+    async def warm_up_session(self, intensity: str = "medium") -> Dict[str, Any]:
+        """Perform natural warm-up behavior before using the session for real work."""
+        if not self.browser_context:
+            return {"status": "error", "message": "No browser context available"}
+
+        try:
+            page = await self.browser_context.new_page() if hasattr(self.browser_context, 'new_page') else None
+
+            if intensity == "light":
+                # Light warm-up
+                await asyncio.sleep(1.5)
+                if page:
+                    await page.mouse.wheel(0, 200)
+                    await asyncio.sleep(0.8)
+
+            elif intensity == "medium":
+                # Medium warm-up with human-like behavior
+                await asyncio.sleep(2.0)
+                if page:
+                    await page.mouse.wheel(0, 350)
+                    await asyncio.sleep(1.2)
+                    await page.mouse.wheel(0, -80)
+                    await asyncio.sleep(0.9)
+
+            elif intensity == "heavy":
+                # Heavy warm-up (more realistic)
+                await asyncio.sleep(3.0)
+                if page:
+                    await page.mouse.wheel(0, 420)
+                    await asyncio.sleep(1.8)
+                    await page.mouse.wheel(0, -120)
+                    await asyncio.sleep(2.2)
+                    await page.mouse.wheel(0, 180)
+                    await asyncio.sleep(1.5)
+
+            return {
+                "status": "success",
+                "intensity": intensity,
+                "message": "Warm-up completed"
+            }
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
