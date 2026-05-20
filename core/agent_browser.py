@@ -5,7 +5,7 @@ Combines stealth, human behavior, and session management
 
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 from playwright.async_api import async_playwright, BrowserContext
 
 from stealth.advanced_stealth import get_stealth_script, StealthConfig

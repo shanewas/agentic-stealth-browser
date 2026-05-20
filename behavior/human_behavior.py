@@ -90,7 +90,7 @@ class HumanBehavior:
             )
 
     async def human_click(self, selector: str = None, x: int = None, y: int = None):
-        """Human-like click: move naturally then click with slight overshoot correction"""
+        """Human-like click"""
         if selector:
             try:
                 box = await self.page.query_selector(selector)
@@ -115,7 +115,7 @@ class HumanBehavior:
             await self.page.mouse.up()
 
     async def scroll_naturally(self, total_pixels: int = 400, direction: str = "down"):
-        """Scroll in small, human-like increments with variable speed and pauses"""
+        """Scroll in small, human-like increments"""
         steps = self.rng.randint(5, 12)
         base_step = total_pixels // steps
 
@@ -133,22 +133,13 @@ class HumanBehavior:
             else:
                 await asyncio.sleep(self.rng.uniform(0.12, 0.38))
 
-            if i > 2 and self.rng.random() < 0.08:
-                await asyncio.sleep(self.rng.uniform(0.3, 0.6))
-                reverse = -amount // 3
-                await self.page.mouse.wheel(0, reverse)
-                await asyncio.sleep(self.rng.uniform(0.2, 0.4))
-
     async def simulate_reading(self, duration_seconds: float = 8.0):
         """Simulate a person reading a page"""
         end_time = asyncio.get_event_loop().time() + duration_seconds
-        total_scrolled = 0
 
         while asyncio.get_event_loop().time() < end_time:
             scroll_amount = self.rng.randint(120, 280)
             await self.scroll_naturally(scroll_amount)
-            total_scrolled += scroll_amount
-
             await asyncio.sleep(self.rng.uniform(1.2, 3.8))
 
             if self.rng.random() < 0.18:
@@ -173,7 +164,7 @@ class HumanBehavior:
             await behavior()
 
     async def apply_viewport_jitter(self):
-        """Occasional small viewport size changes (very effective against fingerprinting)"""
+        """Occasional small viewport size changes"""
         try:
             current = await self.page.evaluate("() => ({width: window.innerWidth, height: window.innerHeight})")
             w = current.get("width", 1366)
@@ -191,19 +182,63 @@ class HumanBehavior:
         except:
             pass
 
-    async def occasional_window_resize(self):
-        """Rare but noticeable window resize"""
-        if self.rng.random() < 0.11:
-            try:
-                sizes = [(1366, 768), (1440, 900), (1280, 720), (1536, 864), (1920, 1080)]
-                new_size = self.rng.choice(sizes)
-                await self.page.set_viewport_size({"width": new_size[0], "height": new_size[1]})
-                await self.think(600, 1400)
-            except:
-                pass
+    async def fake_search_action(self, query: str = None):
+        """Simulate a natural search action"""
+        if query is None:
+            queries = ["python developer", "data analyst", "project manager"]
+            query = self.rng.choice(queries)
+
+        try:
+            search_selectors = [
+                "input[type='search']",
+                "input[name='q']",
+                "input[placeholder*='search']"
+            ]
+
+            for selector in search_selectors:
+                try:
+                    el = await self.page.query_selector(selector)
+                    if el:
+                        await self.human_click(selector)
+                        await self.type_like_human(selector, query)
+                        await asyncio.sleep(self.rng.uniform(0.4, 0.9))
+                        await self.page.keyboard.press("Enter")
+                        await self.think(1200, 2400)
+                        return True
+                except:
+                    continue
+
+            await self.page.keyboard.type(query)
+            await asyncio.sleep(0.6)
+            await self.page.keyboard.press("Enter")
+            return True
+
+        except Exception as e:
+            return False
+
+    async def random_idle_behavior(self, duration_seconds: float = 5.0):
+        """Advanced random idle behavior with multiple patterns"""
+        end_time = asyncio.get_event_loop().time() + duration_seconds
+
+        patterns = [
+            lambda: self.think(800, 2200),
+            lambda: self.micro_movement_while_waiting(800),
+            lambda: self.scroll_naturally(self.rng.randint(80, 180)),
+            lambda: asyncio.sleep(self.rng.uniform(1.2, 2.8)),
+        ]
+
+        while asyncio.get_event_loop().time() < end_time:
+            pattern = self.rng.choice(patterns)
+            if asyncio.iscoroutinefunction(pattern):
+                await pattern()
+            else:
+                await pattern()
+
+            if self.rng.random() < 0.3:
+                break
 
     async def micro_movement_while_waiting(self, duration_ms: int = 800):
-        """Small, natural mouse movements while waiting for elements"""
+        """Small, natural mouse movements while waiting"""
         end_time = asyncio.get_event_loop().time() + (duration_ms / 1000)
 
         while asyncio.get_event_loop().time() < end_time:
@@ -222,7 +257,7 @@ class HumanBehavior:
             await asyncio.sleep(self.rng.uniform(0.35, 0.85))
 
     async def idle_while_loading(self, max_wait_seconds: float = 4.0):
-        """Natural idle behavior while page/elements are loading"""
+        """Natural idle behavior while loading"""
         start = asyncio.get_event_loop().time()
 
         while asyncio.get_event_loop().time() - start < max_wait_seconds:
@@ -238,62 +273,4 @@ class HumanBehavior:
                 await behavior()
 
             if self.rng.random() < 0.25:
-                break
-
-async def fake_search_action(self, query: str = None):
-        """Simulate a natural search action (very effective warm-up)."""
-        if query is None:
-            queries = ["python developer", "data analyst", "project manager", "marketing specialist"]
-            query = self.rng.choice(queries)
-
-        try:
-            # Look for search input
-            search_selectors = [
-                "input[type='search']",
-                "input[name='q']",
-                "input[placeholder*='search']",
-                "input[aria-label*='search']"
-            ]
-
-            for selector in search_selectors:
-                try:
-                    el = await self.page.query_selector(selector)
-                    if el:
-                        await self.human_click(selector)
-                        await self.type_like_human(selector, query)
-                        await asyncio.sleep(self.rng.uniform(0.4, 0.9))
-                        await self.page.keyboard.press("Enter")
-                        await self.think(1200, 2400)
-                        return True
-                except:
-                    continue
-
-            # Fallback: just type in body
-            await self.page.keyboard.type(query)
-            await asyncio.sleep(0.6)
-            await self.page.keyboard.press("Enter")
-            return True
-
-        except Exception as e:
-            return False
-
-    async def random_idle_behavior(self, duration_seconds: float = 5.0):
-        """Advanced random idle behavior with multiple patterns."""
-        end_time = asyncio.get_event_loop().time() + duration_seconds
-
-        patterns = [
-            lambda: self.think(800, 2200),
-            lambda: self.micro_movement_while_waiting(800),
-            lambda: self.scroll_naturally(self.rng.randint(80, 180)),
-            lambda: asyncio.sleep(self.rng.uniform(1.2, 2.8)),
-        ]
-
-        while asyncio.get_event_loop().time() < end_time:
-            pattern = self.rng.choice(patterns)
-            if asyncio.iscoroutinefunction(pattern):
-                await pattern()
-            else:
-                await pattern()
-
-            if self.rng.random() < 0.3:
                 break

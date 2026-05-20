@@ -1,3 +1,4 @@
+from collections import defaultdict
 """
 Rate Limiting per Domain/Account
 Prevents getting blocked by enforcing per-domain and per-account limits.

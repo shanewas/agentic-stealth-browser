@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.clawpatch/
+.clawpatch-hermes/
