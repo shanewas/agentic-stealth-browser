@@ -8,13 +8,13 @@ import random
 import asyncio
 import math
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 
 class HumanBehavior:
     """Orchestrates realistic human-like actions"""
 
-    def __init__(self, page, rng: Optional["random.Random"] = None):
+    def __init__(self, page, rng: Optional["random.Random"] = None, device_profile: Optional[Any] = None):
         self.page = page
         self.rng = rng or random.Random()
 
@@ -22,6 +22,11 @@ class HumanBehavior:
         # Every gesture (move, click, micro, correction) starts from previous end point.
         # Combined with initialize + _record + tracker in stealth: fixes #24 #101 completely.
         self.last_mouse_pos = (self.rng.randint(450, 850), self.rng.randint(280, 620))
+
+        self.device_profile = device_profile
+        self.session_start_time = time.time()
+        self.action_count = 0
+        self.fatigue_level = 0.0
 
         # Perf/ops: configurable realism to reduce CDP chatter + tiny sleeps in CI or low-resource envs (#258 #282 #123 #274)
         # Set AGENTIC_STEALTH_REALISM=light or off to skip heavy micro-movements, use bigger steps, shorter thinks
@@ -79,6 +84,41 @@ class HumanBehavior:
         """Simulate thinking / reading pause"""
         delay = self.rng.uniform(min_ms, max_ms) / 1000
         await asyncio.sleep(delay)
+
+    def _update_fatigue(self) -> None:
+        """#251 fatigue ramp."""
+        if not hasattr(self, "session_start_time") or self.session_start_time is None:
+            self.session_start_time = time.time()
+            self.action_count = 0
+            self.fatigue_level = 0.0
+            return
+        elapsed_h = (time.time() - self.session_start_time) / 3600.0
+        self.fatigue_level = min(0.82, 0.05 * elapsed_h + 0.001 * self.action_count)
+
+    def _get_fatigue_factor(self) -> float:
+        self._update_fatigue()
+        return getattr(self, "fatigue_level", 0.0)
+
+    @property
+    def _fatigue_factor(self):
+        def _g(): return self._get_fatigue_factor()
+        return _g
+
+    async def think_before_action(self, importance: str = "normal"):
+        """#251: thinking pauses before important actions (login etc), fatigue aware."""
+        self.action_count += 1
+        self._update_fatigue()
+        fat = self.fatigue_level
+        b = (1100, 3000) if importance == "critical" else (400, 1300)
+        await self.think(int(b[0]*(1+fat*0.5)), int(b[1]*(1+fat*0.9)))
+
+    async def simulate_distraction(self, max_seconds: float = 0.7):
+        """#251 distraction before commit."""
+        self._update_fatigue()
+        if self.realism_level < 1:
+            await asyncio.sleep(0.05)
+            return
+        await asyncio.sleep(self.rng.uniform(0.1, max_seconds * 0.5))
 
     async def type_like_human(self, selector: str, text: str, mistake_rate: float = 0.025):
         """Type with realistic speed, variable rhythm, and occasional corrections.
@@ -248,6 +288,12 @@ class HumanBehavior:
         """Human-like click. Always maintains mouse position continuity (no teleport to 0,0).
         Uses tracked pos for bare clicks; records after action (#24 #101).
         """
+        # #251 automatic think for critical selectors
+        if selector and any(k in (selector or "").lower() for k in ["submit", "login", "send", "save", "post", "confirm", "button"]):
+            try:
+                await self.think_before_action("critical")
+            except Exception:
+                pass
         did_move = False
         if selector:
             try:

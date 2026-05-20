@@ -163,6 +163,18 @@ class AuditLogger:
         
         return entries[-limit:]
 
+    def replay_sequence(self, limit: int = 30) -> list:
+        """#253 lightweight replay from audit logs."""
+        if not self.audit_file.exists():
+            return []
+        entries = self.get_recent_actions(limit * 3)
+        seq = []
+        for e in entries:
+            a = str(e.get("action", "")).lower()
+            if any(k in a for k in ("click", "type", "goto", "submit", "think", "safe")):
+                seq.append({"timestamp": e.get("timestamp"), "action": e.get("action")})
+        return seq[:limit]
+
     def _drain_audit_queue(self) -> None:
         """Background thread: drain audit queue and perform the actual (blocking) JSONL appends.
         Single writer thread eliminates the N-threads-per-action problem and keeps callers unblocked (#44).

@@ -93,6 +93,15 @@ async def _cmd_list_presets(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cmd_replay(args: argparse.Namespace) -> int:
+    """#253 replay from audit logs (lightweight)."""
+    from audit.logger import AuditLogger
+    log = AuditLogger(args.session or "default")
+    seq = log.replay_sequence(getattr(args, "limit", 15))
+    _print_json({"session": log.session_name, "replay_sequence": seq, "count": len(seq)})
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="stealth-browser",
@@ -121,6 +130,11 @@ def main() -> None:
     # list-presets
     lp = subparsers.add_parser("list-presets", help="List available platform presets (#288)")
     lp.set_defaults(func=_cmd_list_presets)
+
+    rp = subparsers.add_parser("replay", help="Replay/inspect actions from audit logs (#253 light)")
+    rp.add_argument("--session", default="default")
+    rp.add_argument("--limit", type=int, default=15)
+    rp.set_defaults(func=_cmd_replay)
 
     # future: metrics, smoke, debug-report, explain etc. (scaffolded)
     m = subparsers.add_parser("metrics", help="Show aggregated metrics (stub)")

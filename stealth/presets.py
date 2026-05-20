@@ -127,6 +127,20 @@ GENERAL_HIGH_STEALTH = PlatformPreset(
     notes="Use as baseline then specialize. Combine with region switching for geo-targeted sites (JP/KR/EU presets)."
 )
 
+# #277: minimal viable stealth light preset (speed-first)
+LIGHT_STEALTH = PlatformPreset(
+    name="light_stealth",
+    description="Minimal viable stealth (light protection, speed-first preset). For CI, high volume, low resource. Light behavior + quick warm-ups.",
+    tls_region=Region.GLOBAL,
+    behavior_intensity="light",
+    warm_up="light",
+    recovery_max_retries=2,
+    recovery_base_backoff=10,
+    locale="en-US",
+    timezone_id="UTC",
+    notes="Speed over max stealth. Aliases: light, minimal, speed_first. Combine with STEALTH_REALISM=light.",
+)
+
 # Registry for easy lookup
 PRESETS: Dict[str, PlatformPreset] = {
     "linkedin": LINKEDIN_2026,
@@ -141,6 +155,11 @@ PRESETS: Dict[str, PlatformPreset] = {
     "general": GENERAL_HIGH_STEALTH,
     "high_stealth": GENERAL_HIGH_STEALTH,
     "default": GENERAL_HIGH_STEALTH,
+    # #277 light preset aliases
+    "light": LIGHT_STEALTH,
+    "light_stealth": LIGHT_STEALTH,
+    "minimal": LIGHT_STEALTH,
+    "speed_first": LIGHT_STEALTH,
 }
 
 
