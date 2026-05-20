@@ -1,6 +1,14 @@
 """
 Session Manager for Agentic Browser
 Supports named sessions, anonymous sessions, and isolation
+
+#87 multi-instance isolation (final closer): FS-level isolation per session name for
+user_data, cookies, state. Complements AgentBrowser per-instance rate_limiter/metrics.
+Basic guidance + warnings:
+- Always pass unique session_name (or let it auto-generate) per logical agent/account.
+- Concurrent AgentBrowsers in one process still share some globals (network, some recovery).
+- For production fleets: run one AgentBrowser (or process) per identity, or use containers.
+- See AgentBrowser class docstring for constructor options to share/coordinate limiters.
 """
 
 import json
@@ -11,7 +19,7 @@ from typing import Optional, Dict, List, Any
 
 
 class SessionManager:
-    """Manages browser sessions with isolation"""
+    """Manages browser sessions with isolation (#87: FS isolation; pair with AgentBrowser instance isolation for rate/metrics)"""
     
     def __init__(self, base_dir: str = "~/.agentic-browser/sessions"):
         self.base_dir = Path(base_dir).expanduser()
