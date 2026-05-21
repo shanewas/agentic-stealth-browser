@@ -133,6 +133,114 @@ agentic-stealth-browser/
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and best practices.
 
+## Responsible Use
+
+This framework is designed for legitimate automation use cases such as:
+
+- Testing your own applications and infrastructure
+- Automating workflows on platforms that permit automation
+- Research and security analysis
+- Accessibility testing
+
+**Important:** Many websites (including LinkedIn, Amazon, and others) prohibit automated access in their Terms of Service. Always:
+
+1. Review the target site's Terms of Service and robots.txt
+2. Obtain proper authorization before automating access
+3. Respect rate limits and avoid causing harm to services
+4. Use this tool responsibly and legally
+
+This project is provided as-is under the MIT License. Users are responsible for complying with applicable laws and terms of service.
+
+## Responsible Use
+
+This framework is designed for legitimate automation use cases such as:
+
+- Testing your own applications and infrastructure
+- Automating workflows on platforms that permit automation
+- Research and security analysis
+- Accessibility testing
+
+**Important:** Many websites (including LinkedIn, Amazon, and others) prohibit automated access in their Terms of Service. Always:
+
+1. Review the target site's Terms of Service and robots.txt
+2. Obtain proper authorization before automating access
+3. Respect rate limits and avoid causing harm to services
+4. Use this tool responsibly and legally
+
+This project is provided as-is under the MIT License. Users are responsible for complying with applicable laws and terms of service.
+
+## Responsible Use
+
+This framework is designed for legitimate automation use cases such as:
+
+- Testing your own applications and infrastructure
+- Automating workflows on platforms that permit automation
+- Research and security analysis
+- Accessibility testing
+
+**Important:** Many websites (including LinkedIn, Amazon, and others) prohibit automated access in their Terms of Service. Always:
+
+1. Review the target site's Terms of Service and robots.txt
+2. Obtain proper authorization before automating access
+3. Respect rate limits and avoid causing harm to services
+4. Use this tool responsibly and legally
+
+This project is provided as-is under the MIT License. Users are responsible for complying with applicable laws and terms of service.
+
+## Responsible Use
+
+This framework is designed for legitimate automation use cases such as:
+
+- Testing your own applications and infrastructure
+- Automating workflows on platforms that permit automation
+- Research and security analysis
+- Accessibility testing
+
+**Important:** Many websites (including LinkedIn, Amazon, and others) prohibit automated access in their Terms of Service. Always:
+
+1. Review the target site's Terms of Service and robots.txt
+2. Obtain proper authorization before automating access
+3. Respect rate limits and avoid causing harm to services
+4. Use this tool responsibly and legally
+
+This project is provided as-is under the MIT License. Users are responsible for complying with applicable laws and terms of service.
+
+## Responsible Use
+
+This framework is designed for legitimate automation use cases such as:
+
+- Testing your own applications and infrastructure
+- Automating workflows on platforms that permit automation
+- Research and security analysis
+- Accessibility testing
+
+**Important:** Many websites (including LinkedIn, Amazon, and others) prohibit automated access in their Terms of Service. Always:
+
+1. Review the target site's Terms of Service and robots.txt
+2. Obtain proper authorization before automating access
+3. Respect rate limits and avoid causing harm to services
+4. Use this tool responsibly and legally
+
+This project is provided as-is under the MIT License. Users are responsible for complying with applicable laws and terms of service.
+
+## Responsible Use
+
+This framework is designed for legitimate automation use cases such as:
+
+- Testing your own applications and infrastructure
+- Automating workflows on platforms that permit automation
+- Research and security analysis
+- Accessibility testing
+
+**Important:** Many websites (including LinkedIn, Amazon, and others) prohibit automated access in their Terms of Service. Always:
+
+1. Review the target site's Terms of Service and robots.txt
+2. Obtain proper authorization before automating access
+3. Respect rate limits and avoid causing harm to services
+4. Use this tool responsibly and legally
+
+This project is provided as-is under the MIT License. Users are responsible for complying with applicable laws and terms of service.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
