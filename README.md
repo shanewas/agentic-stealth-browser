@@ -1,16 +1,15 @@
 # Agentic Stealth Browser
 
-Production-grade, human-mimicking browser automation framework for autonomous agents. Built to survive modern anti-bot systems (Cloudflare, LinkedIn, Amazon, Upwork, etc.).
+A Python framework that makes browser automation look human. Built for autonomous agents that need to navigate websites protected by Cloudflare, LinkedIn, Amazon, and other anti-bot systems.
 
-## Features
+## Why This Exists
 
-- **Stealth Layer** — TLS fingerprint profiles (US, Japan, EU, Korea), canvas/WebGL/AudioContext spoofing, WebRTC isolation, JA3/JA4 fingerprinting
-- **Human Behavior** — Bézier curve mouse movement, natural typing with pauses/corrections, variable-speed scrolling, distraction simulation, fatigue-aware degradation
-- **Anti-Block Recovery** — Automatic detection of CAPTCHAs, rate limits, account restrictions, and proxy blocks with platform-specific recovery strategies
-- **Account Management** — Health scoring with automatic cooling off, 14-day warming schedules, session checkpointing for cross-host migration
-- **Proxy Support** — Residential proxy integration with health tracking, rotation, and HTTP/SOCKS format support
-- **Platform Presets** — Pre-configured profiles for LinkedIn, Amazon, Cloudflare, and more
-- **MCP Integration** — Model Context Protocol server for AI agent integration
+Standard browser automation (`page.goto()`, `page.click()`) gets detected instantly. This framework solves that by combining:
+
+- **TLS fingerprint spoofing** — matches real browser TLS handshakes
+- **Human behavior simulation** — natural mouse, typing, scrolling with realistic imperfections
+- **Automatic recovery** — detects blocks (CAPTCHAs, rate limits) and recovers without crashing
+- **Account lifecycle management** — warming, health scoring, cooling off
 
 ## Installation
 
@@ -26,13 +25,13 @@ from core.agent_browser import AgentBrowser
 import asyncio
 
 async def main():
-    browser = AgentBrowser(session_name="my-session")
+    browser = AgentBrowser(session_name="demo")
     await browser.launch(headless=True)
 
-    # Navigate with full stealth + automatic recovery
+    # This handles stealth, human behavior, and recovery automatically
     await browser.safe_goto("https://example.com")
 
-    # Human-like behavior
+    # Add human-like actions
     await browser.human.scroll_naturally(400)
     await browser.human.think(1500, 2800)
 
@@ -41,34 +40,42 @@ async def main():
 asyncio.run(main())
 ```
 
-## Production Flow
+## Real-World Example
 
-For protected sites (LinkedIn, Upwork, etc.):
+For protected sites, load real cookies and use a platform preset:
 
 ```python
-from core.agent_browser import AgentBrowser
-import asyncio
-
-async def main():
-    browser = AgentBrowser(session_name="production")
-    await browser.launch(headless=True, preset="linkedin_2026")
-
-    # Load real cookies exported from your browser
-    await browser.load_cookies_from_file("cookies.json")
-
-    # Warm up with human-like behavior
-    await browser.warm_up_before_work(intensity="heavy")
-
-    # Navigate with built-in recovery
-    await browser.safe_goto(
-        "https://www.linkedin.com/in/target-profile",
-        platform="linkedin"
-    )
-
-    await browser.close()
-
-asyncio.run(main())
+browser = AgentBrowser(session_name="linkedin")
+await browser.launch(preset="linkedin_2026")
+await browser.load_cookies_from_file("cookies.json")
+await browser.warm_up_before_work(intensity="heavy")
+await browser.safe_goto("https://www.linkedin.com/feed/", platform="linkedin")
 ```
+
+The flow: **cookies → warm-up → navigate → recover if blocked → act human**.
+
+## How It Works
+
+```
+AgentBrowser
+├── Stealth      → TLS profiles, canvas/WebGL spoofing, WebRTC isolation
+├── Behavior     → Bézier mouse, natural typing, distraction simulation
+├── Recovery     → Detects blocks → rotates proxy/session → retries
+├── Accounts     → Health scoring, 14-day warming, session checkpointing
+└── Proxy        → Residential proxy with rotation and health tracking
+```
+
+## Key Features
+
+| Feature | What It Does |
+|---|---|
+| **TLS Fingerprinting** | Region-specific profiles (US, Japan, EU, Korea) with JA3/JA4 support |
+| **Human Behavior** | Mouse with wobble, typing with mistakes, variable scrolling, fatigue |
+| **Auto Recovery** | Detects CAPTCHAs, rate limits, blocks — recovers automatically |
+| **Account Warming** | 14-day gradual ramp-up so new accounts don't get flagged |
+| **Session Checkpoints** | Export/import browser state for cross-host migration |
+| **Platform Presets** | Pre-configured profiles for LinkedIn, Amazon, Cloudflare |
+| **MCP Server** | Integration with AI agents via Model Context Protocol |
 
 ## Configuration
 
@@ -88,18 +95,6 @@ await browser.launch(preset="amazon_2026")     # Amazon
 await browser.launch(preset="cloudflare")      # Cloudflare-protected sites
 ```
 
-## Testing
-
-```bash
-# All tests
-python -m pytest tests/ -q
-
-# Fast subset
-python -m pytest tests/test_stealth_modules.py tests/test_contract_agent_browser.py -q
-```
-
-493 tests across 23 test files.
-
 ## Project Structure
 
 ```
@@ -116,7 +111,7 @@ agentic-stealth-browser/
 ├── linkedin/       # LinkedIn-specific actions
 ├── scraping/       # Safe page scraping utilities
 ├── docs/           # Architecture Decision Records and guides
-└── tests/          # Full test suite
+└── tests/          # 493 tests across 23 files
 ```
 
 ## Documentation
