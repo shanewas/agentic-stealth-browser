@@ -1,0 +1,45 @@
+# Docker Compose for Agentic Stealth Browser
+# Usage: docker compose up -d
+#        docker compose exec app python -c "from core.agent_browser import AgentBrowser; ..."
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: production/Dockerfile
+    container_name: agentic-stealth-browser
+    restart: unless-stopped
+    environment:
+      - STEALTH_HEADLESS=true
+      - STEALTH_REGION=global
+      - DATA_DIR=/data
+      - PYTHONPATH=/app
+    volumes:
+      # Persistent data directories
+      - ./data/sessions:/data/sessions
+      - ./data/logs:/data/logs
+      - ./data/screenshots:/data/screenshots
+      - ./data/cookies:/data/cookies
+      - ./data/warming:/data/warming
+    # Optional: mount local code for development
+    # - ./core:/app/core:ro
+    # - ./stealth:/app/stealth:ro
+    # - ./behavior:/app/behavior:ro
+    # - ./recovery:/app/recovery:ro
+    # - ./proxy:/app/proxy:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "from core.agent_browser import AgentBrowser; b = AgentBrowser(session_name='healthcheck'); print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Run as non-root (already set in Dockerfile)
+    user: "1000:1000"
