@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-stealth-browser"
+version = "0.8.0"
+description = "Production-grade, human-mimicking browser automation framework for autonomous agents. Survives modern anti-bot systems."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Shane W", email = "shanewas@users.noreply.github.com"},
+]
+keywords = ["stealth", "browser", "automation", "playwright", "anti-bot", "scraping", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Testing",
+    "Framework :: AsyncIO",
+]
+dependencies = [
+    "playwright",
+    "aiohttp",
+    "cryptography",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+]
+
+[project.scripts]
+agentic-stealth-browser = "production.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "core",
+    "stealth",
+    "sessions",
+    "behavior",
+    "recovery",
+    "audit",
+    "proxy",
+    "production",
+    "scraping",
+    "ai",
+    "linkedin",
+]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.cfg", "py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[project.urls]
+Homepage = "https://github.com/shanewas/agentic-stealth-browser"
+Repository = "https://github.com/shanewas/agentic-stealth-browser"
+Issues = "https://github.com/shanewas/agentic-stealth-browser/issues"
+Documentation = "https://github.com/shanewas/agentic-stealth-browser/tree/master/docs"
+Changelog = "https://github.com/shanewas/agentic-stealth-browser/blob/master/CHANGELOG.md"
