@@ -16,7 +16,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -48,7 +48,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -104,7 +104,7 @@ jobs:
     name: Build / Import smoke-test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -127,7 +127,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5

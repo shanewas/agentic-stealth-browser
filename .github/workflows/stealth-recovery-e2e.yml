@@ -23,7 +23,7 @@ jobs:
     name: Fast unit tests (stealth + recovery)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -46,7 +46,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch' && github.event.inputs.run_real_e2e == 'true') || github.event_name == 'schedule'
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
