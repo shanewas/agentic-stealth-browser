@@ -825,7 +825,15 @@ class AgentBrowser:
         
         for attempt in range(max_retries):
             try:
-                if warm_up and "linkedin.com" in url and attempt == 0 and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: legacy goto path now skips warm-up cost/latency under light_mode (matches safe_goto + class/launch doc promises for launch/warm-up perf)
+                # Safe LinkedIn warm-up heuristic (fixes CodeQL py/incomplete-url-substring-sanitization)
+                # Only trigger for actual linkedin.com / *.linkedin.com hosts, not arbitrary substrings in attacker-controlled URLs
+                _is_linkedin = False
+                try:
+                    _netloc = urlparse(url).netloc.lower()
+                    _is_linkedin = _netloc == "linkedin.com" or _netloc.endswith(".linkedin.com")
+                except Exception:
+                    _is_linkedin = False
+                if warm_up and _is_linkedin and attempt == 0 and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: legacy goto path now skips warm-up cost/latency under light_mode (matches safe_goto + class/launch doc promises for launch/warm-up perf)
                     # Natural session warming
                     await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                     await self.human.scroll_naturally(280)
@@ -904,7 +912,15 @@ class AgentBrowser:
             return await self.goto(url, warm_up=warm_up)
 
         async def _navigate():
-            if warm_up and "linkedin.com" in url and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto now skips linkedin warm-up cost/latency under light_mode (matches legacy goto + doc promises for launch/warm-up perf)
+            # Safe LinkedIn warm-up heuristic (fixes CodeQL py/incomplete-url-substring-sanitization)
+            # Only trigger for actual linkedin.com / *.linkedin.com hosts, not arbitrary substrings in attacker-controlled URLs
+            _is_linkedin = False
+            try:
+                _netloc = urlparse(url).netloc.lower()
+                _is_linkedin = _netloc == "linkedin.com" or _netloc.endswith(".linkedin.com")
+            except Exception:
+                _is_linkedin = False
+            if warm_up and _is_linkedin and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto now skips linkedin warm-up cost/latency under light_mode (matches legacy goto + doc promises for launch/warm-up perf)
                 await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
                 await self.human.scroll_naturally(280)
                 await self.human.think(900, 1600)

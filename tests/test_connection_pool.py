@@ -59,6 +59,7 @@ class TestConnectionPoolEviction:
         pool.get_or_create_context("d.com")
 
         assert "a.com" not in pool._contexts
+        # codeql[py/incomplete-url-substring-sanitization]: test fixture domain key, not URL substring sanitization
         assert "d.com" in pool._contexts
 
     def test_access_moves_to_end(self):
@@ -74,6 +75,7 @@ class TestConnectionPoolEviction:
         pool.get_or_create_context("d.com")
 
         assert "a.com" in pool._contexts
+        # codeql[py/incomplete-url-substring-sanitization]: test fixture domain key, not URL substring sanitization
         assert "b.com" not in pool._contexts
 
 
@@ -90,6 +92,7 @@ class TestConnectionPoolTTL:
         # Wait for expiration
         time.sleep(0.15)
         expired = pool.cleanup_expired()
+        # codeql[py/incomplete-url-substring-sanitization]: test fixture domain key, not URL substring sanitization
         assert "example.com" in expired
         assert len(pool._contexts) == 0
 

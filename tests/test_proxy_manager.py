@@ -91,6 +91,7 @@ class TestProxyManagerPlaywrightArgs:
         )
         args = manager.get_playwright_proxy_args()
         assert args["server"].startswith("socks5://")
+        # codeql[py/incomplete-url-substring-sanitization]: test fixture string, not untrusted URL sanitization
         assert "gate.decodo.com" in args["server"]
         assert "10001" in args["server"]
         assert args["username"] is not None
@@ -105,6 +106,7 @@ class TestProxyManagerPlaywrightArgs:
         )
         args = manager.get_playwright_proxy_args(prefer_http=True)
         assert args["server"].startswith("http://")
+        # codeql[py/incomplete-url-substring-sanitization]: test fixture string, not untrusted URL sanitization
         assert "gate.decodo.com" in args["server"]
 
     def test_get_playwright_proxy_args_empty_when_no_config(self):
@@ -250,6 +252,7 @@ class TestProxyManagerUserInfo:
         )
         curl_str = manager.get_curl_proxy_string()
         assert "socks5://" in curl_str
+        # codeql[py/incomplete-url-substring-sanitization]: test fixture string, not untrusted URL sanitization
         assert "gate.decodo.com" in curl_str
 
     def test_safe_extract_base_user(self):
