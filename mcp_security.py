@@ -78,7 +78,7 @@ class FileAccessPolicy:
                         return False, f"file type not allowed: {path_suffix}"
                 return True, "path within allowed directory"
 
-        return False, f"path not within any allowed directory"
+        return False, "path not within any allowed directory"
 
     def add_allowed_dir(self, directory: str) -> None:
         """Add a directory to the allowed list."""

@@ -3,7 +3,6 @@ Tests for AccountHealth scoring and cooling off.
 Addresses #154: Account health scoring + automatic cooling off.
 """
 
-import pytest
 import time
 import sys
 from pathlib import Path

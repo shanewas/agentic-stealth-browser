@@ -14,7 +14,6 @@ This module handles profile selection, logging, and launch arg recommendations. 
 
 from typing import Dict, Any, Optional
 from enum import Enum
-import random
 from audit.logger import AuditLogger
 
 
@@ -210,7 +209,7 @@ class TLSFingerprintManager:
         # Add some entropy reduction
         args.extend([
             "--disable-blink-features=AutomationControlled",
-            f"--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         ])
         return args
 

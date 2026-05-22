@@ -11,10 +11,9 @@ Addresses P1 crash (#100 / related to #256 E2E recovery):
 
 import asyncio
 import json
-import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -127,7 +126,7 @@ class DetectionTester:
                 print(f"  ⚠️  DETECTED — Signals: {result['signals']}")
                 self.scorecard["detected"] += 1
             else:
-                print(f"  ✅ PASSED — No obvious detection signals")
+                print("  ✅ PASSED — No obvious detection signals")
                 self.scorecard["passed"] += 1
 
         except Exception as e:

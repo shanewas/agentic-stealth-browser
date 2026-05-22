@@ -3,7 +3,6 @@ Tests for TLS JA3/JA4 fingerprinting.
 Addresses #75: TLS fingerprinting JA3/JA4 support.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

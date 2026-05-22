@@ -3,9 +3,7 @@ Snapshot tests for CDP commands sent during human sessions.
 Addresses #164: Add snapshot tests for exact CDP commands.
 """
 
-import pytest
 import sys
-import json
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent

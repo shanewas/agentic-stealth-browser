@@ -8,9 +8,8 @@ PersonaRotator slowly evolves device profile, typing speed, scroll patterns, etc
 
 import time
 import random
-import math
-from typing import Optional, Dict, Any, List, Tuple
-from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List
+from dataclasses import dataclass
 
 
 @dataclass

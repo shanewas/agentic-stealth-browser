@@ -5,7 +5,6 @@ This module provides examples and utilities for exporting metrics
 to Prometheus and OpenTelemetry for production monitoring.
 """
 
-from typing import Optional, Dict, Any
 from production.metrics import MetricsCollector
 
 

@@ -166,7 +166,7 @@ def test_presets_import_and_basic_diversity():
 
 def test_tls_manager_basic_selection():
     """TLS profile manager basic contract (supports #264)."""
-    from stealth.tls_fingerprint import get_tls_manager, Region
+    from stealth.tls_fingerprint import get_tls_manager
     for r in ["us", "japan", "global"]:
         m = get_tls_manager(r)
         p = m.get_profile()

@@ -14,7 +14,6 @@ import inspect
 import asyncio
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent

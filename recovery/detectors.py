@@ -7,7 +7,7 @@ for site-specific or advanced block detection beyond the built-in patterns.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from dataclasses import dataclass
 
 from recovery.anti_block_orchestrator import BlockType, RecoveryContext

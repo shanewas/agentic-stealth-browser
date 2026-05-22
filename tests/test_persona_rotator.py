@@ -3,7 +3,6 @@ Tests for Rotating Behavioral Personas.
 Addresses #129: Rotating between multiple behavioral personas per account over time.
 """
 
-import pytest
 import time
 import random
 import sys

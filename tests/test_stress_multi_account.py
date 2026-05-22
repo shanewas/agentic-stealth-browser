@@ -3,7 +3,6 @@ Load/stress tests for long-running multi-account scenarios.
 Addresses #140: No load or stress test for long-running multi-account scenarios.
 """
 
-import pytest
 import time
 import asyncio
 import sys
@@ -144,7 +143,7 @@ class TestSessionCheckpointStress:
 
     def test_multiple_checkpoints_same_account(self, tmp_path):
         """Multiple checkpoints for same account should not conflict."""
-        from core.session_checkpoint import SessionManager, SessionCheckpoint, CheckpointMetadata
+        from core.session_checkpoint import SessionManager
         manager = SessionManager(data_dir=str(tmp_path))
 
         for i in range(10):

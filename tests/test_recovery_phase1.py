@@ -3,8 +3,6 @@ Phase 1 Recovery Tests
 Tests for the anti-block recovery orchestrator basic functionality.
 """
 
-import pytest
-import asyncio
 import sys
 from pathlib import Path
 

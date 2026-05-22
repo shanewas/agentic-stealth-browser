@@ -6,10 +6,9 @@ Uses historical block data to adjust behavior parameters automatically.
 """
 
 import time
-import math
 import random
 from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

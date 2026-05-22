@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from collections import defaultdict
 
 
@@ -72,8 +72,8 @@ class MetricsCollector:
         lines = []
 
         # Add correlation_id as a label
-        lines.append(f'# HELP correlation_id Current correlation ID for tracing')
-        lines.append(f'# TYPE correlation_id gauge')
+        lines.append('# HELP correlation_id Current correlation ID for tracing')
+        lines.append('# TYPE correlation_id gauge')
         lines.append(f'correlation_id{{id="{self.correlation_id}"}} 1')
 
         # Counters

@@ -3,12 +3,11 @@ Advanced Stealth Module for Agentic Browsers
 Production-grade fingerprint spoofing + anti-detection
 """
 
-import random
 import functools
 import json
 import re as _re
 from typing import Dict, Any
-from .cache import get_cached_script as _get_cached_script, make_cache_key, _script_cache
+from .cache import make_cache_key, _script_cache
 
 class StealthConfig:
     """Consistent high-quality fingerprint profile"""

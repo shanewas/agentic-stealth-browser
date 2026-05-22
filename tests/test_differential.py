@@ -3,7 +3,6 @@ Differential testing: patched vs unpatched browser for the same actions.
 Addresses #180: No differential testing between patched and unpatched browser.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

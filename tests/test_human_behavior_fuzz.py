@@ -6,7 +6,6 @@ Tests that human behavior methods handle edge cases, extreme values,
 and invalid inputs gracefully without crashing or producing unreasonable results.
 """
 
-import pytest
 import asyncio
 import sys
 import random

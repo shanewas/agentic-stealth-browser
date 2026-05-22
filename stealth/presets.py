@@ -14,7 +14,6 @@ These are high-value DX improvements: one-liner for operators to get good defaul
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
-from enum import Enum
 
 from stealth.tls_fingerprint import Region
 

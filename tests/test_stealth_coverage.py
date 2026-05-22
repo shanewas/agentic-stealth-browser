@@ -3,7 +3,6 @@ Additional stealth module test coverage.
 Addresses #132: Current unit tests have almost no coverage of the stealth patch modules.
 """
 
-import pytest
 import sys
 from pathlib import Path
 
