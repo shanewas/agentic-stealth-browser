@@ -29,13 +29,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install flake8 ruff
 
-      - name: Run flake8 (allow existing failures)
+      - name: Run flake8 (critical errors — blocking)
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Critical error classes (syntax, undefined names, etc.) are now blocking.
+        # Broader style/complexity checks below remain non-blocking during Phase 8 cleanup.
+
+      - name: Run flake8 (style/complexity — non-blocking for now)
+        run: |
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
         continue-on-error: true
 
-      - name: Run ruff check (allow existing failures)
+      - name: Run ruff check (non-blocking during tech-debt cleanup)
         run: ruff check . || true
         continue-on-error: true
 
@@ -69,9 +74,12 @@ jobs:
             --ignore=tests/test_phase7_fixes.py \
             -q --tb=short \
             --cov=core --cov=stealth --cov=behavior --cov=recovery --cov=proxy --cov=production \
-            --cov-report=xml --cov-report=term-missing || true
+            --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=65
         env:
           PYTEST_ADDOPTS: "-p no:timeout"
+        # Coverage threshold (65%) is now enforced. Raise this over time as we improve coverage.
+        # The ignored E2E tests are the known flaky Cloudflare ones; core unit tests must pass cleanly.
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
