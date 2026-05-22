@@ -5,7 +5,6 @@ Addresses #158: Add mutation testing to verify stealth patches are effective.
 Tests that removing or modifying stealth patches causes detectable changes.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

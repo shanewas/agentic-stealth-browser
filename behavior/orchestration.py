@@ -3,7 +3,6 @@ Behavioral Orchestration Layer
 High-level human-like flows for agentic browsing
 """
 
-import asyncio
 import random
 from typing import Optional
 

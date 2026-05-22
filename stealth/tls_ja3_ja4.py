@@ -6,8 +6,7 @@ Provides JA3/JA4 string generation and comparison for TLS fingerprint analysis.
 """
 
 import hashlib
-import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 
 
 class JA3Fingerprint:

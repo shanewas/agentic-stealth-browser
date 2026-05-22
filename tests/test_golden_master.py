@@ -3,7 +3,6 @@ Golden master / visual regression tests for human-like gestures.
 Addresses #117: No golden master or visual regression tests for human-like gestures.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

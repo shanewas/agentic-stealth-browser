@@ -4,7 +4,7 @@ Addresses #168: First-class support for LinkedIn-specific actions.
 """
 
 import random
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 
 
 class LinkedInActions:

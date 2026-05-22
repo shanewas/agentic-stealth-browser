@@ -12,7 +12,7 @@ Tracks risk factors from browser activity and provides:
 import time
 import math
 from typing import Optional, Dict, List, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 

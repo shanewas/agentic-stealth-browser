@@ -11,9 +11,8 @@ P3 #98 fix: AIHooks now provides real value even without an LLM provider:
 - Structured extraction via regex/heuristics
 """
 
-from typing import Any, Dict, Optional, List
+from typing import Dict, Optional, List
 import re
-import json
 
 
 class AIHooks:

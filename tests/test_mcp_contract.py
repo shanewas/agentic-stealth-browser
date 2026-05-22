@@ -105,8 +105,6 @@ def test_tls_profile_selection_contract():
 
 def test_health_status_contract_shape():
     """Critical testing gap: MCP/CLI health status return shape contract (#281) + preset wiring"""
-    from core.agent_browser import AgentBrowser
-    from stealth.presets import get_preset
     async def _run():
         # Use ephemeral anonymous browser (no real net if possible, but launch needs pw)
         b = AgentBrowser(session_name="health-contract-test", anonymous=True, ephemeral=True)

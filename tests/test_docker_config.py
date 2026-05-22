@@ -3,7 +3,6 @@ Tests for Docker configuration.
 Addresses #15/#13: Docker hardening verification.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

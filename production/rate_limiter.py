@@ -35,7 +35,7 @@ See AgentBrowser class docs + README "Multi-Instance & Scalability (#87)" sectio
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

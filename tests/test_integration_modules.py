@@ -4,7 +4,6 @@ Tests that AccountHealth, AccountWarmer, ConnectionPool, and AdaptiveTuner
 are properly initialized and wired into safe_goto.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, BrowserContext, Browser
 
-from stealth.advanced_stealth import get_stealth_script, StealthConfig, check_stealth_compatibility, get_playwright_version
+from stealth.advanced_stealth import get_stealth_script, check_stealth_compatibility
 from stealth.tls_fingerprint import get_tls_manager
 from recovery.anti_block_orchestrator import AntiBlockOrchestrator
 from behavior.human_behavior import HumanBehavior
@@ -33,11 +33,11 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-from production.rate_limiter import domain_limiter, account_limiter, DomainRateLimiter, AccountRateLimiter, ToolRateLimiter, RateLimitExceeded
-from production.metrics import metrics, MetricsCollector
+from production.rate_limiter import AccountRateLimiter, ToolRateLimiter
+from production.metrics import MetricsCollector
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
-from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
+from stealth.profiles import Persona, DEFAULT_PERSONA
 
 
 # Lightweight library-specific exception hierarchy for #249 DX improvement.

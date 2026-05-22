@@ -654,7 +654,7 @@ class HumanBehavior:
             await self.page.keyboard.press("Enter")
             return True
 
-        except Exception as e:
+        except Exception:
             return False
 
     async def random_idle_behavior(self, duration_seconds: float = 5.0):

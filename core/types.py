@@ -19,32 +19,9 @@ from typing import (
     Protocol,
     runtime_checkable,
 )
-from dataclasses import dataclass
 
 # Re-export main classes for convenience
-from core.agent_browser import (
-    AgentBrowser,
-    StealthBrowserError,
-    LaunchError,
-    RecoveryError,
-    BlockDetectedError,
-    RateLimitError,
-)
-from stealth.profiles import Persona, DeviceProfile, DEFAULT_PERSONA, get_persona, list_personas
-from stealth.tls_fingerprint import TLSFingerprintManager, Region, get_tls_manager
-from stealth.advanced_stealth import StealthConfig, get_stealth_script
-from proxy.proxy_manager import ProxyManager, ProxyConfig, ProxyTier
-from sessions.session_manager import SessionManager
-from behavior.human_behavior import HumanBehavior
-from recovery.anti_block_orchestrator import (
-    AntiBlockOrchestrator,
-    BlockType,
-    RecoveryAction,
-    RecoveryContext,
-    ErrorSeverity,
-)
-from production.metrics import MetricsCollector
-from production.rate_limiter import AccountRateLimiter, ToolRateLimiter, RateLimitExceeded
+from proxy.proxy_manager import ProxyTier
 
 
 # === TypedDicts for return types ===

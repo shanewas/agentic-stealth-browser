@@ -3,8 +3,7 @@ Advanced Fingerprinting Scorecard for Agentic Stealth Browser
 Comprehensive evaluation of browser fingerprinting resistance.
 """
 
-import asyncio
-from typing import Dict, Any
+from typing import Dict
 
 
 class FingerprintScorecard:

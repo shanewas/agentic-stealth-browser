@@ -3,12 +3,10 @@ Tests for AccountWarmer.
 Addresses #137: Account warming and gradual activity ramp-up.
 """
 
-import pytest
 import time
 import sys
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:

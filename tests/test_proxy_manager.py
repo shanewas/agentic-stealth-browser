@@ -3,10 +3,8 @@ Tests for Proxy Manager.
 Addresses #22: Verify proxy args reach Playwright launch.
 """
 
-import pytest
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:

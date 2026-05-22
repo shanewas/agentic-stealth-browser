@@ -3,7 +3,6 @@ Tests for Stealth Script & Profile Caching.
 Addresses #72/#63: Caching of generated stealth scripts and device profiles.
 """
 
-import pytest
 import time
 import sys
 from pathlib import Path

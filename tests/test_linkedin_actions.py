@@ -3,7 +3,6 @@ Tests for LinkedIn-specific actions.
 Addresses #168: LinkedIn-specific actions support.
 """
 
-import pytest
 import sys
 from pathlib import Path
 

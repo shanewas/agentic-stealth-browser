@@ -3,7 +3,6 @@ Tests for Connection Pool.
 Addresses #135: Connection/context reuse between sequential navigations.
 """
 
-import pytest
 import time
 import sys
 from pathlib import Path

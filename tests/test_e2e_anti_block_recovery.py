@@ -37,7 +37,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.agent_browser import AgentBrowser
-from recovery.anti_block_orchestrator import AntiBlockOrchestrator, BlockType
+from recovery.anti_block_orchestrator import AntiBlockOrchestrator
 
 
 def _e2e_enabled() -> bool:
@@ -169,11 +169,11 @@ async def _run_e2e_anti_block_recovery():
             print("\n" + "-" * 70)
             print("VERIFICATION")
             print("-" * 70)
-            print(f"• Real site (nowsecure.nl) safe_goto completed without unhandled crash: yes")
+            print("• Real site (nowsecure.nl) safe_goto completed without unhandled crash: yes")
             print(f"• Real site recovery invocations: {len(real_site_recoveries)}")
             print(f"• Direct orchestrator simulation calls: {len(direct_sim_calls)}")
             print(f"• Orchestrator still healthy after test: {browser.recovery is not None}")
-            print(f"• Browser context manager cleanup will run automatically: yes")
+            print("• Browser context manager cleanup will run automatically: yes")
 
             # The test is considered successful if we reached here:
             # - no unexpected exceptions

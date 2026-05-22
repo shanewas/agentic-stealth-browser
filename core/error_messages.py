@@ -9,7 +9,7 @@ Provides:
 """
 
 import re
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 
 # Common Playwright error patterns and their user-friendly explanations

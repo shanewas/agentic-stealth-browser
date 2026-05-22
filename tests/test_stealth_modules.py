@@ -9,7 +9,6 @@ Tests:
 - profiles.py: Persona, DeviceProfile
 """
 
-import pytest
 import json
 import re
 import sys
@@ -24,7 +23,6 @@ from stealth.advanced_stealth import (
     StealthConfig,
     get_stealth_script,
     check_stealth_compatibility,
-    get_playwright_version,
     get_behavior_script,
 )
 from stealth.tls_fingerprint import (
@@ -34,8 +32,6 @@ from stealth.tls_fingerprint import (
 )
 from stealth.headers import get_extra_http_headers
 from stealth.profiles import (
-    Persona,
-    DeviceProfile,
     DEFAULT_PERSONA,
     get_persona,
     list_personas,

@@ -5,7 +5,6 @@ Addresses #62: Session checkpoint/export for resumption across hosts or restarts
 
 import pytest
 import time
-import json
 import base64
 import sys
 from pathlib import Path
