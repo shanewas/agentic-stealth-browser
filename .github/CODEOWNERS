@@ -1,0 +1,17 @@
+# CODEOWNERS file
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo.
+# These owners will be requested for review when someone opens a pull request.
+*       @shanewas
+
+# CI / Release / Security configuration
+.github/                    @shanewas
+pyproject.toml              @shanewas
+SECURITY.md                 @shanewas
+
+# Documentation
+docs/                       @shanewas
+README.md                   @shanewas
+CHANGELOG.md                @shanewas
+OPEN_SOURCE_READINESS.md    @shanewas
