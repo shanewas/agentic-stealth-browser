@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-493%20passing-brightgreen)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A565%25-green)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
 
 A Python framework that makes browser automation look human. Built for autonomous agents that need to navigate websites protected by Cloudflare, LinkedIn, Amazon, and other anti-bot systems.
 
@@ -81,6 +82,57 @@ AgentBrowser
 | **Session Checkpoints** | Export/import browser state for cross-host migration |
 | **Platform Presets** | Pre-configured profiles for LinkedIn, Amazon, Cloudflare |
 | **MCP Server** | Integration with AI agents via Model Context Protocol |
+
+## MCP Setup
+
+Use this framework with AI agents (Claude Desktop, Cursor, Windsurf, etc.) via MCP.
+
+### 1. Install the MCP Server
+
+```bash
+pip install agentic-stealth-browser
+```
+
+### 2. Configure Your MCP Client
+
+**Claude Desktop** — Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "stealth-browser": {
+      "command": "python",
+      "args": ["-m", "production.mcp_server"],
+      "env": {}
+    }
+  }
+}
+```
+
+**Cursor / Windsurf** — Add to `.cursorrules` or MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "stealth-browser": {
+      "command": "python",
+      "args": ["-m", "production.mcp_server"]
+    }
+  }
+}
+```
+
+### 3. Available MCP Tools
+
+| Tool | Description |
+|---|---|
+| `stealth_launch` | Launch browser with stealth + region preset |
+| `stealth_navigate` | Navigate with full recovery and human behavior |
+| `stealth_load_cookies` | Load cookies from real browser |
+| `stealth_set_region` | Switch TLS fingerprint region (US, Japan, EU, Korea) |
+| `stealth_scrape` | Navigate and extract page content |
+| `stealth_status` | Check browser health and session state |
+| `stealth_close` | Close browser and cleanup |
 
 ## Configuration
 
