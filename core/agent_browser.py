@@ -76,6 +76,33 @@ class RateLimitError(StealthBrowserError):
     pass
 
 
+def _build_launch_args(base_args, extra_args, cdp_flags=None):
+    """Build launch args with stable order-preserving deduplication.
+
+    Merges base_args + extra_args, keeping first occurrence of each arg.
+    Optionally appends CDP flags (also order-preserving, deduped).
+    Returns a list of args with deterministic ordering.
+    """
+    merged = list(dict.fromkeys(list(base_args or []) + list(extra_args or [])))
+    if cdp_flags:
+        merged = list(dict.fromkeys(merged + list(cdp_flags)))
+    return merged
+
+
+def _merge_custom_options(target, custom_options, protected_keys=()):
+    """Merge custom launch options into target dict, protecting critical keys.
+
+    Iterates over custom_options and sets each key on target,
+    skipping any key that appears in protected_keys.
+    Returns target (mutated in place) for convenience.
+    """
+    protected = set(protected_keys)
+    for k, v in (custom_options or {}).items():
+        if k not in protected:
+            target[k] = v
+    return target
+
+
 class _BrowserPool:
     """
     Internal minimal optional shared Browser + Context pool (P1 #57/#48/#47).
@@ -459,13 +486,8 @@ class AgentBrowser:
             "--disable-features=IsolateOrigins,site-per-process",
             "--no-sandbox",
         ]
-        all_args = list(set(base_args + tls_args))
-
-        # #377: CDP remote debugging opt-in (localhost-only for security). Applied to browser args in classic path.
-        # (Pooled path uses shared browser launch in _BrowserPool; CDP debug sessions should use default non-pooled for now - minimal surface change.)
-        if getattr(self, "debug_cdp", False):
-            cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"]
-            all_args = list(dict.fromkeys(all_args + cdp_flags))  # dedupe preserving order
+        cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"] if getattr(self, "debug_cdp", False) else None
+        all_args = _build_launch_args(base_args, tls_args, cdp_flags=cdp_flags)
 
         # Persona integration hook (foundation only for #109)
         # Uses dataclass overrides for consistent fingerprint. No other side effects yet.
@@ -514,11 +536,7 @@ class AgentBrowser:
                 "proxy": launch_proxy,
                 # browser-level args (tls/no-sandbox etc) applied at shared launch time
             }
-            # #143: merge user-provided custom launch/context options safely (non-overriding critical keys)
-            custom = getattr(self, "_custom_launch_options", {}) or {}
-            for k, v in (custom or {}).items():
-                if k not in ("user_data_dir", "headless", "slow_mo"):  # protect launch-time ones for pooled path
-                    context_opts[k] = v
+            _merge_custom_options(context_opts, self._custom_launch_options, protected_keys=("user_data_dir", "headless", "slow_mo"))
             self.browser = await pool.create_context(**context_opts)
         else:
             # Classic (default, fully backward compatible): per-instance persistent context + own playwright
@@ -539,10 +557,7 @@ class AgentBrowser:
                 "args": all_args,
                 "proxy": launch_proxy,
             }
-            custom = getattr(self, "_custom_launch_options", {}) or {}
-            for k, v in (custom or {}).items():
-                if k not in ("user_data_dir",):  # never override critical
-                    lp_kwargs[k] = v
+            _merge_custom_options(lp_kwargs, self._custom_launch_options, protected_keys=("user_data_dir",))
             self.browser = await pw.chromium.launch_persistent_context(**lp_kwargs)
 
             # #377: discover CDP WS endpoint if enabled (uses Chrome's DevToolsActivePort + /json/version; stdlib only)
@@ -733,12 +748,8 @@ class AgentBrowser:
                 "--disable-features=IsolateOrigins,site-per-process",
                 "--no-sandbox",
             ]
-            all_args = list(set(base_args + tls_args))
-
-            # #377: CDP flags on rotation relaunch (if debug_cdp was set on original launch)
-            if getattr(self, "debug_cdp", False):
-                cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"]
-                all_args = list(dict.fromkeys(all_args + cdp_flags))
+            cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"] if getattr(self, "debug_cdp", False) else None
+            all_args = _build_launch_args(base_args, tls_args, cdp_flags=cdp_flags)
 
             p_over = getattr(self, "persona", None).to_launch_overrides() if getattr(self, "persona", None) else {}
             vp = p_over.get("viewport", {"width": 1366, "height": 768})
@@ -769,11 +780,7 @@ class AgentBrowser:
                     "extra_http_headers": extra_headers,
                     "proxy": launch_proxy,
                 }
-                # #143 merge custom in rotation too
-                custom = getattr(self, "_custom_launch_options", {}) or {}
-                for k, v in (custom or {}).items():
-                    if k not in ("user_data_dir", "headless", "slow_mo"):
-                        context_opts[k] = v
+                _merge_custom_options(context_opts, self._custom_launch_options, protected_keys=("user_data_dir", "headless", "slow_mo"))
                 self.browser = await self._pool.create_context(**context_opts)
             else:
                 # #143: build + merge custom in rotation relaunch
@@ -789,10 +796,7 @@ class AgentBrowser:
                     "args": all_args,
                     "proxy": launch_proxy,
                 }
-                custom = getattr(self, "_custom_launch_options", {}) or {}
-                for k, v in (custom or {}).items():
-                    if k not in ("user_data_dir",):
-                        lp_kwargs[k] = v
+                _merge_custom_options(lp_kwargs, self._custom_launch_options, protected_keys=("user_data_dir",))
                 self.browser = await self._pw.chromium.launch_persistent_context(**lp_kwargs)
 
                 # #377 rediscover after rotation relaunch (classic path)
