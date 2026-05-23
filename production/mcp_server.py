@@ -91,6 +91,30 @@ class StealthMCPServer:
                 str(Path.home() / ".agentic-browser" / "mcp_snapshots"),
             )
         )
+        self._snapshot_max_per_session = self._env_int(
+            "STEALTH_MCP_SNAPSHOT_MAX_PER_SESSION",
+            default=20,
+            min_value=1,
+            max_value=500,
+        )
+        self._timeline_default_limit = self._env_int(
+            "STEALTH_MCP_TIMELINE_DEFAULT_LIMIT",
+            default=30,
+            min_value=1,
+            max_value=200,
+        )
+        self._timeline_max_limit = self._env_int(
+            "STEALTH_MCP_TIMELINE_MAX_LIMIT",
+            default=200,
+            min_value=1,
+            max_value=1000,
+        )
+        self._observability_max_chars = self._env_int(
+            "STEALTH_MCP_OBSERVABILITY_MAX_CHARS",
+            default=50000,
+            min_value=2000,
+            max_value=500000,
+        )
         self._shutdown_requested = False
         self._tools: Dict[str, ToolSpec] = self._build_tools()
 
@@ -135,6 +159,16 @@ class StealthMCPServer:
         if is_error:
             result["isError"] = True
         return result
+
+    def _env_int(self, name: str, default: int, min_value: int, max_value: int) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            v = int(raw)
+        except Exception:
+            return default
+        return max(min_value, min(v, max_value))
 
     def _build_tools(self) -> Dict[str, ToolSpec]:
         tools = [
@@ -411,7 +445,46 @@ class StealthMCPServer:
         safe_tab = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tab_id) or "tab"
         folder = self._snapshot_root / safe_session
         folder.mkdir(parents=True, exist_ok=True)
-        return folder / f"{safe_tab}_{int(time.time() * 1000)}.png"
+        root = self._snapshot_root.resolve()
+        resolved_folder = folder.resolve()
+        if root != resolved_folder and root not in resolved_folder.parents:
+            raise ToolError(
+                "MCP_SECURITY_PATH_DENIED",
+                "Snapshot directory resolved outside allowed snapshot root.",
+                {"snapshot_root": str(root), "resolved_folder": str(resolved_folder)},
+            )
+        self._prune_session_snapshots(resolved_folder)
+        return resolved_folder / f"{safe_tab}_{int(time.time() * 1000)}.png"
+
+    def _prune_session_snapshots(self, folder: Path) -> None:
+        files = sorted(
+            [p for p in folder.glob("*.png") if p.is_file()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in files[self._snapshot_max_per_session - 1 :]:
+            try:
+                stale.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _guard_observability_payload(self, payload: Dict[str, Any], endpoint: str) -> Dict[str, Any]:
+        redacted = AuditLogger._redact_sensitive(payload)
+        raw = json.dumps(redacted, default=str)
+        if len(raw) <= self._observability_max_chars:
+            return redacted
+        clipped = raw[: self._observability_max_chars]
+        return {
+            "status": redacted.get("status", "success") if isinstance(redacted, dict) else "success",
+            "truncated": True,
+            "message": "Observability payload truncated by server size guardrail.",
+            "details": {
+                "endpoint": endpoint,
+                "max_chars": self._observability_max_chars,
+                "original_chars": len(raw),
+            },
+            "preview": clipped,
+        }
 
     async def _resolve_page(self, session_name: str, browser: Any, tab_id: Optional[str]) -> tuple[str, Any]:
         pages = self._get_pages(browser)
@@ -585,7 +658,7 @@ class StealthMCPServer:
                 }
             )
 
-        return self._tool_ok_payload(
+        payload = self._tool_ok_payload(
             {
                 "session_name": session_name,
                 "active_tab_id": self._get_tab_id(session_name, current_page) if current_page else None,
@@ -593,6 +666,7 @@ class StealthMCPServer:
                 "tabs": tabs,
             }
         )
+        return self._guard_observability_payload(payload, "stealth_tabs_list")
 
     async def _tool_stealth_tab_snapshot(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
@@ -606,7 +680,7 @@ class StealthMCPServer:
 
         title = await self._page_title(page)
         url = self._page_url(page)
-        return self._tool_ok_payload(
+        payload = self._tool_ok_payload(
             {
                 "session_name": session_name,
                 "tab_id": tab_id,
@@ -617,22 +691,23 @@ class StealthMCPServer:
                 "dom_summary": self._dom_summary_from_signals(title, url),
             }
         )
+        return self._guard_observability_payload(payload, "stealth_tab_snapshot")
 
     async def _tool_stealth_session_timeline(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
-        limit_raw = args.get("limit", 30)
+        limit_raw = args.get("limit", self._timeline_default_limit)
         try:
             limit = int(limit_raw)
         except Exception:
             raise ToolError("MCP_VALIDATION_ERROR", "limit must be an integer")
-        limit = max(1, min(limit, 200))
+        limit = max(1, min(limit, self._timeline_max_limit))
 
         replay = browser.get_replay_sequence(limit) if hasattr(browser, "get_replay_sequence") else {"status": "unsupported", "sequence": []}
         sequence = replay.get("sequence", []) if isinstance(replay, dict) else []
         if not isinstance(sequence, list):
             sequence = []
 
-        return self._tool_ok_payload(
+        payload = self._tool_ok_payload(
             {
                 "session_name": session_name,
                 "timeline_status": replay.get("status", "unknown") if isinstance(replay, dict) else "unknown",
@@ -640,6 +715,7 @@ class StealthMCPServer:
                 "events": sequence,
             }
         )
+        return self._guard_observability_payload(payload, "stealth_session_timeline")
 
     async def _tool_stealth_debug_report(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
@@ -647,7 +723,8 @@ class StealthMCPServer:
         debug = await browser.debug_report(print_report=print_report)
         if debug.get("status") != "success":
             raise ToolError("MCP_DEBUG_REPORT_FAILED", debug.get("message", "debug_report failed"), debug)
-        return self._tool_ok_payload({"session_name": session_name, "debug": debug})
+        payload = self._tool_ok_payload({"session_name": session_name, "debug": debug})
+        return self._guard_observability_payload(payload, "stealth_debug_report")
 
     async def _tool_stealth_close(self, args: Dict[str, Any]) -> Dict[str, Any]:
         close_all = bool(args.get("close_all", False))
