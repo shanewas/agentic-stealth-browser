@@ -1426,8 +1426,10 @@ class AgentBrowser:
             "timestamp": time.time(),
         }
 
-    async def debug_report(self, print_report: bool = False) -> Dict[str, Any]:
-        """#265: Full debug dump of TLS fingerprint, headers, stealth patches. Supports health flows too."""
+    async def debug_report(self, print_report: bool = False, limit: Optional[int] = None, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> Dict[str, Any]:
+        """#265: Full debug dump of TLS fingerprint, headers, stealth patches. Supports health flows too.
+        #381: limit/cursor/since_ts forwarded to control recent_audit pagination in report.
+        """
         if not self.debug_reporter:
             try:
                 from audit.logger import DebugReporter
@@ -1440,7 +1442,12 @@ class AgentBrowser:
             except Exception as e:
                 return {"status": "error", "message": f"DebugReporter unavailable: {e}"}
 
-        report = self.debug_reporter.full_debug_report()
+        report = self.debug_reporter.full_debug_report(
+            include_recent_logs=True,
+            recent_limit=limit,
+            cursor=cursor,
+            since_ts=since_ts,
+        )
         if print_report:
             try:
                 self.debug_reporter.print_human_report(report)
@@ -1547,12 +1554,13 @@ class AgentBrowser:
     # Backward compat alias — old name still works
     get_config_hint = get_stealth_score
 
-    def get_replay_sequence(self, limit: int = 30) -> Dict[str, Any]:
-        """#253 basic replay from AuditLogger."""
+    def get_replay_sequence(self, limit: int = 30, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> Dict[str, Any]:
+        """#253 basic replay from AuditLogger. Supports #381 pagination params (forwarded; cursor treated as 'before' for older pages)."""
         if not getattr(self, "logger", None):
             return {"status": "no_logger", "sequence": []}
         try:
-            return {"status": "ok", "sequence": getattr(self.logger, "replay_sequence", lambda l: [])(limit), "count": 0}
+            replay_fn = getattr(self.logger, "replay_sequence", lambda l, c=None, s=None: [])
+            return {"status": "ok", "sequence": replay_fn(limit, cursor, since_ts), "count": 0}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 

@@ -303,12 +303,14 @@ class StealthMCPServer:
             ),
             ToolSpec(
                 name="stealth_session_timeline",
-                description="Return replay/timeline events for active session.",
+                description="Return replay/timeline events for active session. Supports pagination via limit/cursor/since_ts (#381).",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "session_name": {"type": "string"},
                         "limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 200},
+                        "cursor": {"type": "string", "description": "Opaque cursor for next page (typically previous next_cursor, used as before-ts boundary for older events)"},
+                        "since_ts": {"type": "string", "description": "ISO-8601 timestamp; only return events with timestamp >= since_ts (for incremental/polling)"},
                     },
                     "additionalProperties": False,
                 },
@@ -316,12 +318,15 @@ class StealthMCPServer:
             ),
             ToolSpec(
                 name="stealth_debug_report",
-                description="Return debug report payload for active session.",
+                description="Return debug report payload for active session. Supports pagination params to control recent_audit size/filter (#381).",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "session_name": {"type": "string"},
                         "print_report": {"type": "boolean", "default": False},
+                        "limit": {"type": "integer", "default": 15, "minimum": 1, "maximum": 100},
+                        "cursor": {"type": "string", "description": "Opaque cursor for next page of recent_audit (typically previous next_cursor)"},
+                        "since_ts": {"type": "string", "description": "ISO-8601 timestamp; only recent_audit entries >= since_ts"},
                     },
                     "additionalProperties": False,
                 },
@@ -702,17 +707,30 @@ class StealthMCPServer:
             raise ToolError("MCP_VALIDATION_ERROR", "limit must be an integer")
         limit = max(1, min(limit, self._timeline_max_limit))
 
-        replay = browser.get_replay_sequence(limit) if hasattr(browser, "get_replay_sequence") else {"status": "unsupported", "sequence": []}
+        cursor = args.get("cursor")
+        since_ts = args.get("since_ts")
+        replay = browser.get_replay_sequence(limit, cursor=cursor, since_ts=since_ts) if hasattr(browser, "get_replay_sequence") else {"status": "unsupported", "sequence": []}
         sequence = replay.get("sequence", []) if isinstance(replay, dict) else []
         if not isinstance(sequence, list):
             sequence = []
 
+        # Minimal pagination contract (#381): compute next_cursor/has_more using heuristic (full page => more likely exists)
+        next_cursor = None
+        has_more = False
+        if sequence and len(sequence) == limit:
+            has_more = True
+            first_evt = sequence[0] if sequence else None
+            if isinstance(first_evt, dict):
+                next_cursor = first_evt.get("timestamp") or first_evt.get("ts")
         payload = self._tool_ok_payload(
             {
                 "session_name": session_name,
                 "timeline_status": replay.get("status", "unknown") if isinstance(replay, dict) else "unknown",
                 "count": len(sequence),
                 "events": sequence,
+                "next_cursor": next_cursor,
+                "has_more": has_more,
+                "truncated": False,
             }
         )
         return self._guard_observability_payload(payload, "stealth_session_timeline")
@@ -720,10 +738,39 @@ class StealthMCPServer:
     async def _tool_stealth_debug_report(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         print_report = bool(args.get("print_report", False))
-        debug = await browser.debug_report(print_report=print_report)
+        # #381 pagination params (applied to recent_audit inside the debug report)
+        limit_raw = args.get("limit")
+        limit = None
+        if limit_raw is not None:
+            try:
+                limit = int(limit_raw)
+                limit = max(1, min(limit, 100))
+            except Exception:
+                limit = 15
+        cursor = args.get("cursor")
+        since_ts = args.get("since_ts")
+        debug = await browser.debug_report(print_report=print_report, limit=limit, cursor=cursor, since_ts=since_ts)
         if debug.get("status") != "success":
             raise ToolError("MCP_DEBUG_REPORT_FAILED", debug.get("message", "debug_report failed"), debug)
-        payload = self._tool_ok_payload({"session_name": session_name, "debug": debug})
+        # Compute consistent pagination fields based on the recent_audit included in report (heuristic)
+        report = debug.get("report", {}) if isinstance(debug, dict) else {}
+        recent = report.get("recent_audit", []) if isinstance(report, dict) else []
+        count = len(recent) if isinstance(recent, list) else 0
+        page_limit = limit if limit is not None else 15
+        has_more = (count == page_limit)
+        next_cursor = None
+        if has_more and recent:
+            first = recent[0]
+            if isinstance(first, dict):
+                next_cursor = first.get("timestamp")
+        payload = self._tool_ok_payload({
+            "session_name": session_name,
+            "debug": debug,
+            "count": count,
+            "next_cursor": next_cursor,
+            "has_more": has_more,
+            "truncated": False,
+        })
         return self._guard_observability_payload(payload, "stealth_debug_report")
 
     async def _tool_stealth_close(self, args: Dict[str, Any]) -> Dict[str, Any]:
