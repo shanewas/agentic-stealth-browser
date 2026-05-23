@@ -149,3 +149,26 @@ This guide directly addresses the need to "see what the MCP browser is doing" wi
 - Issues #369, #370, #379 (runtime, observability, hardening)
 
 For contributions or questions on observability, open an issue with example JSON-RPC traces.
+
+## v0.9.0 Migration & Backward Compatibility Policy (#378)
+
+The v0.9.0 release introduces the official in-tree MCP runtime. We are committed to a smooth transition for existing automations.
+
+**Current Compatibility Stance (v0.9.0)**:
+- All tool names and response shapes introduced in the initial 0.9.0 runtime are considered **stable**.
+- If a tool name or major field is ever renamed in a future minor release, the old name will continue to work for at least two minor versions (with a clear deprecation warning in the response and server logs).
+- Use `stealth_capabilities` to discover the exact supported surface and any deprecation notices at runtime.
+
+**Recommended Migration Path**:
+1. Point your MCP client at the new `python -m production.mcp_server` entrypoint.
+2. Replace any old external bridge calls with the native `stealth_*` tools.
+3. Add defensive handling for the new `truncated` / `next_cursor` fields in observability responses (they are additive).
+
+We will publish a full deprecation matrix in future patch releases. All breaking changes will be announced with a clear removal timeline.
+
+If you hit a compatibility issue, open an issue with:
+- The exact tool name + arguments you sent
+- The response you received
+- Your MCP client (Claude Desktop, Cursor, etc.)
+
+We treat compatibility as a first-class release criterion.
