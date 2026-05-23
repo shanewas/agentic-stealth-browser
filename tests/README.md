@@ -78,6 +78,32 @@ RUN_E2E_ANTI_BLOCK=1 python -m pytest tests/test_e2e_anti_block_recovery.py -q -
 
 Results saved to `tests/detection_results_*.json`.
 
+## Marker Taxonomy & CI Selection (v0.9.0+)
+
+All tests must use one of the registered markers for deterministic CI selection and `--strict-markers` enforcement.
+
+Canonical markers:
+
+- `e2e` — End-to-end tests against real protected sites (Cloudflare, LinkedIn, etc.). Deselected in required PR CI.
+- `live_network` — Tests that require outbound network (often overlap with e2e).
+- `slow` — Long-running or resource-heavy tests.
+- `contract` — Pure interface/contract tests (no real browser).
+- `mcp` — MCP runtime, tool handlers, and JSON-RPC contract tests.
+
+Example usage in CI commands:
+
+```bash
+# Fast deterministic suite (used in required PR pipelines)
+python -m pytest tests/ -q -m "not e2e and not live_network"
+
+# All fast non-E2E
+python -m pytest tests/ -q -m "not e2e"
+```
+
+`--strict-markers` (enabled globally via pyproject.toml) will cause any test using an unregistered marker to fail the run immediately. This prevents drift in test selection.
+
+See `.github/workflows/ci.yml` and `stealth-recovery-e2e.yml` for the exact filter expressions used in the release pipelines.
+
 ## What It Measures
 
 1. **Detection Signals** — CAPTCHA, "unusual activity", rate limits, blocks
