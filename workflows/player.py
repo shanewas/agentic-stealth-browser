@@ -1,6 +1,8 @@
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from workflows.action_interpreter import normalize_step_params, validate_step_params
@@ -22,6 +24,7 @@ class ExecutionResult:
     backend_used: str = "bridge"
     recovery_used: bool = False
     checkpoint: Dict[str, Any] = field(default_factory=dict)
+    recovery_actions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class WorkflowPlayer:
@@ -29,6 +32,34 @@ class WorkflowPlayer:
         self.browser = browser
         self.resolver = variable_resolver or VariableResolver()
         self.checkpoint: Dict[str, Any] = {"completed_steps": [], "last_url": "", "variables": {}}
+        self.recovery: Optional[Any] = None
+        self.backend: str = "bridge"
+
+    def set_recovery_controller(self, controller):
+        self.recovery = controller
+
+    def load_checkpoint(self, path: str) -> bool:
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            self.checkpoint = data.get("checkpoint", {"completed_steps": [], "last_url": "", "variables": {}})
+            self.backend = data.get("backend", "bridge")
+            return True
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            return False
+
+    def save_checkpoint(self, path: Optional[str] = None) -> str:
+        if path is None:
+            path = f"checkpoints/checkpoint_{int(time.time())}.json"
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "checkpoint": self.checkpoint,
+            "backend": self.backend,
+            "saved_at": time.time(),
+        }
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+        return str(path)
 
     async def execute(
         self, workflow: Workflow, runtime_vars: Optional[Dict[str, Any]] = None
@@ -38,6 +69,9 @@ class WorkflowPlayer:
         screenshots: List[str] = []
         steps_executed = 0
         recovery_used = False
+        recovery_actions: List[Dict[str, Any]] = []
+
+        completed = set(self.checkpoint.get("completed_steps", []))
 
         run_vars = dict(runtime_vars or {})
         resolved_workflow = self.resolver.resolve_workflow(workflow, run_vars)
@@ -45,6 +79,10 @@ class WorkflowPlayer:
         for i, step in enumerate(resolved_workflow.steps):
             step_type = step.type
             params = normalize_step_params(step_type, step.params)
+
+            if i in completed:
+                steps_executed += 1
+                continue
 
             errors = validate_step_params(step_type, params)
             if errors:
@@ -60,6 +98,7 @@ class WorkflowPlayer:
                     execution_time=elapsed,
                     recovery_used=recovery_used,
                     checkpoint=self.checkpoint,
+                    recovery_actions=recovery_actions,
                 )
 
             try:
@@ -71,6 +110,45 @@ class WorkflowPlayer:
                 except Exception:
                     pass
             except Exception as e:
+                if self.recovery is not None:
+                    recovery_cfg_raw = params.get("recovery")
+                    if recovery_cfg_raw and isinstance(recovery_cfg_raw, dict):
+                        from workflows.recovery import RecoveryAction as RecoveryActionCfg
+                        recovery_cfg = RecoveryActionCfg(
+                            action_type=recovery_cfg_raw.get("action_type", "retry"),
+                            max_retries=recovery_cfg_raw.get("max_retries", 3),
+                            backoff_seconds=recovery_cfg_raw.get("backoff", 2.0),
+                            take_screenshot=recovery_cfg_raw.get("take_screenshot", True),
+                        )
+                    else:
+                        recovery_cfg = None
+
+                    recovery_result = await self.recovery.handle_step_error(
+                        step_type=step_type,
+                        params=params,
+                        error=e,
+                        step_index=i,
+                        recovery_config=recovery_cfg,
+                    )
+
+                    recovery_used = True
+                    recovery_actions.append({
+                        "step_index": i,
+                        "step_type": step_type,
+                        "recovered": recovery_result.recovered,
+                        "action_taken": recovery_result.action_taken,
+                        "retries_used": recovery_result.retries_used,
+                        "backend_used": recovery_result.backend_used,
+                        "error": str(e),
+                    })
+
+                    if recovery_result.recovered:
+                        steps_executed += 1
+                        self.checkpoint["completed_steps"].append(i)
+                        if recovery_result.backend_used == "stealth":
+                            self.backend = "stealth"
+                        continue
+
                 screenshot_path = await self._take_step_screenshot(step_type, i)
                 if screenshot_path:
                     screenshots.append(screenshot_path)
@@ -86,6 +164,7 @@ class WorkflowPlayer:
                     execution_time=elapsed,
                     recovery_used=recovery_used,
                     checkpoint=self.checkpoint,
+                    recovery_actions=recovery_actions,
                 )
 
         elapsed = time.monotonic() - start_time
@@ -98,6 +177,7 @@ class WorkflowPlayer:
             execution_time=elapsed,
             recovery_used=recovery_used,
             checkpoint=self.checkpoint,
+            recovery_actions=recovery_actions,
         )
 
     async def _dispatch_step(self, step_type: str, params: Dict[str, Any], run_vars: Dict[str, Any]):
