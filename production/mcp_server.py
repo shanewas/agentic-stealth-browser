@@ -13,9 +13,9 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from audit.logger import AuditLogger
 from mcp_security import (
@@ -49,6 +49,8 @@ class ToolSpec:
     description: str
     input_schema: Dict[str, Any]
     handler: Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
+    aliases: List[str] = field(default_factory=list)
+    deprecation_notice: Optional[str] = None
 
     def as_mcp_tool(self) -> Dict[str, Any]:
         sanitized_description, _ = sanitize_tool_description(self.description)
@@ -117,6 +119,8 @@ class StealthMCPServer:
         )
         self._shutdown_requested = False
         self._tools: Dict[str, ToolSpec] = self._build_tools()
+        self._tool_aliases: Dict[str, str] = {}
+        self._build_alias_map()
 
     def _get_agent_browser_cls(self):
         if self._agent_browser_cls is not None:
@@ -192,6 +196,8 @@ class StealthMCPServer:
                     "additionalProperties": False,
                 },
                 handler=self._tool_stealth_launch,
+                aliases=["launch"],
+                deprecation_notice="Tool 'launch' has been renamed to 'stealth_launch'. The alias will be removed in v0.10.0. Update your calls to use 'stealth_launch'.",
             ),
             ToolSpec(
                 name="stealth_navigate",
@@ -211,6 +217,8 @@ class StealthMCPServer:
                     "additionalProperties": False,
                 },
                 handler=self._tool_stealth_navigate,
+                aliases=["navigate"],
+                deprecation_notice="Tool 'navigate' has been renamed to 'stealth_navigate'. The alias will be removed in v0.10.0. Update your calls to use 'stealth_navigate'.",
             ),
             ToolSpec(
                 name="stealth_load_cookies",
@@ -366,6 +374,11 @@ class StealthMCPServer:
             ),
         ]
         return {t.name: t for t in tools}
+
+    def _build_alias_map(self) -> None:
+        for tool in self._tools.values():
+            for alias in tool.aliases:
+                self._tool_aliases[alias] = tool.name
 
     def list_tools(self) -> Dict[str, Any]:
         return {"tools": [tool.as_mcp_tool() for tool in self._tools.values()]}
@@ -884,6 +897,15 @@ class StealthMCPServer:
                 return self._jsonrpc_error(msg_id, -32602, "Invalid params: arguments must be object")
 
             tool = self._tools.get(tool_name)
+            is_deprecated = False
+            deprecation_msg: Optional[str] = None
+            if not tool:
+                canonical_name = self._tool_aliases.get(tool_name)
+                if canonical_name:
+                    tool = self._tools.get(canonical_name)
+                    if tool:
+                        is_deprecated = True
+                        deprecation_msg = tool.deprecation_notice
             if not tool:
                 payload = self._tool_error_payload(
                     "MCP_TOOL_NOT_FOUND",
@@ -894,7 +916,10 @@ class StealthMCPServer:
 
             try:
                 payload = await tool.handler(arguments)
-                return self._jsonrpc_result(msg_id, self._tool_result(payload, is_error=False))
+                result = self._tool_result(payload, is_error=False)
+                if is_deprecated and deprecation_msg:
+                    result["_deprecation_warning"] = deprecation_msg
+                return self._jsonrpc_result(msg_id, result)
             except ToolError as te:
                 payload = self._tool_error_payload(te.error_code, te.message, te.details)
                 return self._jsonrpc_result(msg_id, self._tool_result(payload, is_error=True))

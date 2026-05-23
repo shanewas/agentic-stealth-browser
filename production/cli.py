@@ -102,7 +102,8 @@ async def _cmd_health(args: argparse.Namespace) -> int:
 
 async def _cmd_status(args: argparse.Namespace) -> int:
     """Alias / lighter status (enhanced stealth_status behavior)."""
-    # Re-use health but with less noise
+    import sys
+    print("[stealth-browser] Warning: 'status' command is deprecated and has been renamed to 'health'. The alias will be removed in v0.10.0. Please use 'health' instead.", file=sys.stderr)
     rc = await _cmd_health(args)
     return rc
 
