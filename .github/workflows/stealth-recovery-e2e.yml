@@ -35,7 +35,7 @@ jobs:
           pip install "pytest>=8" pytest-asyncio playwright
           playwright install chromium --with-deps
       - name: Run fast non-E2E tests
-        run: python -m pytest tests/ -q -m "not e2e" --tb=line
+        run: python -m pytest tests/ -q -m "not e2e" --strict-markers --tb=line
         env:
           RUN_E2E_ANTI_BLOCK: "0"
       - name: Smoke
