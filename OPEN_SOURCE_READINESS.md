@@ -1,8 +1,8 @@
 # Open Source Readiness Assessment: agentic-stealth-browser
 
 **Repository**: https://github.com/shanewas/agentic-stealth-browser  
-**Current Version**: 0.8.0 (Unreleased Phase 8 DX & Debug)  
-**Assessment Date**: May 22, 2026  
+**Current Version**: 0.9.0 (MCP Runtime, Observability & CI Strictness)  
+**Assessment Date**: May 23, 2026 (updated post v0.9.0 merges)  
 **Assessor**: Hermes Subagent (delegated task)
 
 ## Executive Summary
