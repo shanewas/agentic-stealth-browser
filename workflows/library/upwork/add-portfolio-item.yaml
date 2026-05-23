@@ -1,0 +1,49 @@
+name: upwork-add-portfolio
+description: Add a portfolio item to an Upwork freelancer profile
+variables:
+  portfolio_title:
+    type: string
+    default: "AI-Powered Automation Platform"
+    required: false
+    description: The title for the portfolio item
+  portfolio_description:
+    type: string
+    default: "Built a scalable AI automation platform using Python, reducing manual workload by 80%."
+    required: false
+    description: The description for the portfolio item
+steps:
+  - type: navigate
+    url: https://upwork.com/freelancers/shanewas
+    timeout: 30000
+  - type: wait_for_element
+    selector: "[data-test='profile-container'], .profile-container, main"
+    timeout: 15000
+    state: visible
+  - type: wait
+    ms: 2000
+  - type: scroll
+    selector: "[data-test='portfolio-section'], #portfolio, .portfolio-section"
+  - type: wait
+    ms: 1000
+  - type: click
+    selector: "[data-test='add-portfolio'], button[aria-label*='Add'], [data-qa='add-item']"
+    timeout: 10000
+    wait_after: 1500
+  - type: type
+    selector: "[data-test='portfolio-title-input'], input[name='title'], [aria-label*='Title']"
+    value: "{{portfolio_title}}"
+    timeout: 10000
+    delay_ms: 50
+  - type: type
+    selector: "[data-test='portfolio-description-input'], textarea[name='description'], [aria-label*='Description']"
+    value: "{{portfolio_description}}"
+    timeout: 10000
+    delay_ms: 50
+  - type: click
+    selector: "button[type='submit'], [data-test='save-portfolio'], [data-qa='save']"
+    timeout: 10000
+    wait_after: 2000
+  - type: verify
+    selector: "[data-test='portfolio-item'], .portfolio-item, [role='alert']"
+    timeout: 15000
+    visible: true

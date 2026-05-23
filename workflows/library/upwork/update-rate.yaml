@@ -1,0 +1,35 @@
+name: upwork-update-rate
+description: Update the hourly rate on an Upwork freelancer profile
+variables:
+  rate:
+    type: string
+    default: "34.00"
+    required: false
+    description: The new hourly rate in USD (e.g. 34.00)
+steps:
+  - type: navigate
+    url: https://upwork.com/freelancers/shanewas
+    timeout: 30000
+  - type: wait_for_element
+    selector: "[data-test='profile-container'], .profile-container, main"
+    timeout: 15000
+    state: visible
+  - type: wait
+    ms: 2000
+  - type: click
+    selector: "[data-test='rate-section'], [data-qa='edit-rate'], button[aria-label*='Rate'], a[href*='rate']"
+    timeout: 10000
+    wait_after: 1500
+  - type: type
+    selector: "input[name='rate'], [data-test='rate-input'], input[aria-label*='Rate'], input[type='number']"
+    value: "{{rate}}"
+    timeout: 10000
+    delay_ms: 50
+  - type: click
+    selector: "button[type='submit'], [data-test='save-rate'], [data-qa='save']"
+    timeout: 10000
+    wait_after: 2000
+  - type: verify
+    selector: "[data-test='rate-display'], .rate-value, [role='alert']"
+    timeout: 15000
+    visible: true

@@ -1,0 +1,35 @@
+name: upwork-edit-title
+description: Edit the professional title on an Upwork freelancer profile
+variables:
+  title:
+    type: string
+    default: "Senior Backend Engineer | Python, AI & Automation"
+    required: false
+    description: The new professional title to set on the profile
+steps:
+  - type: navigate
+    url: https://upwork.com/freelancers/shanewas
+    timeout: 30000
+  - type: wait_for_element
+    selector: "[data-test='profile-container'], .profile-container, main"
+    timeout: 15000
+    state: visible
+  - type: wait
+    ms: 2000
+  - type: click
+    selector: "[data-test='edit-title-button'], button[aria-label*='Edit'], [data-qa='edit-title']"
+    timeout: 10000
+    wait_after: 1500
+  - type: type
+    selector: "input[name='title'], [data-test='title-input'], input[aria-label*='Title']"
+    value: "{{title}}"
+    timeout: 10000
+    delay_ms: 50
+  - type: click
+    selector: "button[type='submit'], [data-test='save-button'], [data-qa='save']"
+    timeout: 10000
+    wait_after: 2000
+  - type: verify
+    selector: "[data-test='profile-title'], .profile-title, [role='alert']"
+    timeout: 15000
+    visible: true

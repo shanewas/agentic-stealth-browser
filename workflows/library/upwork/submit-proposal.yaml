@@ -1,0 +1,48 @@
+name: upwork-submit-proposal
+description: Submit a proposal to an Upwork job posting
+variables:
+  job_url:
+    type: string
+    default: ""
+    required: true
+    description: The full URL of the Upwork job posting
+  cover_letter:
+    type: string
+    default: "Hello! I have extensive experience with this stack and would love to help."
+    required: false
+    description: The cover letter text to include in the proposal
+  hourly_rate:
+    type: string
+    default: "34.00"
+    required: false
+    description: The proposed hourly rate
+steps:
+  - type: navigate
+    url: "{{job_url}}"
+    timeout: 30000
+  - type: wait_for_element
+    selector: "[data-test='job-details'], .job-details, main"
+    timeout: 15000
+    state: visible
+  - type: wait
+    ms: 2000
+  - type: click
+    selector: "[data-test='submit-proposal'], [data-qa='apply-now'], button[aria-label*='Apply'], a[aria-label*='Apply']"
+    timeout: 10000
+    wait_after: 2000
+  - type: type
+    selector: "[data-test='cover-letter-textarea'], textarea[name='cover_letter'], [aria-label*='Cover Letter'], textarea"
+    value: "{{cover_letter}}"
+    timeout: 10000
+    delay_ms: 40
+  - type: type
+    selector: "[data-test='rate-input'], input[name='rate'], [aria-label*='Rate']"
+    value: "{{hourly_rate}}"
+    timeout: 5000
+    delay_ms: 50
+  - type: wait
+    ms: 1500
+  - type: verify
+    selector: "[data-test='proposal-preview'], .proposal-preview, [data-test='cover-letter-textarea']"
+    timeout: 10000
+    visible: true
