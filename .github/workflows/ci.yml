@@ -66,11 +66,9 @@ jobs:
       - name: Run tests with coverage
         run: |
           python -m pytest tests/ \
+            -m "not e2e and not live_network" \
             --ignore=tests/test_recovery_phase1.py \
             --ignore=tests/test_basic.py \
-            --ignore=tests/test_mcp_contract.py \
-            --ignore=tests/test_e2e_anti_block_recovery.py \
-            --ignore=tests/test_e2e_protected_sites_placeholder.py \
             --ignore=tests/test_phase7_fixes.py \
             -q --tb=short \
             --cov=core --cov=stealth --cov=behavior --cov=recovery --cov=proxy --cov=production \
@@ -79,7 +77,8 @@ jobs:
         env:
           PYTEST_ADDOPTS: "-p no:timeout"
         # Coverage threshold: 45% (baseline ~46% with low-coverage modules like production/cli, core/types, otel, etc.). Raising as tests improve.
-        # The ignored E2E tests are the known flaky Cloudflare ones; core unit tests must pass cleanly.
+        # Marker-driven selection + --strict-markers (from pyproject.toml) ensures deterministic CI.
+        # The ignored legacy phase files are transitional; e2e/live_network are excluded via markers.
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -98,6 +97,21 @@ jobs:
             *.xml
             tests/detection_results*.json
             tests/detection_history.json
+          retention-days: 30
+
+      - name: Test Collection Audit (marker enforcement proof for #380)
+        if: always()
+        run: |
+          python -m pytest tests/ --collectonly -q -m "not e2e and not live_network" --tb=no > test-collection-audit.txt 2>&1 || true
+          echo "Collected $(wc -l < test-collection-audit.txt) lines"
+        continue-on-error: true
+
+      - name: Upload collection audit artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-collection-audit
+          path: test-collection-audit.txt
           retention-days: 30
 
   build:
