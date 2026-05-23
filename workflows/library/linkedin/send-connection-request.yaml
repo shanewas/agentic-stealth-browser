@@ -1,0 +1,63 @@
+name: linkedin-send-connection
+description: Send a connection request to a LinkedIn profile with optional note
+variables:
+  profile_url:
+    type: string
+    default: ""
+    required: true
+    description: The full LinkedIn profile URL
+  note:
+    type: string
+    default: "Hi, I came across your profile and would love to connect!"
+    required: false
+    description: Optional personal note to include with the connection request
+steps:
+  - type: navigate
+    url: "{{profile_url}}"
+    timeout: 30000
+    wait_until: networkidle
+  - type: wait_for_element
+    selector: "main, .profile-topcard, [data-view-name='profile']"
+    timeout: 15000
+    state: visible
+  - type: wait
+    ms: 3000
+  - type: conditional
+    condition: "profile_has_connect_button"
+    steps:
+      - type: click
+        selector: "button[aria-label*='Connect'], button[aria-label*='Invite'], .artdeco-button--primary.pvs-profile-actions__action"
+        timeout: 10000
+        wait_after: 1500
+    else_steps:
+      - type: click
+        selector: "[aria-label*='More actions'], .pvs-overflow-actions-dropdown__trigger"
+        timeout: 10000
+        wait_after: 1000
+      - type: wait
+        ms: 500
+      - type: click
+        selector: "[aria-label*='Connect'], .artdeco-dropdown__content-inner [aria-label*='Connect']"
+        timeout: 10000
+        wait_after: 1500
+  - type: conditional
+    condition: "add_note_available"
+    steps:
+      - type: click
+        selector: "button[aria-label*='Add a note'], .send-invite__actions button:first-child"
+        timeout: 10000
+        wait_after: 1000
+      - type: type
+        selector: "textarea[name='message'], #custom-message, textarea.connect-button-send-invite__custom-message"
+        value: "{{note}}"
+        timeout: 10000
+        delay_ms: 40
+    else_steps: []
+  - type: click
+    selector: "button[aria-label*='Send'], button[aria-label*='Done'], .artdeco-button--primary.artdeco-button--2"
+    timeout: 10000
+    wait_after: 2000
+  - type: verify
+    selector: "[aria-label*='Pending'], [aria-label*='Invitation sent'], [data-test='invitation-pending']"
+    timeout: 10000
+    visible: true
