@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,16 @@ from production.mcp_server import StealthMCPServer, main
 class _FakePage:
     def __init__(self):
         self.url = "about:blank"
+        self._title = "Fake Page"
+
+    async def title(self):
+        return self._title
+
+    async def screenshot(self, path: str, full_page: bool = False):
+        _ = full_page
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_bytes(b"fake-png-bytes")
+        return b"fake-png-bytes"
 
 
 class _FakeScraper:
@@ -38,6 +49,7 @@ class _FakeBrowser:
         self.current_region = "global"
         self.scraper = _FakeScraper()
         self._page = _FakePage()
+        self._pages = [self._page]
         self._closed = False
 
     async def launch(self, headless=True, debug=False, preset=None, region=None):
@@ -52,6 +64,7 @@ class _FakeBrowser:
     async def safe_goto(self, url: str, warm_up=True, platform="unknown", rate_limit=True, domain=None, account=None):
         _ = (warm_up, platform, rate_limit, domain, account)
         self._page.url = url
+        self._page._title = f"Visited {url}"
         return True
 
     async def load_cookies_from_file(self, cookies_path: str, encryption_key=None):
@@ -69,6 +82,15 @@ class _FakeBrowser:
     async def debug_report(self, print_report: bool = False):
         _ = print_report
         return {"status": "success", "report": {"ok": True}}
+
+    def get_replay_sequence(self, limit: int = 30):
+        return {
+            "status": "ok",
+            "sequence": [{"event": "navigate", "ts": 1}, {"event": "click", "ts": 2}][:limit],
+        }
+
+    def get_pages(self):
+        return list(self._pages)
 
     async def close(self):
         self._closed = True
@@ -89,6 +111,10 @@ async def test_tools_manifest_contains_required_runtime_tools():
         "stealth_set_region",
         "stealth_scrape",
         "stealth_status",
+        "stealth_tabs_list",
+        "stealth_tab_snapshot",
+        "stealth_session_timeline",
+        "stealth_debug_report",
         "stealth_close",
         "stealth_capabilities",
     }
@@ -173,4 +199,75 @@ def test_list_tools_cli_flag(capsys):
     names = {t["name"] for t in data["tools"]}
     assert "stealth_launch" in names
     assert "stealth_status" in names
+    assert "stealth_tabs_list" in names
 
+
+@pytest.mark.asyncio
+async def test_observability_tabs_snapshot_timeline_and_debug_tools():
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "obs"}},
+        }
+    )
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 32,
+            "method": "tools/call",
+            "params": {"name": "stealth_navigate", "arguments": {"session_name": "obs", "url": "https://example.com"}},
+        }
+    )
+
+    tabs_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 33,
+            "method": "tools/call",
+            "params": {"name": "stealth_tabs_list", "arguments": {"session_name": "obs"}},
+        }
+    )
+    tabs_payload = _tool_structured_content(tabs_resp)
+    assert tabs_payload["status"] == "success"
+    assert tabs_payload["tab_count"] >= 1
+    tab_id = tabs_payload["tabs"][0]["tab_id"]
+
+    snap_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {"name": "stealth_tab_snapshot", "arguments": {"session_name": "obs", "tab_id": tab_id}},
+        }
+    )
+    snap_payload = _tool_structured_content(snap_resp)
+    assert snap_payload["status"] == "success"
+    assert Path(snap_payload["screenshot_path"]).exists()
+    assert "dom_summary" in snap_payload
+
+    timeline_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 35,
+            "method": "tools/call",
+            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs", "limit": 2}},
+        }
+    )
+    timeline_payload = _tool_structured_content(timeline_resp)
+    assert timeline_payload["status"] == "success"
+    assert timeline_payload["count"] == 2
+
+    debug_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 36,
+            "method": "tools/call",
+            "params": {"name": "stealth_debug_report", "arguments": {"session_name": "obs"}},
+        }
+    )
+    debug_payload = _tool_structured_content(debug_resp)
+    assert debug_payload["status"] == "success"
+    assert debug_payload["debug"]["status"] == "success"

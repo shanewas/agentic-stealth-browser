@@ -132,6 +132,10 @@ pip install agentic-stealth-browser
 | `stealth_set_region` | Switch TLS fingerprint region (US, Japan, EU, Korea) |
 | `stealth_scrape` | Navigate and extract page content |
 | `stealth_status` | Check browser health and session state |
+| `stealth_tabs_list` | List open tabs/pages and active tab metadata |
+| `stealth_tab_snapshot` | Capture screenshot + metadata for a specific tab/page |
+| `stealth_session_timeline` | Fetch replay/timeline events for debugging and recovery analysis |
+| `stealth_debug_report` | Return full debug report payload for current session |
 | `stealth_close` | Close browser and cleanup |
 | `stealth_capabilities` | Show MCP server/runtime version and available tools |
 
