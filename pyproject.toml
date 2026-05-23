@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-stealth-browser"
-version = "0.8.0"
+version = "0.9.0"
 description = "Production-grade, human-mimicking browser automation framework for autonomous agents. Survives modern anti-bot systems."
 readme = "README.md"
 license = {text = "MIT"}
@@ -64,6 +64,14 @@ include = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "e2e: marks tests as end-to-end (deselect with -m \"not e2e\")",
+  "live_network: requires real network or external protected sites",
+  "slow: slow or resource-heavy tests",
+  "contract: interface/contract tests (pure logic, no browser)",
+  "mcp: MCP server runtime, tools, and contract tests"
+]
 
 [project.urls]
 Homepage = "https://github.com/shanewas/agentic-stealth-browser"
