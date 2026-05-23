@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+import fnmatch
+
 from audit.logger import AuditLogger
 from mcp_security import (
     FileAccessPolicy,
@@ -116,6 +118,8 @@ class StealthMCPServer:
             max_value=500000,
         )
         self._shutdown_requested = False
+        self._workflow_library_root = Path("workflows/library")
+        self._workflow_library_root.mkdir(parents=True, exist_ok=True)
         self._tools: Dict[str, ToolSpec] = self._build_tools()
 
     def _get_agent_browser_cls(self):
@@ -363,6 +367,64 @@ class StealthMCPServer:
                 description="Return server/runtime capabilities and available tools.",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": False},
                 handler=self._tool_stealth_capabilities,
+            ),
+            ToolSpec(
+                name="stealth_teach",
+                description="Record browser actions into a replayable workflow file. Attaches recorder to an active session.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                        "workflow_name": {"type": "string", "description": "The output workflow name."},
+                        "description": {"type": "string", "description": "Optional workflow description."},
+                        "capture_seconds": {"type": "integer", "default": 60, "minimum": 1, "maximum": 600},
+                    },
+                    "required": ["session_name", "workflow_name"],
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_teach,
+            ),
+            ToolSpec(
+                name="stealth_replay",
+                description="Load and execute a workflow file against the current session.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Relative to workflow library root."},
+                        "variables": {"type": "object", "description": "Runtime variable overrides."},
+                        "session_name": {"type": "string"},
+                    },
+                    "required": ["filename"],
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_replay,
+            ),
+            ToolSpec(
+                name="stealth_workflow_list",
+                description="List available workflow files, optionally filtered by platform/pattern.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "platform": {"type": "string", "description": "Filter by directory: upwork, linkedin, common."},
+                        "pattern": {"type": "string", "description": "Filename glob filter."},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_workflow_list,
+            ),
+            ToolSpec(
+                name="stealth_workflow_delete",
+                description="Delete a workflow file from the library. Path-constrained for safety.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Relative to workflow library root."},
+                        "confirm": {"type": "boolean", "description": "Must be true to confirm deletion."},
+                    },
+                    "required": ["filename", "confirm"],
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_workflow_delete,
             ),
         ]
         return {t.name: t for t in tools}
@@ -822,6 +884,247 @@ class StealthMCPServer:
                 "tools": [t.name for t in self._tools.values()],
                 "active_session": self._active_session,
                 "sessions": list(self._sessions.keys()),
+            }
+        )
+
+    async def _tool_stealth_teach(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        from workflows.recorder import WorkflowRecorder
+
+        session_name = str(args.get("session_name") or "")
+        workflow_name = str(args.get("workflow_name") or "")
+        description = args.get("description")
+        capture_seconds_raw = args.get("capture_seconds", 60)
+        try:
+            capture_seconds = int(capture_seconds_raw)
+        except Exception:
+            raise ToolError("MCP_VALIDATION_ERROR", "capture_seconds must be an integer")
+        capture_seconds = max(1, min(capture_seconds, 600))
+
+        if not session_name:
+            raise ToolError("MCP_VALIDATION_ERROR", "session_name is required")
+        if not workflow_name:
+            raise ToolError("MCP_VALIDATION_ERROR", "workflow_name is required")
+
+        resolved_name, browser = await self._resolve_browser(session_name)
+
+        current_url = ""
+        current_title = ""
+        try:
+            p = browser.page_getter()
+            if p:
+                current_url = getattr(p, "url", "") or ""
+                try:
+                    title_attr = getattr(p, "title")
+                    if callable(title_attr):
+                        val = title_attr()
+                        if asyncio.iscoroutine(val):
+                            val = await val
+                        current_title = str(val or "")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        recorder = WorkflowRecorder()
+
+        if current_url:
+            from workflows.schema import Workflow, WorkflowStep, workflow_to_yaml_str
+
+            steps = []
+            steps.append(WorkflowStep(type="navigate", params={"url": current_url}))
+            steps.append(WorkflowStep(type="wait", params={"ms": 1000}))
+
+            workflow = Workflow(
+                name=workflow_name,
+                steps=steps,
+                description=description
+                or f"Recorded workflow for session '{resolved_name}' — URL: {current_url}",
+            )
+
+            output_dir = self._workflow_library_root / resolved_name
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{workflow_name}.yaml"
+            output_path.write_text(workflow_to_yaml_str(workflow))
+
+            return self._tool_ok_payload(
+                {
+                    "session_name": resolved_name,
+                    "workflow_name": workflow_name,
+                    "workflow_path": str(output_path),
+                    "step_count": len(steps),
+                    "note": "Full passive recording requires M4 bridge integration.",
+                }
+            )
+        else:
+            workflow = None
+            steps = []
+
+        workflow = recorder.to_workflow(name=workflow_name, description=description)
+        steps = workflow.steps
+
+        output_dir = self._workflow_library_root / resolved_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{workflow_name}.yaml"
+        workflow_yaml = recorder.to_workflow_yaml(name=workflow_name, description=description)
+        output_path.write_text(workflow_yaml)
+
+        return self._tool_ok_payload(
+            {
+                "session_name": resolved_name,
+                "workflow_name": workflow_name,
+                "workflow_path": str(output_path),
+                "step_count": len(steps),
+                "note": "Full passive recording requires M4 bridge integration.",
+            }
+        )
+
+    async def _tool_stealth_replay(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        from workflows.player import WorkflowPlayer
+        from workflows.schema import load_workflow
+
+        filename = str(args.get("filename") or "")
+        if not filename:
+            raise ToolError("MCP_VALIDATION_ERROR", "filename is required")
+
+        if ".." in filename:
+            raise ToolError(
+                "MCP_SECURITY_PATH_DENIED",
+                "Path traversal not allowed in filename.",
+                {"filename": filename},
+            )
+
+        workflow_path = self._workflow_library_root / filename
+        resolved_workflow_path = workflow_path.resolve()
+        resolved_root = self._workflow_library_root.resolve()
+        if resolved_root not in resolved_workflow_path.parents and resolved_workflow_path != resolved_root:
+            raise ToolError(
+                "MCP_SECURITY_PATH_DENIED",
+                "Workflow path resolved outside allowed library root.",
+                {"filename": filename},
+            )
+
+        if not resolved_workflow_path.exists():
+            raise ToolError(
+                "MCP_WORKFLOW_NOT_FOUND",
+                f"Workflow file not found: {filename}",
+                {"filename": filename},
+            )
+
+        variables = dict(args.get("variables") or {})
+        session_name = args.get("session_name")
+
+        workflow = load_workflow(str(resolved_workflow_path))
+
+        if session_name:
+            resolved_name, browser = await self._resolve_browser(session_name)
+        else:
+            resolved_name, browser = await self._resolve_browser(None)
+
+        player = WorkflowPlayer(browser)
+        result = await player.execute(workflow, runtime_vars=variables if variables else None)
+
+        return self._tool_ok_payload(
+            {
+                "session_name": resolved_name,
+                "filename": filename,
+                "success": result.success,
+                "steps_executed": result.steps_executed,
+                "total_steps": result.total_steps,
+                "failed_step": result.failed_step,
+                "failed_step_type": result.failed_step_type,
+                "error_message": result.error_message,
+                "execution_time": result.execution_time,
+                "summary": result.summary,
+            }
+        )
+
+    async def _tool_stealth_workflow_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        platform = args.get("platform")
+        pattern = args.get("pattern")
+
+        search_root = self._workflow_library_root
+        if platform:
+            platform = str(platform)
+            search_root = self._workflow_library_root / platform
+            if not search_root.exists():
+                return self._tool_ok_payload({"workflows": []})
+
+        workflows = []
+        for yaml_file in sorted(search_root.rglob("*.yaml")):
+            relative_path = yaml_file.relative_to(self._workflow_library_root)
+            filename_str = str(relative_path)
+
+            if pattern and not fnmatch.fnmatch(filename_str, pattern):
+                continue
+
+            parts = relative_path.parts
+            platform_name = parts[0] if len(parts) > 1 else "root"
+
+            try:
+                stat = yaml_file.stat()
+                size = stat.st_size
+                modified_at = time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat.st_mtime)
+                )
+            except Exception:
+                size = 0
+                modified_at = ""
+
+            workflows.append(
+                {
+                    "name": yaml_file.stem,
+                    "path": filename_str,
+                    "platform": platform_name,
+                    "size": size,
+                    "modified_at": modified_at,
+                }
+            )
+
+        return self._tool_ok_payload({"workflows": workflows})
+
+    async def _tool_stealth_workflow_delete(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        filename = str(args.get("filename") or "")
+        confirm = args.get("confirm", False)
+
+        if not filename:
+            raise ToolError("MCP_VALIDATION_ERROR", "filename is required")
+
+        if not confirm:
+            raise ToolError(
+                "MCP_VALIDATION_ERROR",
+                "Confirmation required. Set confirm=True to delete.",
+                {"filename": filename},
+            )
+
+        if ".." in filename:
+            raise ToolError(
+                "MCP_SECURITY_PATH_DENIED",
+                "Path traversal not allowed in filename.",
+                {"filename": filename},
+            )
+
+        workflow_path = self._workflow_library_root / filename
+        resolved_workflow_path = workflow_path.resolve()
+        resolved_root = self._workflow_library_root.resolve()
+        if resolved_root not in resolved_workflow_path.parents and resolved_workflow_path != resolved_root:
+            raise ToolError(
+                "MCP_SECURITY_PATH_DENIED",
+                "Resolved workflow path is outside the allowed library root.",
+                {"filename": filename},
+            )
+
+        if not resolved_workflow_path.exists():
+            raise ToolError(
+                "MCP_WORKFLOW_NOT_FOUND",
+                f"Workflow file not found: {filename}",
+                {"filename": filename},
+            )
+
+        resolved_workflow_path.unlink()
+        return self._tool_ok_payload(
+            {
+                "deleted": True,
+                "filename": filename,
             }
         )
 

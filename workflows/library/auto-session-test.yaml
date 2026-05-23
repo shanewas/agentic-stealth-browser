@@ -1,0 +1,4 @@
+name: auto-session-test
+steps:
+  - type: wait
+    ms: 100
