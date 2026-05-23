@@ -96,6 +96,31 @@ class _FakeBrowser:
         self._closed = True
 
 
+class _TrackingReplayBrowser(_FakeBrowser):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_limit = None
+
+    def get_replay_sequence(self, limit: int = 30):
+        self.last_limit = limit
+        return {
+            "status": "ok",
+            "sequence": [{"event": f"event-{i}", "ts": i} for i in range(limit)],
+        }
+
+
+class _LargeDebugBrowser(_FakeBrowser):
+    async def debug_report(self, print_report: bool = False):
+        _ = print_report
+        return {
+            "status": "success",
+            "report": {
+                "ok": True,
+                "blob": "x" * 12000,
+            },
+        }
+
+
 def _tool_structured_content(resp: dict) -> dict:
     return resp["result"]["structuredContent"]
 
@@ -271,3 +296,156 @@ async def test_observability_tabs_snapshot_timeline_and_debug_tools():
     debug_payload = _tool_structured_content(debug_resp)
     assert debug_payload["status"] == "success"
     assert debug_payload["debug"]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_timeline_limit_uses_env_default_and_max(monkeypatch):
+    monkeypatch.setenv("STEALTH_MCP_TIMELINE_DEFAULT_LIMIT", "2")
+    monkeypatch.setenv("STEALTH_MCP_TIMELINE_MAX_LIMIT", "3")
+    server = StealthMCPServer(agent_browser_cls=_TrackingReplayBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "obs"}},
+        }
+    )
+
+    default_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs"}},
+        }
+    )
+    default_payload = _tool_structured_content(default_resp)
+    assert default_payload["status"] == "success"
+    assert default_payload["count"] == 2
+    assert server._sessions["obs"].last_limit == 2
+
+    clamped_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs", "limit": 999}},
+        }
+    )
+    clamped_payload = _tool_structured_content(clamped_resp)
+    assert clamped_payload["status"] == "success"
+    assert clamped_payload["count"] == 3
+    assert server._sessions["obs"].last_limit == 3
+
+
+@pytest.mark.asyncio
+async def test_observability_payload_is_truncated_when_debug_report_is_large(monkeypatch):
+    monkeypatch.setenv("STEALTH_MCP_OBSERVABILITY_MAX_CHARS", "2000")
+    server = StealthMCPServer(agent_browser_cls=_LargeDebugBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "obs"}},
+        }
+    )
+
+    debug_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 52,
+            "method": "tools/call",
+            "params": {"name": "stealth_debug_report", "arguments": {"session_name": "obs"}},
+        }
+    )
+    payload = _tool_structured_content(debug_resp)
+    assert payload["status"] == "success"
+    assert payload["truncated"] is True
+    assert payload["details"]["endpoint"] == "stealth_debug_report"
+    assert payload["details"]["max_chars"] == 2000
+    assert payload["details"]["original_chars"] > payload["details"]["max_chars"]
+    assert len(payload["preview"]) == 2000
+    assert "debug" not in payload
+
+
+@pytest.mark.asyncio
+async def test_observability_payload_is_truncated_for_large_timeline(monkeypatch):
+    monkeypatch.setenv("STEALTH_MCP_OBSERVABILITY_MAX_CHARS", "2000")
+    monkeypatch.setenv("STEALTH_MCP_TIMELINE_MAX_LIMIT", "1000")
+    server = StealthMCPServer(agent_browser_cls=_TrackingReplayBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 53,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "obs"}},
+        }
+    )
+
+    timeline_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 54,
+            "method": "tools/call",
+            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs", "limit": 400}},
+        }
+    )
+    payload = _tool_structured_content(timeline_resp)
+    assert payload["status"] == "success"
+    assert payload["truncated"] is True
+    assert payload["details"]["endpoint"] == "stealth_session_timeline"
+    assert payload["details"]["original_chars"] > payload["details"]["max_chars"]
+    assert len(payload["preview"]) == 2000
+    assert "events" not in payload
+
+
+@pytest.mark.asyncio
+async def test_snapshot_retention_prunes_old_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("STEALTH_MCP_SNAPSHOT_DIR", str(tmp_path / "snapshots"))
+    monkeypatch.setenv("STEALTH_MCP_SNAPSHOT_MAX_PER_SESSION", "3")
+
+    tick = {"value": 1710000000.0}
+
+    def _fake_time():
+        tick["value"] += 0.01
+        return tick["value"]
+
+    monkeypatch.setattr("production.mcp_server.time.time", _fake_time)
+
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 61,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "obs"}},
+        }
+    )
+
+    tabs_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 62,
+            "method": "tools/call",
+            "params": {"name": "stealth_tabs_list", "arguments": {"session_name": "obs"}},
+        }
+    )
+    tab_id = _tool_structured_content(tabs_resp)["tabs"][0]["tab_id"]
+
+    for idx in range(6):
+        snap_resp = await server.handle_jsonrpc(
+            {
+                "jsonrpc": "2.0",
+                "id": 63 + idx,
+                "method": "tools/call",
+                "params": {"name": "stealth_tab_snapshot", "arguments": {"session_name": "obs", "tab_id": tab_id}},
+            }
+        )
+        snap_payload = _tool_structured_content(snap_resp)
+        assert snap_payload["status"] == "success"
+
+    snapshot_dir = (tmp_path / "snapshots") / "obs"
+    pngs = sorted(snapshot_dir.glob("*.png"))
+    assert len(pngs) == 3

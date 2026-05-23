@@ -139,6 +139,17 @@ pip install agentic-stealth-browser
 | `stealth_close` | Close browser and cleanup |
 | `stealth_capabilities` | Show MCP server/runtime version and available tools |
 
+### 4. MCP Server Environment Variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `STEALTH_MCP_ALLOWED_DIRS` | Extra allowed directories for MCP file-access policy (comma/semicolon separated) | _(empty)_ |
+| `STEALTH_MCP_SNAPSHOT_DIR` | Snapshot output root for `stealth_tab_snapshot` | `~/.agentic-browser/mcp_snapshots` |
+| `STEALTH_MCP_SNAPSHOT_MAX_PER_SESSION` | Max screenshots retained per session directory (older files are pruned) | `20` |
+| `STEALTH_MCP_TIMELINE_DEFAULT_LIMIT` | Default event limit when `stealth_session_timeline` is called without `limit` | `30` |
+| `STEALTH_MCP_TIMELINE_MAX_LIMIT` | Hard upper bound for `stealth_session_timeline.limit` | `200` |
+| `STEALTH_MCP_OBSERVABILITY_MAX_CHARS` | Max serialized response size for observability payloads before truncation | `50000` |
+
 ## Configuration
 
 ### Environment Variables
