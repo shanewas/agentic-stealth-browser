@@ -181,6 +181,7 @@ class StealthMCPServer:
                         "session_name": {"type": "string", "description": "Session identifier."},
                         "headless": {"type": "boolean", "default": True},
                         "debug": {"type": "boolean", "default": False},
+                        "debug_cdp": {"type": "boolean", "default": False, "description": "Opt-in CDP remote debugging (localhost-only). Use stealth_get_cdp_endpoint after launch to retrieve WS URL + metadata. Disabled returns explicit status."},
                         "preset": {"type": "string"},
                         "region": {"type": "string"},
                         "anonymous": {"type": "boolean", "default": True},
@@ -331,6 +332,18 @@ class StealthMCPServer:
                     "additionalProperties": False,
                 },
                 handler=self._tool_stealth_debug_report,
+            ),
+            ToolSpec(
+                name="stealth_get_cdp_endpoint",
+                description="Return the CDP WebSocket endpoint, port, version metadata (and security warnings) for external attach. ONLY works if launched with debug_cdp=True; otherwise returns explicit {'status': 'disabled', 'message': '...'}. Binds to 127.0.0.1 only. See MCP_BROWSER_OBSERVABILITY.md.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_get_cdp_endpoint,
             ),
             ToolSpec(
                 name="stealth_close",
@@ -509,6 +522,7 @@ class StealthMCPServer:
         session_name = str(args.get("session_name") or "default")
         headless = bool(args.get("headless", True))
         debug = bool(args.get("debug", False))
+        debug_cdp = bool(args.get("debug_cdp", False))
         preset = args.get("preset")
         region = args.get("region")
         anonymous = bool(args.get("anonymous", True))
@@ -532,7 +546,7 @@ class StealthMCPServer:
             light_mode=light_mode,
             use_pooled_context=use_pooled_context,
         )
-        await browser.launch(headless=headless, debug=debug, preset=preset, region=region)
+        await browser.launch(headless=headless, debug=debug, debug_cdp=debug_cdp, preset=preset, region=region)
 
         self._sessions[session_name] = browser
         self._active_session = session_name
@@ -772,6 +786,14 @@ class StealthMCPServer:
             "truncated": False,
         })
         return self._guard_observability_payload(payload, "stealth_debug_report")
+
+    async def _tool_stealth_get_cdp_endpoint(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        session_name, browser = await self._resolve_browser(args.get("session_name"))
+        cdp = await browser.get_cdp_endpoint()
+        # small payload; no truncation guard needed, but redact just in case
+        payload = self._tool_ok_payload({"session_name": session_name, "cdp": cdp})
+        # use guard for uniformity (though typically tiny)
+        return self._guard_observability_payload(payload, "stealth_get_cdp_endpoint")
 
     async def _tool_stealth_close(self, args: Dict[str, Any]) -> Dict[str, Any]:
         close_all = bool(args.get("close_all", False))

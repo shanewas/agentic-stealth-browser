@@ -102,16 +102,19 @@ If MCP-native tools are insufficient (e.g., visual DOM inspection needed beyond 
 3. Screenshots via `stealth_tab_snapshot` or the built-in `VISUAL_DEBUGGING.md` flows.
 4. Local `~/.agentic-browser/.../debug/` artifacts.
 
-## Optional / Advanced: CDP Attach (Deeper Live Observation)
+## Optional / Advanced: CDP Attach (Deeper Live Observation) — v0.9.0 #377
 
 For clients/backends that support direct Chrome DevTools Protocol attach (e.g., some desktop agents or custom setups):
 
-- After `stealth_launch(..., debug=True)`, the browser exposes a CDP endpoint (printed in debug logs or via `stealth_status`).
-- Attach external tools (Chrome DevTools, Playwright inspector, Puppeteer) using the WS endpoint.
-- **Caveat**: Not available in all MCP client sandboxes (e.g., containerized or restricted Claude Desktop). The MCP-native tools above are the portable default.
-- Security: CDP attach bypasses some MCP guardrails; use only in trusted environments.
+- **Opt-in only**: Launch with `stealth_launch(..., debug_cdp=True)` (flag defaults to false for security; `debug=True` alone does **not** enable the port).
+- Then call the dedicated MCP tool: `stealth_get_cdp_endpoint` (optionally with `session_name`).
+  - When enabled: returns `{"status": "enabled", "ws_endpoint": "ws://127.0.0.1:<port>/...", "port": <n>, "browser": "...", "warning": "SECURITY: ... localhost (127.0.0.1) ONLY ...", ...}` + attach instructions.
+  - When disabled (default): returns clear `{"status": "disabled", "message": "CDP attach is disabled (default). ... explicit security boundary ...", "security_note": "..."}`.
+- Attach external tools (Chrome DevTools, Playwright `connect_over_cdp(ws_endpoint)`, Puppeteer, etc.) using the WS endpoint.
+- **Caveat**: Not available (or firewalled) in all MCP client sandboxes (e.g., containerized or restricted Claude Desktop). The MCP-native tools (`stealth_*` observability) are the portable default and recommended.
+- **Security (critical)**: The endpoint is **always bound exclusively to 127.0.0.1** (never 0.0.0.0). Explicit warnings are surfaced in tool descriptions, launch schema, responses, and this guide. CDP grants low-level control that bypasses some MCP guards/stealth — use **only** in trusted local development environments. Never expose, port-forward, or enable in production/shared hosts.
 
-See upcoming #377 for standardized `stealth_cdp_attach` helper (optional).
+This implements GitHub #377 (optional CDP attach for v0.9.0) with minimal surface, localhost-only, and disabled-by-default posture.
 
 ## Security & Redaction Notes
 
@@ -126,7 +129,7 @@ See upcoming #377 for standardized `stealth_cdp_attach` helper (optional).
 - **No tabs listed?** Ensure you called `stealth_launch` successfully first; check `stealth_status`.
 - **Snapshots empty / pruned?** Check retention limit and `STEALTH_MCP_SNAPSHOT_DIR` writability.
 - **Timeline empty?** Only navigation/click/type actions are captured; pure waits may not appear.
-- **CDP attach fails?** Most hosted MCP clients do not expose raw CDP ports. Stick to native tools or run the server locally with `headless=false`.
+- **CDP attach fails or "disabled"?** You must explicitly pass `debug_cdp: true` to `stealth_launch`. The port is localhost-only (127.0.0.1) and only discoverable via `stealth_get_cdp_endpoint`. Most hosted/remote MCP clients cannot surface local TCP ports anyway — use native MCP observability tools or run the server in a local trusted dev environment with `headless=false` + `debug_cdp=true`.
 - **Large responses truncated?** Increase `STEALTH_MCP_OBSERVABILITY_MAX_CHARS` (or reduce `limit`).
 - **Permission errors on files?** Add dirs via `STEALTH_MCP_ALLOWED_DIRS` or adjust `mcp_security.py` policy.
 
@@ -138,7 +141,7 @@ See upcoming #377 for standardized `stealth_cdp_attach` helper (optional).
 | "Show me the page"          | `stealth_tab_snapshot`           | No            | + `dom_summary` |
 | "What actions happened?"    | `stealth_session_timeline`       | No            | Audit replay |
 | "Full stealth config?"      | `stealth_debug_report`           | No            | TLS + patches + logs |
-| Visual deep inspect         | Headed + snapshot / external CDP | Optional      | Local only |
+| Visual deep inspect         | Headed + snapshot / `stealth_get_cdp_endpoint` + external CDP | Optional (opt-in via `debug_cdp=True` on launch) | Localhost-only binding; explicit disabled status + warnings when off |
 | Programmatic control        | All `stealth_*` + your agent loop| No            | Full MCP contract |
 
 This guide directly addresses the need to "see what the MCP browser is doing" without requiring privileged browser backends.

@@ -54,10 +54,11 @@ class _FakeBrowser:
         self._pages = [self._page]
         self._closed = False
 
-    async def launch(self, headless=True, debug=False, preset=None, region=None):
+    async def launch(self, headless=True, debug=False, debug_cdp=False, preset=None, region=None):
         self.current_preset = preset
         self.current_region = region or "global"
         self.debug = debug
+        self.debug_cdp = debug_cdp
         self.headless = headless
 
     def page_getter(self):
@@ -84,6 +85,19 @@ class _FakeBrowser:
     async def debug_report(self, print_report: bool = False, limit: int = None, cursor: str = None, since_ts: str = None):
         _ = (print_report, limit, cursor, since_ts)
         return {"status": "success", "report": {"ok": True}}
+
+    async def get_cdp_endpoint(self):
+        if not getattr(self, "debug_cdp", False):
+            return {
+                "status": "disabled",
+                "message": "CDP attach is disabled for this session. Relaunch with debug_cdp=True to enable (binds to localhost only; see security notes).",
+            }
+        return {
+            "status": "enabled",
+            "ws_endpoint": "ws://127.0.0.1:9222/devtools/browser/fake-uuid-for-test",
+            "port": 9222,
+            "warning": "SECURITY: localhost only.",
+        }
 
     def get_replay_sequence(self, limit: int = 30, cursor: str = None, since_ts: str = None):
         _ = (cursor, since_ts)
@@ -144,6 +158,7 @@ async def test_tools_manifest_contains_required_runtime_tools():
         "stealth_tab_snapshot",
         "stealth_session_timeline",
         "stealth_debug_report",
+        "stealth_get_cdp_endpoint",
         "stealth_close",
         "stealth_capabilities",
     }
@@ -453,3 +468,58 @@ async def test_snapshot_retention_prunes_old_files(monkeypatch, tmp_path):
     snapshot_dir = (tmp_path / "snapshots") / "obs"
     pngs = sorted(snapshot_dir.glob("*.png"))
     assert len(pngs) == 3
+
+
+@pytest.mark.asyncio
+async def test_stealth_get_cdp_endpoint_disabled_by_default_and_enabled_when_flagged():
+    """#377: opt-in CDP endpoint tool. Disabled returns clear status; enabled returns ws + warnings."""
+    # Default (disabled)
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 71,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "cdp-test"}},
+        }
+    )
+    resp_disabled = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 72,
+            "method": "tools/call",
+            "params": {"name": "stealth_get_cdp_endpoint", "arguments": {"session_name": "cdp-test"}},
+        }
+    )
+    payload_d = _tool_structured_content(resp_disabled)
+    assert payload_d["status"] == "success"
+    cdp_d = payload_d["cdp"]
+    assert cdp_d["status"] == "disabled"
+    assert "disabled" in cdp_d.get("message", "").lower()
+    assert "localhost" in cdp_d.get("message", "").lower() or "127.0.0.1" in str(cdp_d)
+
+    # Now launch with flag
+    server2 = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    await server2.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 73,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "cdp-enabled", "debug_cdp": True}},
+        }
+    )
+    resp_enabled = await server2.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 74,
+            "method": "tools/call",
+            "params": {"name": "stealth_get_cdp_endpoint", "arguments": {"session_name": "cdp-enabled"}},
+        }
+    )
+    payload_e = _tool_structured_content(resp_enabled)
+    assert payload_e["status"] == "success"
+    cdp_e = payload_e["cdp"]
+    assert cdp_e["status"] == "enabled"
+    assert "ws_endpoint" in cdp_e
+    assert cdp_e["ws_endpoint"].startswith("ws://127.0.0.1")
+    assert "warning" in cdp_e and "localhost" in cdp_e["warning"].lower()
