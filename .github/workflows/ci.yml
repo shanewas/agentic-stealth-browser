@@ -81,7 +81,7 @@ jobs:
         # The ignored legacy phase files are transitional; e2e/live_network are excluded via markers.
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-report
@@ -89,7 +89,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results
@@ -107,7 +107,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload collection audit artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-collection-audit
