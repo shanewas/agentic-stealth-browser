@@ -1,9 +1,9 @@
 """
-Connection & Context Reuse for Sequential Navigations
-Addresses #135: No connection or context reuse between sequential navigations on the same domain.
+Domain Navigation History Tracker (Telemetry)
 
-Keeps contexts warm and reuses them intelligently when the domain matches recent activity.
-Reduces TLS setup cost and fingerprinting signals from new connections.
+Tracks domain navigation history for telemetry and reuse-pattern analysis.
+Provides lightweight records of visited domains with timestamps for
+understanding browsing patterns across sessions.
 """
 
 import time
@@ -12,20 +12,20 @@ from urllib.parse import urlparse
 from collections import OrderedDict
 
 
-class ConnectionPool:
-    """Manages reusable browser contexts for same-domain sequential navigations.
+class NavigationHistory:
+    """Tracks domain navigation history with timestamps for telemetry purposes.
 
     Usage:
-        pool = ConnectionPool(max_contexts=5, ttl=300)
-        context = pool.get_or_create_context("example.com")
-        # ... use context ...
-        pool.release_context("example.com", context)
+        history = NavigationHistory(max_contexts=5, ttl=300)
+        entry = history.record_domain("example.com")
+        # ... later ...
+        history.touch_domain("example.com")
     """
 
     def __init__(self, max_contexts: int = 5, ttl: float = 300.0):
         self.max_contexts = max_contexts
-        self.ttl = ttl  # Time-to-live for idle contexts (seconds)
-        self._contexts: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+        self.ttl = ttl  # Time-to-live for stale records (seconds)
+        self._domains: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self._domain_history: List[str] = []
 
     def get_domain(self, url: str) -> str:
@@ -35,22 +35,20 @@ class ConnectionPool:
         except Exception:
             return url.lower()
 
-    def get_or_create_context(self, domain: str) -> Dict[str, Any]:
-        """Get existing context for domain or create new one.
+    def record_domain(self, domain: str) -> Dict[str, Any]:
+        """Record a domain visit in navigation history.
 
-        Returns context info dict with 'created_at' and 'last_used' timestamps.
+        Returns history entry dict with 'created_at' and 'last_used' timestamps.
         """
         domain = domain.lower()
 
-        if domain in self._contexts:
-            ctx = self._contexts[domain]
+        if domain in self._domains:
+            ctx = self._domains[domain]
             ctx["last_used"] = time.time()
             ctx["reuse_count"] = ctx.get("reuse_count", 0) + 1
-            # Move to end (most recently used)
-            self._contexts.move_to_end(domain)
+            self._domains.move_to_end(domain)
             return ctx
 
-        # Create new context
         ctx = {
             "domain": domain,
             "created_at": time.time(),
@@ -58,58 +56,56 @@ class ConnectionPool:
             "reuse_count": 0,
             "navigation_count": 0,
         }
-        self._contexts[domain] = ctx
+        self._domains[domain] = ctx
         self._domain_history.append(domain)
 
-        # Evict oldest if over capacity
-        while len(self._contexts) > self.max_contexts:
-            oldest_domain, oldest_ctx = self._contexts.popitem(last=False)
-            # Could close browser context here if we had a reference
+        while len(self._domains) > self.max_contexts:
+            oldest_domain, oldest_ctx = self._domains.popitem(last=False)
 
         return ctx
 
-    def release_context(self, domain: str, context: Optional[Dict] = None):
-        """Release context back to pool (updates last_used)."""
+    def touch_domain(self, domain: str, context: Optional[Dict] = None):
+        """Update last_used timestamp on a domain entry."""
         domain = domain.lower()
-        if domain in self._contexts:
-            self._contexts[domain]["last_used"] = time.time()
-            self._contexts.move_to_end(domain)
+        if domain in self._domains:
+            self._domains[domain]["last_used"] = time.time()
+            self._domains.move_to_end(domain)
 
-    def cleanup_expired(self) -> List[str]:
-        """Remove expired contexts. Returns list of removed domains."""
+    def cleanup_stale(self) -> List[str]:
+        """Remove stale domain records. Returns list of removed domains."""
         now = time.time()
-        expired = []
-        for domain, ctx in list(self._contexts.items()):
+        stale = []
+        for domain, ctx in list(self._domains.items()):
             if now - ctx["last_used"] > self.ttl:
-                expired.append(domain)
-                del self._contexts[domain]
-        return expired
+                stale.append(domain)
+                del self._domains[domain]
+        return stale
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get pool statistics."""
-        total_reuses = sum(ctx.get("reuse_count", 0) for ctx in self._contexts.values())
-        total_navigations = sum(ctx.get("navigation_count", 0) for ctx in self._contexts.values())
+        """Get navigation history statistics."""
+        total_reuses = sum(ctx.get("reuse_count", 0) for ctx in self._domains.values())
+        total_navigations = sum(ctx.get("navigation_count", 0) for ctx in self._domains.values())
         return {
-            "active_contexts": len(self._contexts),
+            "active_contexts": len(self._domains),
             "max_contexts": self.max_contexts,
             "total_reuses": total_reuses,
             "total_navigations": total_navigations,
             "reuse_rate": total_reuses / max(1, total_navigations + total_reuses),
-            "domains": list(self._contexts.keys()),
+            "domains": list(self._domains.keys()),
         }
 
     def clear(self):
-        """Clear all contexts."""
-        self._contexts.clear()
+        """Clear all history records."""
+        self._domains.clear()
         self._domain_history.clear()
 
     def should_reuse(self, url: str) -> bool:
-        """Check if we should reuse an existing context for this URL."""
+        """Check if domain has been visited recently."""
         domain = self.get_domain(url)
-        return domain in self._contexts
+        return domain in self._domains
 
     def record_navigation(self, url: str):
         """Record a navigation for tracking."""
         domain = self.get_domain(url)
-        if domain in self._contexts:
-            self._contexts[domain]["navigation_count"] = self._contexts[domain].get("navigation_count", 0) + 1
+        if domain in self._domains:
+            self._domains[domain]["navigation_count"] = self._domains[domain].get("navigation_count", 0) + 1

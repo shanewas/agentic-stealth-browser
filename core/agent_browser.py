@@ -28,7 +28,7 @@ from proxy.proxy_manager import ProxyManager
 # P3: New module integrations
 from core.account_health import AccountHealth
 from core.account_warming import AccountWarmer
-from core.connection_pool import ConnectionPool
+from core.connection_pool import NavigationHistory
 from behavior.adaptive_tuner import BehaviorTuner
 from stealth.headers import get_extra_http_headers
 from audit.logger import AuditLogger
@@ -251,7 +251,7 @@ class AgentBrowser:
         # P3: New module integrations
         self.account_health = AccountHealth(account_id=session_name or "default")
         self.account_warming = AccountWarmer(account_id=session_name or "default")
-        self.connection_pool = ConnectionPool(max_contexts=5, ttl=300.0)
+        self.connection_pool = NavigationHistory(max_contexts=5, ttl=300.0)
         self.adaptive_tuner = BehaviorTuner(rng=self.rng)
 
     @property
@@ -925,7 +925,7 @@ class AgentBrowser:
         P0 #20: Rate limiting is now the default (rate_limit=True).
         Set rate_limit=False to opt-out for specific calls.
 
-        P3: Integrated with AccountHealth, AccountWarmer, ConnectionPool, and AdaptiveTuner.
+        P3: Integrated with AccountHealth, AccountWarmer, NavigationHistory, and AdaptiveTuner.
         """
         # #136: tool-level rate limit check
         if self._rate_limiter:
@@ -1003,7 +1003,7 @@ class AgentBrowser:
             if self.account_warming.days_elapsed > 0:
                 self.account_warming.record_action()
                 self.account_warming.record_page_visit(url)
-            self.connection_pool.release_context(domain)
+            self.connection_pool.touch_domain(domain)
             self.adaptive_tuner.record_feedback(blocked=False, platform=platform)
             return True
         except Exception as e:

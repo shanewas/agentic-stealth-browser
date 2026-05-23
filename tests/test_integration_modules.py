@@ -1,6 +1,6 @@
 """
 Integration tests for new module wiring in AgentBrowser.
-Tests that AccountHealth, AccountWarmer, ConnectionPool, and AdaptiveTuner
+Tests that AccountHealth, AccountWarmer, NavigationHistory, and AdaptiveTuner
 are properly initialized and wired into safe_goto.
 """
 
@@ -30,7 +30,7 @@ class TestModuleInitialization:
     def test_connection_pool_initialized(self):
         browser = AgentBrowser(session_name="integration-test")
         assert browser.connection_pool is not None
-        assert len(browser.connection_pool._contexts) == 0
+        assert len(browser.connection_pool._domains) == 0
 
     def test_adaptive_tuner_initialized(self):
         browser = AgentBrowser(session_name="integration-test")
@@ -56,7 +56,7 @@ class TestModuleIntegration:
 
     def test_connection_pool_tracks_domains(self):
         browser = AgentBrowser(session_name="integration-test")
-        browser.connection_pool.get_or_create_context("example.com")
+        browser.connection_pool.record_domain("example.com")
         assert browser.connection_pool.should_reuse("https://example.com/page") is True
 
     def test_adaptive_tuner_records_feedback(self):
