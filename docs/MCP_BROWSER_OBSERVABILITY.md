@@ -50,14 +50,17 @@ Returns tab IDs (e.g., `tab-0`, `tab-1`) and basic metadata. Use the returned `t
   "name": "stealth_session_timeline",
   "arguments": {
     "session_name": "my-session",
-    "limit": 50
+    "limit": 50,
+    "since_ts": "2026-05-23T07:00:00Z",
+    "cursor": "2026-05-23T07:12:34.123Z"
   }
 }
 ```
 
-- Wraps `browser.get_replay_sequence(limit)` (audit log actions like click/type/goto).
+- Wraps `browser.get_replay_sequence(...)` with full pagination support (`limit`, `cursor`, `since_ts`).
+- Response now includes `next_cursor`, `has_more`, `count`, and `truncated` (via guardrails).
 - `limit` clamped: default `STEALTH_MCP_TIMELINE_DEFAULT_LIMIT=30`, hard max `STEALTH_MCP_TIMELINE_MAX_LIMIT=200`.
-- Ideal for "what did the agent actually do?" traces.
+- Ideal for "what did the agent actually do?" traces and incremental polling.
 
 ### 4. Full Debug Report
 
