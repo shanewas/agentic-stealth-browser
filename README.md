@@ -150,6 +150,8 @@ pip install agentic-stealth-browser
 | `STEALTH_MCP_TIMELINE_MAX_LIMIT` | Hard upper bound for `stealth_session_timeline.limit` | `200` |
 | `STEALTH_MCP_OBSERVABILITY_MAX_CHARS` | Max serialized response size for observability payloads before truncation | `50000` |
 
+> **Operator Guide**: For detailed workflows on observing what the MCP-driven browser is actually doing (tabs, snapshots, timelines, debug reports, security notes, CDP fallbacks), see [docs/MCP_BROWSER_OBSERVABILITY.md](docs/MCP_BROWSER_OBSERVABILITY.md).
+
 ## Configuration
 
 ### Environment Variables
