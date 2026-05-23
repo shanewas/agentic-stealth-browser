@@ -13,6 +13,8 @@ import weakref
 from pathlib import Path
 from typing import Optional, Dict, Any
 from urllib.parse import urlparse
+import json
+import urllib.request
 from playwright.async_api import async_playwright, BrowserContext, Browser
 
 from stealth.advanced_stealth import get_stealth_script, check_stealth_compatibility
@@ -231,6 +233,7 @@ class AgentBrowser:
 
         # P2/P3 DX & Observability (#281, #265, #288): health/status, debug, presets
         self.debug_mode: bool = False
+        self.debug_cdp: bool = False  # #377: opt-in CDP remote debugging (localhost-only WS endpoint)
         self.current_preset: Optional[str] = None
         self.current_region: str = "global"
         self.tls_manager: Optional[Any] = None
@@ -349,6 +352,7 @@ class AgentBrowser:
         use_pooled_context: Optional[bool] = None,
         resume: bool = False,  # P2: lighter warm-up when resuming from saved sessions
         debug: bool = False,   # P2/P3 DX: enable DebugReporter (#265)
+        debug_cdp: bool = False,  # #377: optional CDP attach (remote-debugging on localhost: random-port only; security: never 0.0.0.0)
         preset: Optional[str] = None,  # P2/P3: platform preset (#288)
         region: Optional[str] = None,  # P2/P3: TLS region override
         launch_options: Optional[Dict[str, Any]] = None,  # #143: custom Playwright launch_persistent_context / context opts (merged safely, e.g. ignore_default_args, extra args)
@@ -384,6 +388,7 @@ class AgentBrowser:
                 Default False for full backward compat + per-session disk persistence via launch_persistent_context.
             resume: Opt-in P2: when True, forces light_mode for faster resume from saved sessions (less rigid warm-up).
             debug: Enable debug mode (#265) - populates DebugReporter for fingerprint/headers/patches.
+            debug_cdp: Opt-in for #377 CDP remote debugging WS endpoint (binds strictly to 127.0.0.1, random port via =0). Returns via stealth_get_cdp_endpoint or get_cdp_endpoint(). Explicit security warning in responses. Disabled by default for safety.
             preset: Platform preset e.g. "linkedin_2026" (#288) - sets region, behavior, recovery tuning.
             region: TLS region override ("us", "eu", "japan", "korea", "global").
             launch_options: Dict of extra kwargs passed to Playwright's launch_persistent_context (or context opts in pooled).
@@ -417,6 +422,7 @@ class AgentBrowser:
 
         # P2/P3 DX wiring (#281 health, #265 debug, #288 preset)
         self.debug_mode = bool(debug)
+        self.debug_cdp = bool(debug_cdp)  # #377
         if preset:
             self.current_preset = preset
             try:
@@ -435,7 +441,7 @@ class AgentBrowser:
         self._launch_options = {
             "headless": headless, "slow_mo": slow_mo, "headed": headed,
             "light_mode": light_mode, "use_pooled_context": use_pooled_context,
-            "debug": self.debug_mode, "preset": self.current_preset, "region": self.current_region,
+            "debug": self.debug_mode, "debug_cdp": self.debug_cdp, "preset": self.current_preset, "region": self.current_region,
             "resume": resume,
             "launch_options": launch_options,  # #143 preserve custom for rotation relaunch
         }
@@ -454,6 +460,12 @@ class AgentBrowser:
             "--no-sandbox",
         ]
         all_args = list(set(base_args + tls_args))
+
+        # #377: CDP remote debugging opt-in (localhost-only for security). Applied to browser args in classic path.
+        # (Pooled path uses shared browser launch in _BrowserPool; CDP debug sessions should use default non-pooled for now - minimal surface change.)
+        if getattr(self, "debug_cdp", False):
+            cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"]
+            all_args = list(dict.fromkeys(all_args + cdp_flags))  # dedupe preserving order
 
         # Persona integration hook (foundation only for #109)
         # Uses dataclass overrides for consistent fingerprint. No other side effects yet.
@@ -532,6 +544,28 @@ class AgentBrowser:
                 if k not in ("user_data_dir",):  # never override critical
                     lp_kwargs[k] = v
             self.browser = await pw.chromium.launch_persistent_context(**lp_kwargs)
+
+            # #377: discover CDP WS endpoint if enabled (uses Chrome's DevToolsActivePort + /json/version; stdlib only)
+            if getattr(self, "debug_cdp", False):
+                try:
+                    udir = Path(str(user_data))
+                    port_file = udir / "DevToolsActivePort"
+                    if port_file.exists():
+                        port_text = port_file.read_text().strip().splitlines()[0].strip()
+                        port = int(port_text)
+                        probe_url = f"http://127.0.0.1:{port}/json/version"
+                        with urllib.request.urlopen(probe_url, timeout=3) as r:
+                            ver = json.loads(r.read().decode("utf-8", errors="replace"))
+                        self._cdp_ws_endpoint = ver.get("webSocketDebuggerUrl")
+                        self._cdp_port = port
+                        self._cdp_browser_version = ver.get("Browser", "unknown")
+                    else:
+                        self._cdp_ws_endpoint = None
+                        self._cdp_port = None
+                except Exception:
+                    self._cdp_ws_endpoint = None
+                    self._cdp_port = None
+                    self._cdp_browser_version = None
         
         # Per-session stable fingerprint seed (canvas/WebGL noise + fonts) for consistency across reloads
         # and variation between sessions. Addresses #150 (re-apply), #94, #210 etc.
@@ -701,6 +735,11 @@ class AgentBrowser:
             ]
             all_args = list(set(base_args + tls_args))
 
+            # #377: CDP flags on rotation relaunch (if debug_cdp was set on original launch)
+            if getattr(self, "debug_cdp", False):
+                cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"]
+                all_args = list(dict.fromkeys(all_args + cdp_flags))
+
             p_over = getattr(self, "persona", None).to_launch_overrides() if getattr(self, "persona", None) else {}
             vp = p_over.get("viewport", {"width": 1366, "height": 768})
             ua = p_over.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -755,6 +794,28 @@ class AgentBrowser:
                     if k not in ("user_data_dir",):
                         lp_kwargs[k] = v
                 self.browser = await self._pw.chromium.launch_persistent_context(**lp_kwargs)
+
+                # #377 rediscover after rotation relaunch (classic path)
+                if getattr(self, "debug_cdp", False):
+                    try:
+                        udir = Path(str(user_data))
+                        port_file = udir / "DevToolsActivePort"
+                        if port_file.exists():
+                            port_text = port_file.read_text().strip().splitlines()[0].strip()
+                            port = int(port_text)
+                            probe_url = f"http://127.0.0.1:{port}/json/version"
+                            with urllib.request.urlopen(probe_url, timeout=3) as r:
+                                ver = json.loads(r.read().decode("utf-8", errors="replace"))
+                            self._cdp_ws_endpoint = ver.get("webSocketDebuggerUrl")
+                            self._cdp_port = port
+                            self._cdp_browser_version = ver.get("Browser", "unknown")
+                        else:
+                            self._cdp_ws_endpoint = None
+                            self._cdp_port = None
+                    except Exception:
+                        self._cdp_ws_endpoint = None
+                        self._cdp_port = None
+                        self._cdp_browser_version = None
 
             self.page = await self.browser.new_page()
             self.context = self.browser
@@ -1447,6 +1508,54 @@ class AgentBrowser:
             except Exception:
                 print(report)
         return {"status": "success", "report": report}
+
+    async def get_cdp_endpoint(self) -> Dict[str, Any]:
+        """#377: Return CDP WS endpoint + metadata ONLY if debug_cdp was enabled on launch (opt-in).
+        When disabled (default for security): clear {"status": "disabled", ...} response.
+        Binds exclusively to localhost (127.0.0.1) + random port. Explicit warnings included.
+        """
+        if not getattr(self, "debug_cdp", False):
+            return {
+                "status": "disabled",
+                "message": "CDP attach is disabled (default). Launch with debug_cdp=True (or the MCP flag) to opt-in. This is an explicit security boundary: the endpoint binds ONLY to 127.0.0.1 and is never exposed on the network.",
+                "security_note": "Remote debugging ports on non-localhost are a common attack vector; opt-in only in trusted local dev environments.",
+            }
+
+        # Lazy discovery (in case called before post-launch probe, or after some event)
+        if not getattr(self, "_cdp_ws_endpoint", None):
+            try:
+                # best-effort re-probe using last known user_data if available (from _launch_options or session)
+                udir = Path(self.session.get("user_data_dir", "")) if getattr(self, "session", None) else None
+                if udir and udir.exists():
+                    port_file = udir / "DevToolsActivePort"
+                    if port_file.exists():
+                        port_text = port_file.read_text().strip().splitlines()[0].strip()
+                        port = int(port_text)
+                        probe_url = f"http://127.0.0.1:{port}/json/version"
+                        with urllib.request.urlopen(probe_url, timeout=3) as r:
+                            ver = json.loads(r.read().decode("utf-8", errors="replace"))
+                        self._cdp_ws_endpoint = ver.get("webSocketDebuggerUrl")
+                        self._cdp_port = port
+                        self._cdp_browser_version = ver.get("Browser", "unknown")
+            except Exception:
+                pass
+
+        ws = getattr(self, "_cdp_ws_endpoint", None)
+        if not ws:
+            return {
+                "status": "error",
+                "message": "CDP was enabled but endpoint not discoverable (browser may still be starting, or DevToolsActivePort file absent). Retry after launch settles.",
+                "debug_cdp": True,
+            }
+
+        return {
+            "status": "enabled",
+            "ws_endpoint": ws,
+            "port": getattr(self, "_cdp_port", None),
+            "browser": getattr(self, "_cdp_browser_version", "unknown"),
+            "warning": "SECURITY: CDP endpoint is bound to localhost (127.0.0.1) ONLY. Do not forward or expose this port. CDP attach grants full browser control bypassing some MCP/stealth layers. Use exclusively for local debugging/observability in trusted environments. This was explicitly opted-in via debug_cdp=True.",
+            "how_to_attach": "Use the ws_endpoint with Chrome DevTools, Playwright connectOverCDP, puppeteer, etc. Example: playwright.chromium.connect_over_cdp(ws_endpoint)",
+        }
 
     async def apply_preset(self, name: str) -> Dict[str, Any]:
         """#288: Runtime apply of platform preset (tunes recovery/behavior notes; TLS best on (re)launch)."""
