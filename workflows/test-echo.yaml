@@ -1,0 +1,8 @@
+name: test-echo
+description: Simple smoke test workflow
+steps:
+  - type: navigate
+    url: https://example.com
+  - type: verify
+    selector: h1
+    text: Example Domain

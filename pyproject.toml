@@ -56,6 +56,7 @@ include = [
     "scraping",
     "ai",
     "linkedin",
+    "workflows",
 ]
 
 [tool.setuptools.package-data]
