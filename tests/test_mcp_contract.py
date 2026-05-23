@@ -141,6 +141,60 @@ def test_health_status_contract_shape():
     asyncio.run(_run())
 
 
+class TestMCPToolManifest:
+    """MCP entrypoint/tool-manifest smoke test (#371)."""
+
+    def test_server_instantiates_and_lists_tools(self):
+        from production.mcp_server import StealthMCPServer
+        server = StealthMCPServer()
+        manifest = server.list_tools()
+        assert "tools" in manifest
+        assert isinstance(manifest["tools"], list)
+        assert len(manifest["tools"]) > 0
+
+    def test_expected_tools_present(self):
+        from production.mcp_server import StealthMCPServer
+        server = StealthMCPServer()
+        names = {t["name"] for t in server.list_tools()["tools"]}
+        expected = {
+            "stealth_launch",
+            "stealth_navigate",
+            "stealth_load_cookies",
+            "stealth_set_region",
+            "stealth_scrape",
+            "stealth_status",
+            "stealth_tabs_list",
+            "stealth_tab_snapshot",
+            "stealth_session_timeline",
+            "stealth_debug_report",
+            "stealth_get_cdp_endpoint",
+            "stealth_close",
+            "stealth_capabilities",
+        }
+        assert expected.issubset(names)
+
+    def test_tool_names_are_stealth_prefixed(self):
+        from production.mcp_server import StealthMCPServer
+        server = StealthMCPServer()
+        for tool in server.list_tools()["tools"]:
+            assert tool["name"].startswith("stealth_"), f"{tool['name']} missing stealth_ prefix"
+
+    def test_each_tool_has_name_description_and_schema(self):
+        from production.mcp_server import StealthMCPServer
+        server = StealthMCPServer()
+        for tool in server.list_tools()["tools"]:
+            assert "name" in tool
+            assert "description" in tool
+            assert "inputSchema" in tool
+
+    def test_tool_descriptions_are_non_empty_strings(self):
+        from production.mcp_server import StealthMCPServer
+        server = StealthMCPServer()
+        for tool in server.list_tools()["tools"]:
+            assert isinstance(tool["description"], str)
+            assert len(tool["description"]) > 0, f"{tool['name']} has empty description"
+
+
 if __name__ == "__main__":
     # Allow direct run
     test_proxy_wiring_and_tier_selection()
