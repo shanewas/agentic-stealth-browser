@@ -1,0 +1,176 @@
+import json
+
+import pytest
+
+from production.mcp_server import StealthMCPServer, main
+
+
+class _FakePage:
+    def __init__(self):
+        self.url = "about:blank"
+
+
+class _FakeScraper:
+    async def scrape_page(self, url: str, extract_images: bool = False, platform: str = "unknown"):
+        return {
+            "url": url,
+            "extract_images": extract_images,
+            "platform": platform,
+            "content": {"title": "fake"},
+        }
+
+
+class _FakeBrowser:
+    def __init__(
+        self,
+        session_name=None,
+        anonymous=False,
+        ephemeral=False,
+        light_mode=False,
+        use_pooled_context=False,
+    ):
+        self.session_name = session_name
+        self.anonymous = anonymous
+        self.ephemeral = ephemeral
+        self.light_mode = light_mode
+        self.use_pooled_context = use_pooled_context
+        self.current_preset = None
+        self.current_region = "global"
+        self.scraper = _FakeScraper()
+        self._page = _FakePage()
+        self._closed = False
+
+    async def launch(self, headless=True, debug=False, preset=None, region=None):
+        self.current_preset = preset
+        self.current_region = region or "global"
+        self.debug = debug
+        self.headless = headless
+
+    def page_getter(self):
+        return self._page
+
+    async def safe_goto(self, url: str, warm_up=True, platform="unknown", rate_limit=True, domain=None, account=None):
+        _ = (warm_up, platform, rate_limit, domain, account)
+        self._page.url = url
+        return True
+
+    async def load_cookies_from_file(self, cookies_path: str, encryption_key=None):
+        _ = encryption_key
+        return {"status": "success", "loaded": 1, "path": cookies_path}
+
+    async def switch_region(self, new_region: str, relaunch: bool = False):
+        self.current_region = new_region
+        _ = relaunch
+        return {"status": "success", "old_region": "global", "new_region": new_region}
+
+    async def get_health_status(self):
+        return {"status": "ok", "launched": True, "region": self.current_region}
+
+    async def debug_report(self, print_report: bool = False):
+        _ = print_report
+        return {"status": "success", "report": {"ok": True}}
+
+    async def close(self):
+        self._closed = True
+
+
+def _tool_structured_content(resp: dict) -> dict:
+    return resp["result"]["structuredContent"]
+
+
+@pytest.mark.asyncio
+async def test_tools_manifest_contains_required_runtime_tools():
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    names = {t["name"] for t in server.list_tools()["tools"]}
+    required = {
+        "stealth_launch",
+        "stealth_navigate",
+        "stealth_load_cookies",
+        "stealth_set_region",
+        "stealth_scrape",
+        "stealth_status",
+        "stealth_close",
+        "stealth_capabilities",
+    }
+    assert required.issubset(names)
+
+
+@pytest.mark.asyncio
+async def test_initialize_and_tools_list_jsonrpc_shape():
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    init_resp = await server.handle_jsonrpc(
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}}
+    )
+    assert init_resp["result"]["protocolVersion"] == "2025-03-26"
+    assert "tools" in init_resp["result"]["capabilities"]
+
+    list_resp = await server.handle_jsonrpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    assert "tools" in list_resp["result"]
+    assert len(list_resp["result"]["tools"]) >= 8
+
+
+@pytest.mark.asyncio
+async def test_launch_then_navigate_tool_flow():
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+
+    launch_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "demo", "headless": True, "region": "us"}},
+        }
+    )
+    launch_payload = _tool_structured_content(launch_resp)
+    assert launch_payload["status"] == "success"
+    assert launch_payload["session_name"] == "demo"
+
+    nav_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {"name": "stealth_navigate", "arguments": {"session_name": "demo", "url": "https://example.com"}},
+        }
+    )
+    nav_payload = _tool_structured_content(nav_resp)
+    assert nav_payload["status"] == "success"
+    assert nav_payload["navigated"] is True
+    assert nav_payload["current_url"] == "https://example.com"
+
+
+@pytest.mark.asyncio
+async def test_cookie_load_blocks_path_traversal_by_security_policy():
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "demo"}},
+        }
+    )
+
+    cookies_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {"name": "stealth_load_cookies", "arguments": {"session_name": "demo", "cookies_path": "../secret.json"}},
+        }
+    )
+    payload = _tool_structured_content(cookies_resp)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "MCP_SECURITY_PATH_DENIED"
+    assert cookies_resp["result"].get("isError") is True
+
+
+def test_list_tools_cli_flag(capsys):
+    rc = main(["--list-tools"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    names = {t["name"] for t in data["tools"]}
+    assert "stealth_launch" in names
+    assert "stealth_status" in names
+
