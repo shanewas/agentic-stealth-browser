@@ -30,6 +30,7 @@ dependencies = [
     "playwright",
     "aiohttp",
     "cryptography",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
