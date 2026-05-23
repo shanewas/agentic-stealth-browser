@@ -278,24 +278,46 @@ class AuditLogger:
             **(details or {})
         }, level="warning")
     
-    def get_recent_actions(self, limit: int = 50) -> list:
-        """Read recent audit entries (sync read is acceptable; only called from debug/report paths)"""
+    def get_recent_actions(self, limit: int = 50, since_ts: Optional[str] = None, before_ts: Optional[str] = None) -> list:
+        """Read recent audit entries (sync read is acceptable; only called from debug/report paths)
+
+        Supports optional time filtering for pagination (#381):
+        - since_ts: only entries with timestamp >= since_ts (ISO strings are comparable)
+        - before_ts: only entries with timestamp < before_ts (used when cursor provided for older pages)
+        After any filter, returns the most recent 'limit' of the matching entries (chronological order).
+        """
         if not self.audit_file.exists():
             return []
-        
+
         entries = []
         with open(self.audit_file) as f:
             for line in f:
                 if line.strip():
-                    entries.append(json.loads(line))
-        
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass  # tolerate corrupt lines
+
+        if since_ts or before_ts:
+            filtered = []
+            for e in entries:
+                ts = str(e.get("timestamp", ""))
+                if since_ts and ts < since_ts:
+                    continue
+                if before_ts and ts >= before_ts:
+                    continue
+                filtered.append(e)
+            entries = filtered
+
         return entries[-limit:]
 
-    def replay_sequence(self, limit: int = 30) -> list:
-        """#253 lightweight replay from audit logs."""
+    def replay_sequence(self, limit: int = 30, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> list:
+        """#253 lightweight replay from audit logs. Extended for #381 cursor/since_ts pagination (minimal keyset on timestamp)."""
         if not self.audit_file.exists():
             return []
-        entries = self.get_recent_actions(limit * 3)
+        before_ts = cursor if cursor else None
+        fetch_n = (limit * 5) if (cursor or since_ts) else (limit * 3)
+        entries = self.get_recent_actions(fetch_n, since_ts=since_ts, before_ts=before_ts)
         seq = []
         for e in entries:
             a = str(e.get("action", "")).lower()
@@ -409,8 +431,10 @@ class DebugReporter:
         """Return all recorded stealth patches."""
         return dict(self.patches)
 
-    def full_debug_report(self, include_recent_logs: bool = True) -> Dict[str, Any]:
-        """Produce a comprehensive debug bundle for the current browser state."""
+    def full_debug_report(self, include_recent_logs: bool = True, recent_limit: Optional[int] = None, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> Dict[str, Any]:
+        """Produce a comprehensive debug bundle for the current browser state.
+        #381: recent_limit/cursor/since_ts control the recent_audit list via get_recent_actions (pagination support).
+        """
         report = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "tls_fingerprint": self.dump_fingerprint(),
@@ -420,7 +444,9 @@ class DebugReporter:
         }
         if include_recent_logs and self.logger:
             try:
-                report["recent_audit"] = self.logger.get_recent_actions(15)
+                rlimit = recent_limit if recent_limit is not None else 15
+                before = cursor
+                report["recent_audit"] = self.logger.get_recent_actions(rlimit, since_ts=since_ts, before_ts=before)
             except Exception:
                 report["recent_audit"] = ["<error reading audit>"]
         return report

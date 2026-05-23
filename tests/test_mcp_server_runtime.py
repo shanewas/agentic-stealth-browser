@@ -81,11 +81,12 @@ class _FakeBrowser:
     async def get_health_status(self):
         return {"status": "ok", "launched": True, "region": self.current_region}
 
-    async def debug_report(self, print_report: bool = False):
-        _ = print_report
+    async def debug_report(self, print_report: bool = False, limit: int = None, cursor: str = None, since_ts: str = None):
+        _ = (print_report, limit, cursor, since_ts)
         return {"status": "success", "report": {"ok": True}}
 
-    def get_replay_sequence(self, limit: int = 30):
+    def get_replay_sequence(self, limit: int = 30, cursor: str = None, since_ts: str = None):
+        _ = (cursor, since_ts)
         return {
             "status": "ok",
             "sequence": [{"event": "navigate", "ts": 1}, {"event": "click", "ts": 2}][:limit],
@@ -103,7 +104,8 @@ class _TrackingReplayBrowser(_FakeBrowser):
         super().__init__(*args, **kwargs)
         self.last_limit = None
 
-    def get_replay_sequence(self, limit: int = 30):
+    def get_replay_sequence(self, limit: int = 30, cursor: str = None, since_ts: str = None):
+        _ = (cursor, since_ts)
         self.last_limit = limit
         return {
             "status": "ok",
@@ -112,8 +114,8 @@ class _TrackingReplayBrowser(_FakeBrowser):
 
 
 class _LargeDebugBrowser(_FakeBrowser):
-    async def debug_report(self, print_report: bool = False):
-        _ = print_report
+    async def debug_report(self, print_report: bool = False, limit: int = None, cursor: str = None, since_ts: str = None):
+        _ = (print_report, limit, cursor, since_ts)
         return {
             "status": "success",
             "report": {
