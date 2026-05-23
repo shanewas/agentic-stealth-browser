@@ -1,0 +1,7 @@
+name: test-teach
+description: A test workflow
+steps:
+- type: navigate
+  url: https://example.com
+- type: wait
+  ms: 1000

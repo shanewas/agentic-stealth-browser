@@ -1,0 +1,7 @@
+name: simple-test
+description: A simple workflow for replay testing
+steps:
+  - type: navigate
+    url: https://example.com
+  - type: wait
+    ms: 500
