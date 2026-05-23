@@ -15,6 +15,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+pytestmark = pytest.mark.contract
+
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:

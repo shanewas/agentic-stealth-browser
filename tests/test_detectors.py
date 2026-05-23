@@ -3,6 +3,8 @@ Tests for the pluggable detector interface (#185).
 """
 
 import pytest
+
+pytestmark = pytest.mark.contract
 import asyncio
 import sys
 from pathlib import Path
