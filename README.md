@@ -133,6 +133,7 @@ pip install agentic-stealth-browser
 | `stealth_scrape` | Navigate and extract page content |
 | `stealth_status` | Check browser health and session state |
 | `stealth_close` | Close browser and cleanup |
+| `stealth_capabilities` | Show MCP server/runtime version and available tools |
 
 ## Configuration
 
