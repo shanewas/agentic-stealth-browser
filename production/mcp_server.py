@@ -12,7 +12,9 @@ import asyncio
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from audit.logger import AuditLogger
@@ -81,6 +83,14 @@ class StealthMCPServer:
         self._agent_browser_cls = agent_browser_cls
         self._sessions: Dict[str, Any] = {}
         self._active_session: Optional[str] = None
+        self._tab_ids: Dict[str, Dict[int, str]] = {}
+        self._next_tab_id = 1
+        self._snapshot_root = Path(
+            os.getenv(
+                "STEALTH_MCP_SNAPSHOT_DIR",
+                str(Path.home() / ".agentic-browser" / "mcp_snapshots"),
+            )
+        )
         self._shutdown_requested = False
         self._tools: Dict[str, ToolSpec] = self._build_tools()
 
@@ -232,6 +242,58 @@ class StealthMCPServer:
                 handler=self._tool_stealth_status,
             ),
             ToolSpec(
+                name="stealth_tabs_list",
+                description="List known tabs/pages for active session.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_tabs_list,
+            ),
+            ToolSpec(
+                name="stealth_tab_snapshot",
+                description="Capture screenshot and metadata for a tab/page.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                        "tab_id": {"type": "string"},
+                        "full_page": {"type": "boolean", "default": False},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_tab_snapshot,
+            ),
+            ToolSpec(
+                name="stealth_session_timeline",
+                description="Return replay/timeline events for active session.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                        "limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 200},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_session_timeline,
+            ),
+            ToolSpec(
+                name="stealth_debug_report",
+                description="Return debug report payload for active session.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                        "print_report": {"type": "boolean", "default": False},
+                    },
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_debug_report,
+            ),
+            ToolSpec(
                 name="stealth_close",
                 description="Close active session or all running sessions.",
                 input_schema={
@@ -280,7 +342,90 @@ class StealthMCPServer:
                 pass
             finally:
                 self._sessions.pop(name, None)
+                self._tab_ids.pop(name, None)
         self._active_session = None
+
+    def _get_pages(self, browser: Any) -> list:
+        pages = []
+        if hasattr(browser, "get_pages") and callable(getattr(browser, "get_pages")):
+            try:
+                pages = browser.get_pages() or []
+            except Exception:
+                pages = []
+        if not pages:
+            try:
+                p = browser.page_getter()
+                if p:
+                    pages = [p]
+            except Exception:
+                pages = []
+        return [p for p in pages if p is not None]
+
+    def _get_current_page(self, browser: Any) -> Any:
+        try:
+            return browser.page_getter()
+        except Exception:
+            return None
+
+    def _get_tab_id(self, session_name: str, page: Any) -> str:
+        session_tabs = self._tab_ids.setdefault(session_name, {})
+        key = id(page)
+        if key not in session_tabs:
+            session_tabs[key] = f"tab-{self._next_tab_id}"
+            self._next_tab_id += 1
+        return session_tabs[key]
+
+    async def _page_title(self, page: Any) -> str:
+        if page is None:
+            return ""
+        if hasattr(page, "title"):
+            title_attr = getattr(page, "title")
+            try:
+                if callable(title_attr):
+                    value = title_attr()
+                    if asyncio.iscoroutine(value):
+                        value = await value
+                    return str(value or "")
+                return str(title_attr or "")
+            except Exception:
+                return ""
+        return ""
+
+    def _page_url(self, page: Any) -> str:
+        if page is None:
+            return ""
+        try:
+            return str(getattr(page, "url", "") or "")
+        except Exception:
+            return ""
+
+    def _dom_summary_from_signals(self, title: str, url: str) -> Dict[str, Any]:
+        sig = f"{title} {url}".lower()
+        return {
+            "has_captcha_signal": any(k in sig for k in ("captcha", "verify you are human", "challenge")),
+            "has_rate_limit_signal": any(k in sig for k in ("too many requests", "rate limit", "429")),
+        }
+
+    def _resolve_snapshot_path(self, session_name: str, tab_id: str) -> Path:
+        safe_session = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in session_name) or "default"
+        safe_tab = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tab_id) or "tab"
+        folder = self._snapshot_root / safe_session
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"{safe_tab}_{int(time.time() * 1000)}.png"
+
+    async def _resolve_page(self, session_name: str, browser: Any, tab_id: Optional[str]) -> tuple[str, Any]:
+        pages = self._get_pages(browser)
+        current_page = self._get_current_page(browser)
+        if not pages:
+            raise ToolError("MCP_PAGE_NOT_FOUND", "No active page found for session.")
+        if tab_id:
+            for p in pages:
+                token = self._get_tab_id(session_name, p)
+                if token == tab_id:
+                    return token, p
+            raise ToolError("MCP_TAB_NOT_FOUND", f"tab_id '{tab_id}' was not found.")
+        selected = current_page if current_page in pages else pages[0]
+        return self._get_tab_id(session_name, selected), selected
 
     async def _tool_stealth_launch(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name = str(args.get("session_name") or "default")
@@ -422,6 +567,88 @@ class StealthMCPServer:
             payload["debug"] = await browser.debug_report(print_report=False)
         return self._tool_ok_payload(payload)
 
+    async def _tool_stealth_tabs_list(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        session_name, browser = await self._resolve_browser(args.get("session_name"))
+        pages = self._get_pages(browser)
+        current_page = self._get_current_page(browser)
+
+        tabs = []
+        for idx, page in enumerate(pages, start=1):
+            tab_id = self._get_tab_id(session_name, page)
+            tabs.append(
+                {
+                    "tab_id": tab_id,
+                    "index": idx,
+                    "title": await self._page_title(page),
+                    "url": self._page_url(page),
+                    "is_current": page is current_page,
+                }
+            )
+
+        return self._tool_ok_payload(
+            {
+                "session_name": session_name,
+                "active_tab_id": self._get_tab_id(session_name, current_page) if current_page else None,
+                "tab_count": len(tabs),
+                "tabs": tabs,
+            }
+        )
+
+    async def _tool_stealth_tab_snapshot(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        session_name, browser = await self._resolve_browser(args.get("session_name"))
+        full_page = bool(args.get("full_page", False))
+        tab_id, page = await self._resolve_page(session_name, browser, args.get("tab_id"))
+
+        snapshot_path = self._resolve_snapshot_path(session_name, tab_id)
+        screenshot_call = page.screenshot(path=str(snapshot_path), full_page=full_page)
+        if asyncio.iscoroutine(screenshot_call):
+            await screenshot_call
+
+        title = await self._page_title(page)
+        url = self._page_url(page)
+        return self._tool_ok_payload(
+            {
+                "session_name": session_name,
+                "tab_id": tab_id,
+                "title": title,
+                "url": url,
+                "screenshot_path": str(snapshot_path.resolve()),
+                "full_page": full_page,
+                "dom_summary": self._dom_summary_from_signals(title, url),
+            }
+        )
+
+    async def _tool_stealth_session_timeline(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        session_name, browser = await self._resolve_browser(args.get("session_name"))
+        limit_raw = args.get("limit", 30)
+        try:
+            limit = int(limit_raw)
+        except Exception:
+            raise ToolError("MCP_VALIDATION_ERROR", "limit must be an integer")
+        limit = max(1, min(limit, 200))
+
+        replay = browser.get_replay_sequence(limit) if hasattr(browser, "get_replay_sequence") else {"status": "unsupported", "sequence": []}
+        sequence = replay.get("sequence", []) if isinstance(replay, dict) else []
+        if not isinstance(sequence, list):
+            sequence = []
+
+        return self._tool_ok_payload(
+            {
+                "session_name": session_name,
+                "timeline_status": replay.get("status", "unknown") if isinstance(replay, dict) else "unknown",
+                "count": len(sequence),
+                "events": sequence,
+            }
+        )
+
+    async def _tool_stealth_debug_report(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        session_name, browser = await self._resolve_browser(args.get("session_name"))
+        print_report = bool(args.get("print_report", False))
+        debug = await browser.debug_report(print_report=print_report)
+        if debug.get("status") != "success":
+            raise ToolError("MCP_DEBUG_REPORT_FAILED", debug.get("message", "debug_report failed"), debug)
+        return self._tool_ok_payload({"session_name": session_name, "debug": debug})
+
     async def _tool_stealth_close(self, args: Dict[str, Any]) -> Dict[str, Any]:
         close_all = bool(args.get("close_all", False))
         if close_all:
@@ -432,6 +659,7 @@ class StealthMCPServer:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         await browser.close()
         self._sessions.pop(session_name, None)
+        self._tab_ids.pop(session_name, None)
         if self._active_session == session_name:
             self._active_session = next(iter(self._sessions.keys()), None)
         return self._tool_ok_payload({"session_name": session_name, "closed": True})
@@ -481,8 +709,9 @@ class StealthMCPServer:
                     "version": SERVER_VERSION,
                 },
                 "instructions": (
-                    "Use stealth_launch to start a session, then stealth_navigate / stealth_scrape "
-                    "and stealth_status to inspect state."
+                    "Use stealth_launch to start a session, then stealth_navigate / stealth_scrape. "
+                    "Use stealth_tabs_list, stealth_tab_snapshot, stealth_session_timeline, and stealth_status "
+                    "to inspect runtime state."
                 ),
             }
             return self._jsonrpc_result(msg_id, result)
@@ -584,4 +813,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
