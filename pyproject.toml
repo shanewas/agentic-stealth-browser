@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-stealth-browser"
-version = "0.9.0"
+version = "1.0.0"
 description = "Production-grade, human-mimicking browser automation framework for autonomous agents. Survives modern anti-bot systems."
 readme = "README.md"
 license = {text = "MIT"}
