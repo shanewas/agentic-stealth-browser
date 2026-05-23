@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.mcp
+
 from production.mcp_server import StealthMCPServer, main
 
 
