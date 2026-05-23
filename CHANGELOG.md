@@ -7,7 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.0.0] — Workflow Teach/Replay + Remote Bridge (2026-05-23)
+
+### Added — Workflow System (M0–M5)
+- **Workflow Schema + Validator** (#389): Dataclass models for all 13 step types (navigate, click, fill, type, select, verify, wait, wait_for_element, scroll, screenshot, execute_js, conditional, run_workflow) with required/optional field validation.
+- **Variable Resolver** (#389): `{{variable}}` resolution with runtime > default > builtin precedence. Builtins: timestamp, date, random_name, last_url.
+- **Workflow Player** (#390): Bridge-first player executing workflows via CDP/Playwright with selector fallback chain, step timeouts, checkpoint progress, variable resolution, and structured ExecutionResult.
+- **Recorder** (#391): Passive CDP capture → workflow YAML with noise filtering, event grouping, CSS selector generation (ranked by stability), and variable detection.
+- **Recovery & Checkpoint** (#393): FallbackController for element-not-found (exponential backoff), timeout handling (doubled timeout retry), block/challenge detection, checkpoint save/load with resume capability.
+- **MCP Integration** (#392): 4 new MCP tools — stealth_teach, stealth_replay, stealth_workflow_list, stealth_workflow_delete — with path traversal protection and confirmation gates.
+
+### Added — Deployment & Operations (M5)
+- **Production Workflow Library**: Upwork (edit-title, update-rate, add-portfolio, submit-proposal) and LinkedIn (send-connection-request) workflows.
+- **Operator Setup Guide** (#394): docs/OPERATOR_SETUP.md with quick start, MCP tools, bridge setup, troubleshooting, failure modes, backend selection guidance.
+- **RBB Setup Scripts**: scripts/setup_rbb.sh (Linux systemd + cloudflared) and setup_rbb.ps1 (Windows nssm service wrapper).
+- **Health Check**: scripts/health_check.py — validates MCP server, workflow library, bridge status, disk, and memory.
+- **Deprecation Policy** (#378): MCP/CLI backward-compatibility aliases with 1-minor-version deprecation window and structured deprecation warnings.
+
+### Changed / Improved
+- CI includes MCP tool manifest smoke test ensuring all 17 tools present with valid schemas (#371).
+- ConnectionPool renamed to NavigationHistory for honest telemetry-only semantics (#374).
+- All CLI examples/docs normalized to canonical `agentic-stealth-browser` command (#372).
+- Deterministic launch args via shared `_build_launch_args()` and `_merge_custom_options()` helpers (#373).
+
+### Documentation
+- docs/MCP_DEPRECATION.md — migration table and deprecation policy.
+- docs/OPERATOR_SETUP.md — full operator guide.
+- All stale module references removed from docs and changelog (#372).
+
+### Migration Notes (v0.9 → v1.0)
+- MCP tools extended with 4 workflow tools — validate existing clients handle unknown tools gracefully or update to list tools dynamically.
+- CLI commands unchanged from v0.9.0.
+- Legacy `ConnectionPool` → `NavigationHistory` rename: update any external references.
+
+---
 
 ## [0.9.0] — MCP Runtime, Observability & CI Strictness (2026-05-23)
 
@@ -107,6 +140,8 @@ See the full v0.9.0 milestone and the stacked PRs #383/#384/#385 for implementat
 
 ---
 
-[Unreleased]: https://github.com/shanewas/agentic-stealth-browser/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/shanewas/agentic-stealth-browser/compare/v0.9.0...HEAD
+[1.0.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v1.0.0
+[0.9.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v0.9.0
 [0.2.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v0.2.0
 [0.1.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v0.1.0
