@@ -11,6 +11,10 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 from core.agent_browser import AgentBrowser
 from proxy.proxy_manager import ProxyManager
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
