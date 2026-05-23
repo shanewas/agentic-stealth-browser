@@ -169,7 +169,7 @@ agentic-stealth-browser/
 │   ├── metrics.py            # Metrics collection
 │   ├── rate_limiter.py       # Rate limiting
 │   ├── cli.py                # CLI entry point
-│   └── agent_orchestrator.py # Multi-agent orchestration
+
 ├── audit/
 │   └── logger.py             # Audit logging
 ├── scraping/

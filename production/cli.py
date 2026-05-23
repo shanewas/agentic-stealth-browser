@@ -2,20 +2,20 @@
 """
 Production CLI entrypoint for Agentic Stealth Browser (addresses #233, #281, #173).
 
-High-value DX: `stealth-browser health` and `status` commands expose:
+High-value DX: `agentic-stealth-browser health` and `status` commands expose:
   - proxy usage / current config
   - account state (healthy/degraded)
   - block rate (from recovery + metrics)
   - TLS/preset/region, cookies, recovery stats, current URL after launch
 
-#173: Added `stealth-browser scrape <url>` for one-liner stealth scraping from terminal.
+#173: Added `agentic-stealth-browser scrape <url>` for one-liner stealth scraping from terminal.
 
 Usage examples:
   python -m production.cli health --preset linkedin_2026 --region us --headless
-  stealth-browser status
-  stealth-browser scrape https://example.com --extract text
-  stealth-browser scrape https://example.com --extract html --platform amazon
-  stealth-browser health --no-launch   # future: inspect persisted state
+  agentic-stealth-browser status
+  agentic-stealth-browser scrape https://example.com --extract text
+  agentic-stealth-browser scrape https://example.com --extract html --platform amazon
+  agentic-stealth-browser health --no-launch   # future: inspect persisted state
 
 Also supports smoke, metrics, debug-report for operators.
 """
@@ -56,7 +56,7 @@ def _print_json(obj: Dict[str, Any], pretty: bool = True) -> None:
 
 async def _cmd_health(args: argparse.Namespace) -> int:
     """Launch (optionally) and print rich health/status snapshot. Core of #281."""
-    print("[stealth-browser] Health/Status command (P2/P3 DX observability)")
+    print("[agentic-stealth-browser] Health/Status command (P2/P3 DX observability)")
     print(f"  preset={args.preset} region={args.region} headless={args.headless} debug={args.debug}")
 
     try:
@@ -112,7 +112,7 @@ async def _cmd_list_presets(args: argparse.Namespace) -> int:
     print("Available 2026 presets:")
     for p in presets:
         print(f"  - {p}")
-    print("Use with: stealth-browser health --preset linkedin_2026")
+    print("Use with: agentic-stealth-browser health --preset linkedin_2026")
     return 0
 
 
@@ -133,7 +133,7 @@ async def _cmd_scrape(args: argparse.Namespace) -> int:
     preset = args.preset
     region = args.region or "global"
 
-    print(f"[stealth-browser] Scraping: {url} (extract={extract}, platform={platform})")
+    print(f"[agentic-stealth-browser] Scraping: {url} (extract={extract}, platform={platform})")
 
     try:
         async with AgentBrowser(
@@ -170,7 +170,7 @@ async def _cmd_scrape(args: argparse.Namespace) -> int:
 
             # Print summary to stderr so it doesn't mix with content
             health = await browser.get_health_status()
-            print(f"\n[stealth-browser] Scrape complete. Block rate: {health.get('block_rate_pct', 0)}%", file=sys.stderr)
+            print(f"\n[agentic-stealth-browser] Scrape complete. Block rate: {health.get('block_rate_pct', 0)}%", file=sys.stderr)
 
         return 0
 
@@ -181,7 +181,7 @@ async def _cmd_scrape(args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="stealth-browser",
+        prog="agentic-stealth-browser",
         description="Agentic Stealth Browser Production CLI - DX & Observability (#281)"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

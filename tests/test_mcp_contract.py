@@ -1,6 +1,5 @@
 """
 MCP Contract / Integration Tests (#280)
-Validates core components used by stealth-playwright-mcp.
 Headless-friendly pure logic + session tests. Uses asyncio.run for compatibility.
 Run: python3 -m pytest tests/test_mcp_contract.py -q
 or: python3 -c 'import asyncio; from tests.test_mcp_contract import *; asyncio.run(test_xxx())'

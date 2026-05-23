@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Migration Notes (v0.8 → v0.9)
 - New primary way to run as MCP server: `python -m production.mcp_server`.
-- Old external `stealth-playwright-mcp` bridge is superseded by the in-tree runtime (aliases/deprecation helpers to be expanded in patch releases per #378).
+- Old external MCP bridge is superseded by the in-tree runtime (aliases/deprecation helpers to be expanded in patch releases per #378).
 - All observability responses now bounded and redacted by default.
 
 See the full v0.9.0 milestone and the stacked PRs #383/#384/#385 for implementation details.
@@ -63,7 +63,7 @@ See the full v0.9.0 milestone and the stacked PRs #383/#384/#385 for implementat
   - Launched state, current preset, TLS profile, recent blocks, cookie health, current URL, recovery stats.
   - Immediately useful for operators, dashboards, and MCP consumers.
 
-- **Quick-Start Notebook (#257)**: `examples/quick_start.ipynb` (created) with runnable cells covering:
+- **Quick-Start Notebook (#257)**: `examples/quick_start.ipynb` (planned) with runnable cells covering:
   - Basic launch, safe_goto, warm-up
   - Debug mode + full fingerprint dump
   - LinkedIn 2026 preset end-to-end
@@ -81,7 +81,7 @@ See the full v0.9.0 milestone and the stacked PRs #383/#384/#385 for implementat
 
 ### Changed / Improved
 - `AgentBrowser.launch()` now accepts `debug`, `preset`, `region` — fully backwards compatible.
-- MCP tools (`stealth-playwright-mcp/mcp_tools.py` + `stealth_mcp.py`) expose all new DX capabilities.
+- MCP tools expose all new DX capabilities (in-tree `production/mcp_server.py`).
 - `AuditLogger` extended with `enable_debug_mode()`, `log_debug_dump()`, `DebugReporter` class.
 - Recovery orchestrator now produces richer logs when blocks occur.
 - README updated with "Quick Start", "Debugging & Diagnostics", "Platform Presets 2026", "Health & Status", "MCP DX Tools".
