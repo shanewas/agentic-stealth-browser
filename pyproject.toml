@@ -30,6 +30,7 @@ dependencies = [
     "playwright",
     "aiohttp",
     "cryptography",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +57,7 @@ include = [
     "scraping",
     "ai",
     "linkedin",
+    "workflows",
 ]
 
 [tool.setuptools.package-data]
