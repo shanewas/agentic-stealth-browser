@@ -210,7 +210,7 @@ class AuditLogger:
         SENSITIVE_KEYS = frozenset([
             "password", "passwd", "secret", "token", "api_key", "apikey",
             "access_key", "private_key", "auth", "credentials", "cookie",
-            "session",
+            "session_id", "sessionid", "session_token", "session_secret", "session_key",
         ])
         if not isinstance(details, dict):
             return details
