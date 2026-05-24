@@ -32,7 +32,7 @@ JSONRPC_VERSION = "2.0"
 PROTOCOL_VERSION = "2025-03-26"
 SERVER_NAME = "agentic-stealth-browser"
 SERVER_TITLE = "Agentic Stealth Browser MCP Server"
-SERVER_VERSION = "1.0.1"
+SERVER_VERSION = "2.0.0"
 
 
 class ToolError(Exception):
@@ -51,13 +51,25 @@ class ToolSpec:
     description: str
     input_schema: Dict[str, Any]
     handler: Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]
+    output_schema: Optional[Dict[str, Any]] = None
 
     def as_mcp_tool(self) -> Dict[str, Any]:
         sanitized_description, _ = sanitize_tool_description(self.description)
-        return {
+        result: Dict[str, Any] = {
             "name": self.name,
             "description": sanitized_description,
             "inputSchema": self.input_schema,
+        }
+        if self.output_schema is not None:
+            result["outputSchema"] = self.output_schema
+        return result
+
+    def json_schema(self) -> Dict[str, Any]:
+        """Return full JSON Schema representation for this tool (input + output)."""
+        return {
+            "name": self.name,
+            "inputSchema": self.input_schema,
+            "outputSchema": self.output_schema or {},
         }
 
 
@@ -431,6 +443,34 @@ class StealthMCPServer:
 
     def list_tools(self) -> Dict[str, Any]:
         return {"tools": [tool.as_mcp_tool() for tool in self._tools.values()]}
+
+    def list_tool_schemas(self) -> Dict[str, Any]:
+        """Return complete JSON Schemas (input + output) for all tools."""
+        schemas = {}
+        for name, tool in self._tools.items():
+            schemas[name] = tool.json_schema()
+        return {"schemas": schemas}
+
+    @staticmethod
+    def unified_result_envelope(payload: Dict[str, Any], is_error: bool = False) -> Dict[str, Any]:
+        """Normalize every MCP tool response into a consistent typed envelope.
+
+        Every result contains:
+          - status: "success" | "error"
+          - data: tool-specific payload
+          - meta: { tool, elapsed_ms, server_version }
+        """
+        status = "error" if is_error else payload.get("status", "success")
+        if status not in ("success", "error"):
+            status = "success"
+        return {
+            "status": status,
+            "data": payload,
+            "meta": {
+                "tool": payload.get("tool", "unknown"),
+                "server_version": SERVER_VERSION,
+            },
+        }
 
     async def _resolve_browser(self, session_name: Optional[str]) -> tuple[str, Any]:
         chosen = session_name or self._active_session

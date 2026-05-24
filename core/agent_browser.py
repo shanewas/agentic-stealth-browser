@@ -204,7 +204,8 @@ class AgentBrowser:
         self.recovery = None
         self.cookie_manager = None
         self.session_orchestrator = None
-        self.context: Optional[BrowserContext] = None  # Deprecated alias for self.browser (#93). Prefer self.browser.
+        self.context: Optional[BrowserContext] = None  # Deprecated alias for self.browser (#93). Removed in v2.1.0. Prefer self.browser.
+        self.browser_context: Optional[BrowserContext] = None  # Canonical browser context reference (v2.0.0+).
         self.browser = None   # Playwright BrowserContext (persistent or pooled) — see launch() docstring
         self.page = None      # Playwright Page (main) — use this for most page actions
         self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
@@ -520,7 +521,7 @@ class AgentBrowser:
                 if k not in ("user_data_dir", "headless", "slow_mo"):  # protect launch-time ones for pooled path
                     context_opts[k] = v
             self.browser = await pool.create_context(**context_opts)
-        else:
+            self.browser_context = self.browser
             # Classic (default, fully backward compatible): per-instance persistent context + own playwright
             pw = await async_playwright().start()
             self._pw = pw
@@ -544,6 +545,7 @@ class AgentBrowser:
                 if k not in ("user_data_dir",):  # never override critical
                     lp_kwargs[k] = v
             self.browser = await pw.chromium.launch_persistent_context(**lp_kwargs)
+            self.browser_context = self.browser
 
             # #377: discover CDP WS endpoint if enabled (uses Chrome's DevToolsActivePort + /json/version; stdlib only)
             if getattr(self, "debug_cdp", False):
@@ -709,6 +711,7 @@ class AgentBrowser:
                 except Exception:
                     pass
                 self.browser = None
+                self.browser_context = None
 
             # 2. Adopt rotated session (provides fresh user_data_dir + name)
             if new_session_meta and isinstance(new_session_meta, dict):
@@ -775,6 +778,7 @@ class AgentBrowser:
                     if k not in ("user_data_dir", "headless", "slow_mo"):
                         context_opts[k] = v
                 self.browser = await self._pool.create_context(**context_opts)
+                self.browser_context = self.browser
             else:
                 # #143: build + merge custom in rotation relaunch
                 lp_kwargs = {
@@ -794,6 +798,7 @@ class AgentBrowser:
                     if k not in ("user_data_dir",):
                         lp_kwargs[k] = v
                 self.browser = await self._pw.chromium.launch_persistent_context(**lp_kwargs)
+                self.browser_context = self.browser
 
                 # #377 rediscover after rotation relaunch (classic path)
                 if getattr(self, "debug_cdp", False):
@@ -1760,6 +1765,7 @@ class AgentBrowser:
                 except Exception:
                     pass
                 self.browser = None
+                self.browser_context = None
                 self.context = None
                 self._pooled_ctx_id = None
 
