@@ -48,8 +48,11 @@ COPY proxy/ ./proxy/
 COPY production/ ./production/
 COPY sessions/ ./sessions/
 COPY audit/ ./audit/
+COPY linkedin/ ./linkedin/
 COPY ai/ ./ai/
+COPY scraping/ ./scraping/
 COPY workflows/ ./workflows/
+COPY plugins/ ./plugins/
 COPY mcp_security.py ./
 
 # Install the project
