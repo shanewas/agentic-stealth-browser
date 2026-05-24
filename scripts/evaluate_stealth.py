@@ -107,6 +107,7 @@ class StealthEvaluator:
                 session_name=f"eval_patched_{time.time_ns()}",
                 anonymous=True,
                 ephemeral=True,
+                light_mode=True,
             )
             await browser.launch(headless=True)
             ok = await browser.safe_goto(str(url), warm_up=True, platform="eval")

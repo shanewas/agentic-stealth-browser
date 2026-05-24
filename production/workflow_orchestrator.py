@@ -398,6 +398,7 @@ class WorkflowOrchestrator:
                     async with self._lock:
                         self._queue.append(job)
                         self._queue.sort(key=lambda j: j.priority, reverse=True)
+                        self._active.pop(job.job_id, None)
                         self._release_slot(job.domain)
                     await asyncio.sleep(delay)
                     return

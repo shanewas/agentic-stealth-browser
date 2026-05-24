@@ -51,17 +51,18 @@ class SessionEnforcer:
         self._contexts: Dict[str, str] = {}  # context_token -> session_name
         self._lock = asyncio.Lock()
 
-    def bind_session(self, session_name: str, context_token: str, browser: Any = None) -> SessionBinding:
-        if context_token in self._contexts:
-            existing = self._contexts[context_token]
-            if existing != session_name:
-                self._unbind_context(context_token)
-        binding = self._bindings.get(session_name)
-        if binding is None:
-            binding = SessionBinding(session_name, token=secrets.token_hex(16), browser=browser)
-            self._bindings[session_name] = binding
-        self._contexts[context_token] = session_name
-        return binding
+    async def bind_session(self, session_name: str, context_token: str, browser: Any = None) -> SessionBinding:
+        async with self._lock:
+            if context_token in self._contexts:
+                existing = self._contexts[context_token]
+                if existing != session_name:
+                    self._unbind_context(context_token)
+            binding = self._bindings.get(session_name)
+            if binding is None:
+                binding = SessionBinding(session_name, token=secrets.token_hex(16), browser=browser)
+                self._bindings[session_name] = binding
+            self._contexts[context_token] = session_name
+            return binding
 
     def _unbind_context(self, context_token: str) -> None:
         self._contexts.pop(context_token, None)

@@ -8,6 +8,7 @@ Policy files load from ~/.agentic-browser/policies/ (YAML).
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +27,7 @@ ALLOWED_STEP_TYPES = {"navigate", "click", "fill", "type", "select", "verify",
 class DomainRule:
     domain: str
     allow: bool = True
-    paths: Optional[List[str]] = None
+    # Note: path-level filtering is not yet implemented — only domain name is checked.
 
 
 @dataclass
@@ -100,7 +101,9 @@ class PolicyEngine:
                 )
                 self.policies[policy.name] = policy
                 count += 1
-            except Exception:
+            except Exception as exc:
+                _logger = logging.getLogger("stealth.policy")
+                _logger.warning("Failed to load policy from %s: %s", yaml_file.name, exc)
                 continue
         return count
 

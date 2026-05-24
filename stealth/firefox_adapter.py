@@ -37,10 +37,8 @@ def get_firefox_launch_args(region: str = "global", headless: bool = True) -> li
     args = []
     if headless:
         args.append("--headless")
-    args.extend([
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-    ])
+    # Firefox uses about:config preferences, not Chromium-style CLI flags.
+    # Stealth is achieved via firefox_user_prefs in Playwright launch options.
     return args
 
 

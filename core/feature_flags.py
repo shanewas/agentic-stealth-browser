@@ -57,7 +57,8 @@ def get_browser_backend() -> str:
     backend = os.getenv("STEALTH_BROWSER_BACKEND", "").lower()
     if backend in ("chromium", "chrome", "edge", "firefox", "gecko"):
         return backend
-    if is_firefox_supported() and backend == "firefox":
+    # No explicit backend set: fall back to Firefox if feature-flagged, else Chromium
+    if is_firefox_supported():
         return "firefox"
     return "chromium"
 

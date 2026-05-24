@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import statistics
 import time
@@ -157,22 +158,45 @@ class PerfBenchmark:
 
             return self._run("audit_logging", _log)
 
-    def bench_rate_limiter(self) -> BenchmarkResult:
+    async def bench_rate_limiter(self) -> BenchmarkResult:
         import asyncio
         from production.rate_limiter import ToolRateLimiter, DomainRateLimiter, RateLimitConfig
 
         limiter = ToolRateLimiter(tool_calls_per_minute=10000, total_calls_cap=50000)
 
-        def _check() -> None:
-            asyncio.run(limiter.check_and_wait("goto"))
+        result = BenchmarkResult(name="tool_rate_limiter_check", iterations=self.iterations)
 
-        return self._run("tool_rate_limiter_check", _check)
+        async def _check() -> None:
+            await limiter.check_and_wait("goto")
 
-    def bench_all(self) -> Dict[str, Any]:
+        for _ in range(self.warmup):
+            try:
+                await _check()
+            except Exception as e:
+                if self.verbose:
+                    print(f"  warmup failure [tool_rate_limiter_check]: {e}")
+
+        for i in range(self.iterations):
+            t0 = time.perf_counter()
+            try:
+                await _check()
+            except Exception as e:
+                if self.verbose:
+                    print(f"  iter {i} failure [tool_rate_limiter_check]: {e}")
+                continue
+            elapsed = time.perf_counter() - t0
+            result.samples.append(elapsed)
+            if self.verbose:
+                print(f"  [tool_rate_limiter_check] iter {i + 1}/{self.iterations}: {elapsed * 1000:.1f}ms")
+
+        self.results[result.name] = result
+        return result
+
+    async def bench_all(self) -> Dict[str, Any]:
         self.bench_imports()
         self.bench_input_validation()
         self.bench_audit_logging()
-        self.bench_rate_limiter()
+        await self.bench_rate_limiter()
         try:
             self.bench_policy_load()
         except Exception:
@@ -217,7 +241,7 @@ class PerfBenchmark:
         print(f"\n{'=' * 60}\n")
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+async def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Agentic Stealth Browser — Performance Benchmark"
     )
@@ -240,7 +264,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         warmup=args.warmup,
         verbose=args.verbose,
     )
-    report = bench.bench_all()
+    report = await bench.bench_all()
 
     if args.json:
         print(json.dumps(report, indent=2))
@@ -251,4 +275,4 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main()))
