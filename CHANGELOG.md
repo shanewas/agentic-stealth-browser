@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] — Reliability, CI, and Backlog Convergence (2026-05-25)
+
+### Added
+- **Unit test expansion** (#6): 6 new test files with 180+ tests covering rate limiter, cookie health, recovery state machine, proxy config, workflow schema, and metrics collector.
+- **CI pipeline** (#21): `.github/workflows/ci.yml` with ruff lint, pytest coverage (45% gate), Docker build smoke, and nightly detection regression.
+- **Production deployment docs** (`docs/DEPLOYMENT.md`): Docker deployment guide with volume mounts, health checks, and operator runbook.
+- **Upgrade notes** (`docs/UPGRADE-v1.1.md`): v1.0→v1.1 migration guide.
+- **Docker healthcheck**: Stdio-based healthcheck script verifying core imports (MCP server is stdio-only, not HTTP).
+- **MCP server health endpoint**: JSON-RPC method `"health"` returning server status, version, and active session count.
+- **`.dockerignore`**: Excludes tests, docs, CI files, and dev artifacts from Docker builds.
+
+### Fixed
+- **Backoff jitter clamping** (`recovery/anti_block_orchestrator.py`): Jitter could push backoff above `max_backoff`. Now clamped with `min(max_backoff, backoff + jitter)`.
+- **Cookie health naive date comparison** (`sessions/cookie_manager.py`): `datetime.fromtimestamp()` without `tz=timezone.utc` created naive datetimes that broke expiry comparison vs timezone-aware `now`.
+- **Docker healthcheck HTTP dead code**: Removed non-functional HTTP health check — MCP server uses stdio JSON-RPC, not HTTP.
+
+### Changed
+- **Dockerfile**: Non-root user (`appuser`), HEALTHCHECK directive, proper MCP server ENTRYPOINT, volume mounts for sessions/logs/screenshots/cookies, `workflows/` COPY.
+- **Stale PRs closed**: 10 feature branches from v0.9 development cycle closed (content already in v1.0.0).
+
+---
+
 ## [1.0.1] — Security & Cleanup Patch (2026-05-25)
 
 ### Fixed
