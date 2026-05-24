@@ -1,6 +1,11 @@
 name: upwork-update-rate
 description: Update the hourly rate on an Upwork freelancer profile
 variables:
+  profile_url:
+    type: string
+    default: "https://upwork.com/freelancers/shanewas"
+    required: false
+    description: The freelancer profile URL
   rate:
     type: string
     default: "34.00"
@@ -8,7 +13,7 @@ variables:
     description: The new hourly rate in USD (e.g. 34.00)
 steps:
   - type: navigate
-    url: https://upwork.com/freelancers/shanewas
+    url: "{{profile_url}}"
     timeout: 30000
   - type: wait_for_element
     selector: "[data-test='profile-container'], .profile-container, main"

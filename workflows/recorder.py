@@ -43,7 +43,7 @@ _NOISE_METHODS = {
 
 _VARIABLE_PATTERNS = [
     (re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"), "email", "{{email}}"),
-    (re.compile(r"^\d{3}-\d{2}-\d{4}$"), "ssn", "{{ssn}}"),
+
     (re.compile(r"^\d{3}-?\d{3}-?\d{4}$"), "phone", "{{phone}}"),
     (re.compile(r"^https?://[^\s]+$"), "url", "{{url}}"),
     (re.compile(r"^[+\-]?\d+\.?\d*$"), "number", "{{number}}"),

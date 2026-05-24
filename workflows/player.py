@@ -228,7 +228,7 @@ class WorkflowPlayer:
                     timeout=timeout_s,
                 )
             else:
-                await self._evaluate(f'window.location.href = "{url}"')
+                await self._evaluate(f'window.location.href = {json.dumps(url)}')
         except asyncio.TimeoutError:
             raise TimeoutError(f"Navigation to {url} timed out after {timeout_s}s")
 
@@ -247,7 +247,7 @@ class WorkflowPlayer:
                     )
                 else:
                     await asyncio.wait_for(
-                        self._evaluate(f'document.querySelector("{sel}").click()'),
+                        self._evaluate(f'document.querySelector({json.dumps(sel)}).click()'),
                         timeout=timeout_s,
                     )
                 wait_after = params.get("wait_after", 0)
@@ -271,12 +271,12 @@ class WorkflowPlayer:
             )
         else:
             await self._evaluate(
-                f'document.querySelector("{selector}").value = {repr(value)}'
+                f'document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}'
             )
 
         if params.get("submit"):
             await self._evaluate(
-                f'document.querySelector("{selector}").form.submit()'
+                f'document.querySelector({json.dumps(selector)}).form.submit()'
             )
 
     async def _step_type(self, params: Dict[str, Any], timeout_s: float):
@@ -292,13 +292,13 @@ class WorkflowPlayer:
         else:
             for char in value:
                 await self._evaluate(
-                    f'document.querySelector("{selector}").value += {repr(char)}'
+                    f'document.querySelector({json.dumps(selector)}).value += {json.dumps(char)}'
                 )
                 await asyncio.sleep(delay_ms / 1000.0)
 
         if params.get("submit"):
             await self._evaluate(
-                f'document.querySelector("{selector}").form.submit()'
+                f'document.querySelector({json.dumps(selector)}).form.submit()'
             )
 
     async def _step_select(self, params: Dict[str, Any], timeout_s: float):
@@ -306,7 +306,7 @@ class WorkflowPlayer:
         value = params["value"]
         await asyncio.wait_for(
             self._evaluate(
-                f'document.querySelector("{selector}").value = {repr(value)}'
+                f'document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}'
             ),
             timeout=timeout_s,
         )
@@ -318,14 +318,14 @@ class WorkflowPlayer:
 
         async def check():
             exists = await self._evaluate(
-                f'!!document.querySelector("{selector}")'
+                f'!!document.querySelector({json.dumps(selector)})'
             )
             if not exists:
                 raise RuntimeError(f"Verify failed: selector '{selector}' not found")
 
             if expected_text is not None:
                 actual = await self._evaluate(
-                    f'document.querySelector("{selector}").textContent'
+                    f'document.querySelector({json.dumps(selector)}).textContent'
                 )
                 if expected_text not in str(actual):
                     raise RuntimeError(
@@ -334,7 +334,7 @@ class WorkflowPlayer:
 
             if visible:
                 displayed = await self._evaluate(
-                    f'document.querySelector("{selector}").offsetParent !== null'
+                    f'document.querySelector({json.dumps(selector)}).offsetParent !== null'
                 )
                 if not displayed:
                     raise RuntimeError(f"Verify failed: selector '{selector}' is not visible")
@@ -350,7 +350,7 @@ class WorkflowPlayer:
         if selector:
             deadline = time.monotonic() + ms / 1000.0
             while time.monotonic() < deadline:
-                exists = await self._evaluate(f'!!document.querySelector("{selector}")')
+                exists = await self._evaluate(f'!!document.querySelector({json.dumps(selector)})')
                 if exists:
                     return
                 await asyncio.sleep(0.1)
@@ -378,7 +378,7 @@ class WorkflowPlayer:
         selector = params["selector"]
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            exists = await self._evaluate(f'!!document.querySelector("{selector}")')
+            exists = await self._evaluate(f'!!document.querySelector({json.dumps(selector)})')
             if exists:
                 return
             await asyncio.sleep(0.1)
@@ -391,7 +391,7 @@ class WorkflowPlayer:
 
         if selector:
             await self._evaluate(
-                f'document.querySelector("{selector}").scrollIntoView()'
+                f'document.querySelector({json.dumps(selector)}).scrollIntoView()'
             )
         else:
             delta_y = amount if direction == "down" else -amount

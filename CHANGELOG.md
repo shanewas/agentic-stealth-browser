@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.1] — Security & Cleanup Patch (2026-05-25)
+
+### Fixed
+- **Security: mcp_security redaction regex now actually redacts** (#420): All 8 `SENSITIVE_PATTERNS` regexes had inverted group capture — group 1 captured the secret value, so replacements output `actual_value=[REDACTED_*]` instead of `[REDACTED_*]`. Fixed by capturing the key/prefix in group 1 instead of the value.
+- **Security: JS injection in Workflow Player and Recovery** (#421): All `_evaluate()` calls in `workflows/player.py` (13 sites) and `workflows/recovery.py` (3 sites) now use `json.dumps()` instead of bare f-string interpolation for selectors, URLs, and user-controlled values.
+- **Bug: Wrong timeout recovery action for verify/wait_for_element** (#422): `_handle_timeout_error` in `workflows/recovery.py` was dispatching `safe_type()` for non-input step types when the browser had `safe_type` available. Now correctly gates `safe_type` to `fill`/`type` steps only and falls through to sleep for `verify`/`wait_for_element`.
+- **Workflow library: Upwork profile URL parameterized** (#423): Three Upwork workflow YAMLs (add-portfolio-item, edit-title, update-rate) now use `{{profile_url}}` variable instead of hardcoded URL.
+- **Removed empty apply.yaml stub** (#424): Deleted the unimplemented `workflows/library/upwork/apply.yaml`.
+- **Removed low-precision SSN detection from recorder** (#425): `_VARIABLE_PATTERNS` in `workflows/recorder.py` no longer contains the heuristic SSN matching pattern that caused false positives.
+
+---
+
 ## [1.0.0] — Workflow Teach/Replay + Remote Bridge (2026-05-23)
 
 ### Added — Workflow System (M0–M5)

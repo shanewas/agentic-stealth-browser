@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -106,7 +107,7 @@ class FallbackController:
                 if hasattr(self.browser, "safe_click"):
                     await self.browser.safe_click(selector)
                 else:
-                    await self._evaluate(f'document.querySelector("{selector}").click()')
+                    await self._evaluate(f'document.querySelector({json.dumps(selector)}).click()')
                 return RecoveryResult(
                     recovered=True,
                     action_taken="retry",
@@ -122,7 +123,7 @@ class FallbackController:
                 if hasattr(self.browser, "safe_click"):
                     await self.browser.safe_click(fallback_sel)
                 else:
-                    await self._evaluate(f'document.querySelector("{fallback_sel}").click()')
+                    await self._evaluate(f'document.querySelector({json.dumps(fallback_sel)}).click()')
                 return RecoveryResult(
                     recovered=True,
                     action_taken="fallback_to_stealth",
@@ -182,20 +183,22 @@ class FallbackController:
                         timeout=timeout_s,
                     )
                 else:
-                    await self._evaluate(f'window.location.href = "{url}"')
+                    await self._evaluate(f'window.location.href = {json.dumps(url)}')
             elif step_type in ("click", "fill", "type", "verify", "wait_for_element"):
                 selector = params.get("selector", "")
-                if hasattr(self.browser, "safe_click") and step_type == "click":
+                if step_type == "click" and hasattr(self.browser, "safe_click"):
                     await asyncio.wait_for(
                         self.browser.safe_click(selector),
                         timeout=timeout_s,
                     )
-                elif hasattr(self.browser, "safe_type"):
+                elif step_type in ("fill", "type") and hasattr(self.browser, "safe_type"):
                     value = params.get("value", "")
                     await asyncio.wait_for(
                         self.browser.safe_type(selector, value),
                         timeout=timeout_s,
                     )
+                elif step_type in ("verify", "wait_for_element"):
+                    await asyncio.sleep(timeout_s)
                 else:
                     await asyncio.sleep(timeout_s)
             else:

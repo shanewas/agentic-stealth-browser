@@ -1,6 +1,11 @@
 name: upwork-edit-title
 description: Edit the professional title on an Upwork freelancer profile
 variables:
+  profile_url:
+    type: string
+    default: "https://upwork.com/freelancers/shanewas"
+    required: false
+    description: The freelancer profile URL
   title:
     type: string
     default: "Senior Backend Engineer | Python, AI & Automation"
@@ -8,7 +13,7 @@ variables:
     description: The new professional title to set on the profile
 steps:
   - type: navigate
-    url: https://upwork.com/freelancers/shanewas
+    url: "{{profile_url}}"
     timeout: 30000
   - type: wait_for_element
     selector: "[data-test='profile-container'], .profile-container, main"

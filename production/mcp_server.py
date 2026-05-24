@@ -32,7 +32,7 @@ JSONRPC_VERSION = "2.0"
 PROTOCOL_VERSION = "2025-03-26"
 SERVER_NAME = "agentic-stealth-browser"
 SERVER_TITLE = "Agentic Stealth Browser MCP Server"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.0.1"
 
 
 class ToolError(Exception):

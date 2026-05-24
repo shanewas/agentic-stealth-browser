@@ -3,10 +3,10 @@
 [![CI](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml/badge.svg)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://pypi.org/project/agentic-stealth-browser/)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://pypi.org/project/agentic-stealth-browser/)
 [![Tests](https://img.shields.io/badge/tests-500%2B%20passing-brightgreen)](tests/)
 
-A Python framework that makes browser automation look human. Built for autonomous agents that need to navigate websites protected by Cloudflare, LinkedIn, Amazon, and other anti-bot systems. **v1.0.0** introduces the Teach/Replay workflow system — record real user interactions and replay them with full stealth.
+A Python framework that makes browser automation look human. Built for autonomous agents that need to navigate websites protected by Cloudflare, LinkedIn, Amazon, and other anti-bot systems. **v1.0.0** introduced the Teach/Replay workflow system — record real user interactions and replay them with full stealth. **v1.0.1** ships critical security fixes for MCP redaction and JS injection, plus workflow library cleanup.
 
 ## Why This Exists
 

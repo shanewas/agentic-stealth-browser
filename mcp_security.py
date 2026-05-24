@@ -151,20 +151,20 @@ class LLMAuthorizationPolicy:
 # Patterns to detect and redact sensitive data in stderr output
 SENSITIVE_PATTERNS = [
     # API keys
-    (re.compile(r'(?:api[_-]?key|apikey)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{16,})["\']?', re.IGNORECASE), r'\1=[REDACTED_API_KEY]'),
+    (re.compile(r'((?:api[_-]?key|apikey)\s*[:=]\s*["\']?)[A-Za-z0-9_\-]{16,}["\']?', re.IGNORECASE), r'\1[REDACTED_API_KEY]'),
     # Bearer tokens
-    (re.compile(r'(?:bearer|authorization)\s*[:=]\s*["\']?([A-Za-z0-9_\-\.]{20,})["\']?', re.IGNORECASE), r'\1=[REDACTED_TOKEN]'),
+    (re.compile(r'((?:bearer|authorization)\s*[:=]\s*["\']?)[A-Za-z0-9_\-\.]{20,}["\']?', re.IGNORECASE), r'\1[REDACTED_TOKEN]'),
     # Passwords
-    (re.compile(r'(?:password|passwd|pwd)\s*[:=]\s*["\']?([^\s"\']{4,})["\']?', re.IGNORECASE), r'\1=[REDACTED_PASSWORD]'),
+    (re.compile(r'((?:password|passwd|pwd)\s*[:=]\s*["\']?)[^\s"\']{4,}["\']?', re.IGNORECASE), r'\1[REDACTED_PASSWORD]'),
     # Private keys
     (re.compile(r'-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----'), '[REDACTED_PRIVATE_KEY]'),
     # AWS keys
     (re.compile(r'(AKIA[0-9A-Z]{16})'), '[REDACTED_AWS_KEY]'),
     # Generic secrets
-    (re.compile(r'(?:secret|token)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{16,})["\']?', re.IGNORECASE), r'\1=[REDACTED_SECRET]'),
+    (re.compile(r'((?:secret|token)\s*[:=]\s*["\']?)[A-Za-z0-9_\-]{16,}["\']?', re.IGNORECASE), r'\1[REDACTED_SECRET]'),
     # URLs with credentials
     (re.compile(r'(://[^:@/]+:)([^@]+)(@)'), r'\1[REDACTED_CREDENTIALS]\3'),
-    # Email addresses (partial redaction)
+    # Email addresses
     (re.compile(r'\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b'), r'[EMAIL_REDACTED]'),
 ]
 

@@ -1,6 +1,11 @@
 name: upwork-add-portfolio
 description: Add a portfolio item to an Upwork freelancer profile
 variables:
+  profile_url:
+    type: string
+    default: "https://upwork.com/freelancers/shanewas"
+    required: false
+    description: The freelancer profile URL
   portfolio_title:
     type: string
     default: "AI-Powered Automation Platform"
@@ -13,7 +18,7 @@ variables:
     description: The description for the portfolio item
 steps:
   - type: navigate
-    url: https://upwork.com/freelancers/shanewas
+    url: "{{profile_url}}"
     timeout: 30000
   - type: wait_for_element
     selector: "[data-test='profile-container'], .profile-container, main"
