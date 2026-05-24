@@ -32,6 +32,48 @@ async with AgentBrowser(session_name="demo") as browser:
     await browser.safe_goto("https://example.com")
 ```
 
+## MCP + Dashboard Quick Start
+
+Run the MCP server when an agent client needs tool access to the browser:
+
+```bash
+python -m production.mcp_server
+```
+
+Add this server to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "stealth-browser": {
+      "command": "python",
+      "args": ["-m", "production.mcp_server"]
+    }
+  }
+}
+```
+
+Common MCP flow:
+
+```text
+1. stealth_launch      -> start a named browser session
+2. stealth_navigate    -> open a URL with recovery behavior
+3. stealth_tabs_list   -> inspect current tabs/pages
+4. stealth_tab_snapshot -> capture screenshot + metadata
+5. stealth_teach       -> save a demonstrated workflow
+6. stealth_replay      -> replay a saved workflow YAML
+7. stealth_close       -> close the session
+```
+
+For a human-agent shared browser console, start the Hermes dashboard:
+
+```bash
+export HERMES_DASHBOARD_PASSWORD="replace-me"
+agentic-stealth-browser dashboard --host 127.0.0.1 --port 8443
+```
+
+Open `http://127.0.0.1:8443` in Edge and log in with that password. Use the dashboard to watch the live browser, switch backends, pause/resume automation, solve CAPTCHA/login challenges, record workflows, and replay them. See [docs/HERMES_BROWSER_DASHBOARD.md](docs/HERMES_BROWSER_DASHBOARD.md).
+
 ## Workflow System
 
 Record real interactions and replay autonomously:
@@ -69,7 +111,7 @@ result = await player.execute()
 
 ## MCP Setup
 
-Add to `claude_desktop_config.json`:
+Add to `claude_desktop_config.json` or the equivalent MCP client config:
 
 ```json
 {
@@ -83,6 +125,15 @@ Add to `claude_desktop_config.json`:
 ```
 
 Tools: `stealth_launch`, `stealth_navigate`, `stealth_load_cookies`, `stealth_scrape`, `stealth_teach`, `stealth_replay`, `stealth_tabs_list`, `stealth_session_timeline`, `stealth_close`, `stealth_capabilities`, and more.
+
+Useful observability tools:
+
+- `stealth_tabs_list`: list active tabs/pages.
+- `stealth_tab_snapshot`: capture screenshot and page metadata.
+- `stealth_session_timeline`: inspect recent action/recovery/debug events.
+- `stealth_debug_report`: get redacted runtime diagnostics.
+
+To expose a local CDP endpoint for supported clients, launch with `debug_cdp: true`, then call `stealth_get_cdp_endpoint`. The endpoint is localhost-only and should not be exposed directly to the internet.
 
 ## Orchestrator
 
