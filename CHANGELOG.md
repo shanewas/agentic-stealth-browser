@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] — Workflow Platform GA (Major Release) (2026-05-25)
+
+### v1.6.0 — API/SDK and Plugin Ecosystem (incremental)
+
+#### Added
+- **Python SDK** (`production/sdk/client.py`): Workflow lifecycle API with async client, type-hinted interfaces, timeout and error handling.
+- **MCP JSON Schema output**: `ToolSpec.json_schema()` returns full input+output schemas for every tool. New MCP method `list_tool_schemas`.
+- **Unified response envelope**: `StealthMCPServer.unified_result_envelope()` normalizes all tool responses to `{status, data, meta}` structure.
+- **Plugin template** (`plugins/template/`): Working example plugin with registration pattern.
+
+### v1.7.0 — Browser/Platform Expansion
+#### Added
+- **Browser capability map** (`docs/CAPABILITY_MAP.md`): Full feature matrix across backends.
+- **Feature flag system** (`core/feature_flags.py`): Dynamic feature toggles for browser-specific capabilities.
+- **Firefox adapter** (`stealth/firefox_adapter.py`): Feature-flagged Firefox support with basic stealth patches.
+
+### v1.8.0 — Adaptive Stealth and Learning Loop
+#### Added
+- **FeedbackStore**: Persistent telemetry ingestion for replay/recovery events. Tracks selector success rates per domain and detection events.
+- **Domain-specific tuning profiles**: AdaptiveTuner now maintains per-domain behavior profiles with bounded adaptation (minimum stealth thresholds enforced).
+- **Stealth evaluation harness** (`scripts/evaluate_stealth.py`): Comparative evaluation between patched and baseline behavior.
+
+### v1.9.0 — v2 Migration Line
+#### Added
+- **v2 migration RFC** (`docs/rfc/v2-migration.md`): Documented all planned breaking changes with before/after examples and timeline.
+- **Deprecation shims** (`production/deprecations.py`): Backward-compatibility wrappers for APIs changing in v2.
+- **Migration script** (`scripts/migrate_v1_to_v2.py`): Converts v1 workflow YAMLs to v2 format with CI validation support.
+- **`browser_context` canonical reference**: New `self.browser_context` attribute in AgentBrowser replacing deprecated `self.context`.
+
+### v2.0.0 — Workflow Platform GA
+#### Changed
+- `SERVER_VERSION` → `2.0.0`
+- `pyproject.toml` version → `2.0.0`
+
+### Migration Notes (v1.x → v2.0)
+- `self.context` is deprecated in favor of `self.browser_context` (planned removal in v2.1.0)
+- MCP tool responses now use unified `{status, data, meta}` envelope — old direct payload parsing will break
+- Workflow schema v2 includes required metadata version field — run `scripts/migrate_v1_to_v2.py` to update existing workflows
+- See `docs/rfc/v2-migration.md` for complete breaking change list
+
+---
+
+## [1.5.0] — Scale and Performance (2026-05-25)
+
+### Added
+- **Timing profiler** (`production/profiler.py`): Decorator and context-manager-based performance instrumentation.
+- **Performance benchmark script** (`scripts/perf_benchmark.py`): Benchmarks core operations (safe_goto, safe_click, safe_type) with timing stats.
+- Pre-existing bottlenecks documented in `docs/PERFORMANCE_TUNING.md`.
+
+### v1.4.0 — Security and Governance
+#### Added
+- **MCP input validator** (`production/mcp_input_validator.py`): Parameter type/length/pattern validation for all tool inputs.
+- **Session isolation enforcer** (`production/mcp_session_isolation.py`): Ensures one session's tools cannot access another session's data.
+- **Workflow policy engine** (`production/policy_engine.py`): YAML-based policy files with path/action/destination controls.
+- **Approval gate hooks** (`production/approval_gate.py`): Sensitive actions (navigate to unknown domain, execute_js) require explicit approval.
+- **Audit enrichment** (`production/audit_enrichment.py`): Actor/session/workflow correlation data added to all audit log entries.
+
+---
+
+## [1.3.0] — Orchestration and Automation Operations (2026-05-25)
+
+### Added
+- **WorkflowOrchestrator** (`production/workflow_orchestrator.py`): Queue manager with per-domain/account concurrency controls, priority ordering, and disk persistence.
+- **Scheduled execution**: Recurring workflow support with datetime-based scheduling and interval config.
+- **Checkpoint persistence**: Queue state save/load with resume capability on restart.
+- **Cross-workflow composition**: `run_workflow` step type with variable passing and cycle detection.
+- **Unit tests**: 24 tests for enqueue, domain concurrency, scheduling, persistence, status, backoff.
+
+---
+
+## [1.2.0] — Workflow Intelligence and Authoring Quality (2026-05-25)
+
+### Added
+- **Selector auto-heal**: Confidence scoring for CSS selectors, dynamic class detection, auto-generated fallback selectors when primary selectors fail.
+- **Rehearsal mode**: `rehearse()` method on WorkflowPlayer — dry-run execution that validates selectors, takes screenshots, logs issues without clicking/submitting.
+- **Pre-save validation**: `validate_workflow_steps()` detects anti-patterns (navigate without timeout, fill without verify, fragile selectors, typos in step types).
+- **Workflow versioning**: Version field in schema, metadata changelog on save, `workflow_diff()` for comparing versions.
+- **Unit tests**: 59 tests across 4 new test files (selector_auto_heal, workflow_orchestrator, rehearsal_validation, workflow_versioning).
+
+---
+
 ## [1.1.0] — Reliability, CI, and Backlog Convergence (2026-05-25)
 
 ### Added
