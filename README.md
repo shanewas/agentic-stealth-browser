@@ -3,10 +3,10 @@
 [![CI](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml/badge.svg)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-493%20passing-brightgreen)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A565%25-green)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://pypi.org/project/agentic-stealth-browser/)
+[![Tests](https://img.shields.io/badge/tests-500%2B%20passing-brightgreen)](tests/)
 
-A Python framework that makes browser automation look human. Built for autonomous agents that need to navigate websites protected by Cloudflare, LinkedIn, Amazon, and other anti-bot systems.
+A Python framework that makes browser automation look human. Built for autonomous agents that need to navigate websites protected by Cloudflare, LinkedIn, Amazon, and other anti-bot systems. **v1.0.0** introduces the Teach/Replay workflow system — record real user interactions and replay them with full stealth.
 
 ## Why This Exists
 
@@ -16,6 +16,7 @@ Standard browser automation (`page.goto()`, `page.click()`) gets detected instan
 - **Human behavior simulation** — natural mouse, typing, scrolling with realistic imperfections
 - **Automatic recovery** — detects blocks (CAPTCHAs, rate limits) and recovers without crashing
 - **Account lifecycle management** — warming, health scoring, cooling off
+- **Workflow Teach/Replay** — record real user actions via CDP, save as YAML, replay with fallbacks
 
 ## Installation
 
@@ -60,6 +61,82 @@ await browser.safe_goto("https://www.linkedin.com/feed/", platform="linkedin")
 
 The flow: **cookies → warm-up → navigate → recover if blocked → act human**.
 
+## Workflow System (v1.0.0)
+
+Record real user interactions and replay them autonomously — the "teach mode" for browser automation.
+
+### Teach — Record a Workflow
+
+```python
+from workflows.recorder import WorkflowRecorder
+
+recorder = WorkflowRecorder(cdp_url="http://localhost:9222")
+async with recorder:
+    await recorder.start_capture()
+    # User performs actions in their real browser...
+    workflow = await recorder.stop_and_save("upwork_edit_title.yaml")
+```
+
+### Replay — Execute a Saved Workflow
+
+```python
+from workflows.player import WorkflowPlayer
+from workflows.schema import load_workflow
+
+workflow = load_workflow("workflows/library/upwork/edit-title.yaml")
+player = WorkflowPlayer(browser, workflow)
+result = await player.execute()
+print(f"Done: {result.success} — {result.steps_passed}/{result.steps_total}")
+```
+
+### Workflow Library
+
+Pre-built, production-tested workflows included out of the box:
+
+| Workflow | Platform | What It Does |
+|---|---|---|
+| `edit-title` | Upwork | Updates profile title |
+| `update-rate` | Upwork | Changes hourly rate |
+| `add-portfolio` | Upwork | Adds portfolio item |
+| `submit-proposal` | Upwork | Submits a proposal |
+| `send-connection-request` | LinkedIn | Sends connection request |
+
+### From MCP (AI Agent)
+
+```json
+{
+  "tool": "stealth_teach",
+  "args": { "session_name": "my-flow", "cdp_url": "http://localhost:9222" }
+}
+```
+
+```json
+{
+  "tool": "stealth_replay",
+  "args": { "workflow_path": "upwork/edit-title.yaml" }
+}
+```
+
+### Workflow Schema
+
+Each workflow is a YAML file with typed steps. 13 step types supported:
+
+`navigate` · `click` · `fill` · `type` · `select` · `verify` · `wait` · `wait_for_element` · `scroll` · `screenshot` · `execute_js` · `conditional` · `run_workflow`
+
+Variables (`{{variable}}`) resolve at runtime with built-in support for `timestamp`, `date`, `random_name`, `last_url`.
+
+## Remote Bridge
+
+Connect the stealth framework to a browser running on another machine — ideal for keeping cookies/sessions on your local Windows PC while the agent runs on a VPS.
+
+```
+Windows (Edge + CDP)  ←ngrok→  VPS (Agentic Stealth Browser)
+```
+
+Setup scripts included for both Linux (`scripts/setup_rbb.sh`) and Windows (`scripts/setup_rbb.ps1`). Requires Edge/Chrome launched with `--remote-debugging-port=9222`.
+
+See [docs/OPERATOR_SETUP.md](docs/OPERATOR_SETUP.md) for full setup guide, failure modes, and backend selection.
+
 ## How It Works
 
 ```
@@ -68,7 +145,11 @@ AgentBrowser
 ├── Behavior     → Bézier mouse, natural typing, distraction simulation
 ├── Recovery     → Detects blocks → rotates proxy/session → retries
 ├── Accounts     → Health scoring, 14-day warming, session checkpointing
-└── Proxy        → Residential proxy with rotation and health tracking
+├── Proxy        → Residential proxy with rotation and health tracking
+└── Workflows    → Record, replay, library (v1.0.0)
+
+Remote Bridge (optional)
+└── CDP Proxy    → Connect to local browser from VPS via ngrok
 ```
 
 ## Key Features
@@ -81,6 +162,10 @@ AgentBrowser
 | **Account Warming** | 14-day gradual ramp-up so new accounts don't get flagged |
 | **Session Checkpoints** | Export/import browser state for cross-host migration |
 | **Platform Presets** | Pre-configured profiles for LinkedIn, Amazon, Cloudflare |
+| **Workflow Recorder** | Capture real user actions via CDP → reproducible YAML workflows |
+| **Workflow Player** | Execute workflows with fallback selectors, retries, checkpoint resumption |
+| **Workflow Library** | Pre-built workflows for Upwork, LinkedIn — usable immediately |
+| **Remote Bridge** | Drive a local Windows browser from a VPS via CDP + ngrok |
 | **MCP Server** | Integration with AI agents via Model Context Protocol |
 
 ## MCP Setup
@@ -124,20 +209,26 @@ pip install agentic-stealth-browser
 
 ### 3. Available MCP Tools
 
-| Tool | Description |
-|---|---|
-| `stealth_launch` | Launch browser with stealth + region preset |
-| `stealth_navigate` | Navigate with full recovery and human behavior |
-| `stealth_load_cookies` | Load cookies from real browser |
-| `stealth_set_region` | Switch TLS fingerprint region (US, Japan, EU, Korea) |
-| `stealth_scrape` | Navigate and extract page content |
-| `stealth_status` | Check browser health and session state |
-| `stealth_tabs_list` | List open tabs/pages and active tab metadata |
-| `stealth_tab_snapshot` | Capture screenshot + metadata for a specific tab/page |
-| `stealth_session_timeline` | Fetch replay/timeline events for debugging and recovery analysis |
-| `stealth_debug_report` | Return full debug report payload for current session |
-| `stealth_close` | Close browser and cleanup |
-| `stealth_capabilities` | Show MCP server/runtime version and available tools |
+| Tool | Description | Added |
+|---|---|---|
+| `stealth_launch` | Launch browser with stealth + region preset | v0.8 |
+| `stealth_navigate` | Navigate with full recovery and human behavior | v0.8 |
+| `stealth_load_cookies` | Load cookies from real browser | v0.8 |
+| `stealth_set_region` | Switch TLS fingerprint region (US, Japan, EU, Korea) | v0.8 |
+| `stealth_scrape` | Navigate and extract page content | v0.8 |
+| `stealth_status` | Check browser health and session state | v0.8 |
+| `stealth_capabilities` | Show MCP server/runtime version and available tools | v0.9 |
+| `stealth_tabs_list` | List open tabs/pages and active tab metadata | v0.9 |
+| `stealth_tab_snapshot` | Capture screenshot + metadata for a specific tab/page | v0.9 |
+| `stealth_session_timeline` | Fetch replay/timeline events for debugging and recovery analysis | v0.9 |
+| `stealth_debug_report` | Return full debug report payload for current session | v0.9 |
+| `stealth_close` | Close browser and cleanup | v0.8 |
+| `stealth_teach` | Start recording a workflow session (CDP capture → YAML) | v1.0 |
+| `stealth_replay` | Execute a saved workflow by name or path | v1.0 |
+| `stealth_workflow_list` | List available workflows in the library | v1.0 |
+| `stealth_workflow_delete` | Delete a workflow from the library | v1.0 |
+
+> **Operator Guide**: For detailed workflows on observing what the MCP-driven browser is actually doing (tabs, snapshots, timelines, debug reports, security notes, CDP fallbacks), see [docs/MCP_BROWSER_OBSERVABILITY.md](docs/MCP_BROWSER_OBSERVABILITY.md).
 
 ### 4. MCP Server Environment Variables
 
@@ -149,8 +240,6 @@ pip install agentic-stealth-browser
 | `STEALTH_MCP_TIMELINE_DEFAULT_LIMIT` | Default event limit when `stealth_session_timeline` is called without `limit` | `30` |
 | `STEALTH_MCP_TIMELINE_MAX_LIMIT` | Hard upper bound for `stealth_session_timeline.limit` | `200` |
 | `STEALTH_MCP_OBSERVABILITY_MAX_CHARS` | Max serialized response size for observability payloads before truncation | `50000` |
-
-> **Operator Guide**: For detailed workflows on observing what the MCP-driven browser is actually doing (tabs, snapshots, timelines, debug reports, security notes, CDP fallbacks), see [docs/MCP_BROWSER_OBSERVABILITY.md](docs/MCP_BROWSER_OBSERVABILITY.md).
 
 ## Configuration
 
@@ -180,18 +269,29 @@ agentic-stealth-browser/
 ├── recovery/       # Block detection, anti-block orchestrator
 ├── proxy/          # Proxy management and rotation
 ├── sessions/       # Session and cookie management
+├── workflows/      # Teach/Replay workflow system (v1.0.0)
+│   ├── recorder.py          # CDP capture → YAML
+│   ├── player.py            # Execute saved workflows
+│   ├── schema.py            # Workflow models & validation
+│   ├── recovery.py          # Fallback controller
+│   ├── variable_resolver.py # {{variable}} resolution
+│   ├── selector_generator.py# CSS selector from recorded actions
+│   └── library/             # Pre-built workflows (Upwork, LinkedIn)
+├── scripts/        # Deployment & ops (RBB setup, health check)
 ├── audit/          # Structured logging and audit trails
 ├── ai/             # AI hooks and content analysis
-├── production/     # CLI, Docker, rate limiting, metrics
+├── production/     # CLI, Docker, MCP server, rate limiting, metrics
 ├── linkedin/       # LinkedIn-specific actions
 ├── scraping/       # Safe page scraping utilities
 ├── docs/           # Architecture Decision Records and guides
-└── tests/          # 493 tests across 23 files
+└── tests/          # 500+ tests across 25+ files
 ```
 
 ## Documentation
 
 - [Architecture Decision Records](docs/adr/)
+- [Operator Setup Guide](docs/OPERATOR_SETUP.md)
+- [MCP Browser Observability](docs/MCP_BROWSER_OBSERVABILITY.md)
 - [Visual Debugging Guide](docs/VISUAL_DEBUGGING.md)
 - [Stealth Limitations](docs/STEALTH_LIMITATIONS.md)
 - [Threat Model](docs/THREAT_MODEL.md)
@@ -228,3 +328,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
