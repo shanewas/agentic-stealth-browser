@@ -41,6 +41,8 @@ venv/
 *~
 
 # Testing
+tests/
+.clawpatch/
 .coverage
 coverage.xml
 htmlcov/

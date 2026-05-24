@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   lint:
-    name: Lint
+    name: Lint (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,25 +27,20 @@ jobs:
       - name: Install linting tools
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 ruff
+          pip install ruff mypy
 
-      - name: Run flake8 (critical errors — blocking)
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Critical error classes (syntax, undefined names, etc.) are now blocking.
-        # Broader style/complexity checks below remain non-blocking during Phase 8 cleanup.
+      - name: Run ruff check (blocking)
+        run: ruff check .
 
-      - name: Run flake8 (style/complexity — non-blocking for now)
-        run: |
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-        continue-on-error: true
+      - name: Run ruff format check (blocking)
+        run: ruff format --check .
 
-      - name: Run ruff check (non-blocking during tech-debt cleanup)
-        run: ruff check . || true
+      - name: Run mypy gradual type checking (non-blocking, informative)
+        run: mypy core/ --ignore-missing-imports --exclude 'tests' || true
         continue-on-error: true
 
   test:
-    name: Test
+    name: Test (pytest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,9 +71,6 @@ jobs:
             --cov-fail-under=45
         env:
           PYTEST_ADDOPTS: "-p no:timeout"
-        # Coverage threshold: 45% (baseline ~46% with low-coverage modules like production/cli, core/types, otel, etc.). Raising as tests improve.
-        # Marker-driven selection + --strict-markers (from pyproject.toml) ensures deterministic CI.
-        # The ignored legacy phase files are transitional; e2e/live_network are excluded via markers.
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -99,7 +91,7 @@ jobs:
             tests/detection_history.json
           retention-days: 30
 
-      - name: Test Collection Audit (marker enforcement proof for #380)
+      - name: Test Collection Audit
         if: always()
         run: |
           python -m pytest tests/ --collectonly -q -m "not e2e and not live_network" --tb=no > test-collection-audit.txt 2>&1 || true
@@ -115,7 +107,7 @@ jobs:
           retention-days: 30
 
   build:
-    name: Build / Import smoke-test
+    name: Build / Docker smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -135,6 +127,15 @@ jobs:
       - name: Verify core imports
         run: |
           python -c "from core.agent_browser import AgentBrowser; from stealth.advanced_stealth import get_stealth_script; from sessions.cookie_manager import CookieManager; print('OK')"
+
+      - name: Docker build smoke test
+        run: |
+          docker build -t agentic-stealth-browser:ci-check -f production/Dockerfile .
+          echo "Docker build succeeded"
+
+      - name: Docker healthcheck test
+        run: |
+          docker run --rm agentic-stealth-browser:ci-check python -c "from core.agent_browser import AgentBrowser; print('Runtime OK')"
 
   nightly-detection:
     name: Nightly detection testing

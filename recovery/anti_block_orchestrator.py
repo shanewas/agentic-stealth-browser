@@ -522,7 +522,7 @@ class AntiBlockOrchestrator:
         backoff = min(base * (2 ** (context.attempt - 1)), max_backoff) * mult
         rng = getattr(self, "rng", random)
         jitter_amount = backoff * jitter * rng.uniform(-1, 1)
-        return max(3.0, backoff + jitter_amount)
+        return max(3.0, min(max_backoff, backoff + jitter_amount))
 
     def _safe_extract_base_user(self, proxy_username: str) -> str:
         """Robustly extract the base 'user' part from Decodo proxy username string.

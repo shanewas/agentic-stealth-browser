@@ -49,6 +49,7 @@ COPY production/ ./production/
 COPY sessions/ ./sessions/
 COPY audit/ ./audit/
 COPY ai/ ./ai/
+COPY workflows/ ./workflows/
 COPY mcp_security.py ./
 
 # Install the project
@@ -77,7 +78,7 @@ VOLUME ["/data/sessions", "/data/logs", "/data/screenshots", "/data/cookies", "/
 USER appuser
 
 # Entrypoint for flexible command execution
-ENTRYPOINT ["python"]
+ENTRYPOINT ["python", "-m", "production.mcp_server"]
 
 # Default command
-CMD ["-c", "from core.agent_browser import AgentBrowser; print('Agentic Stealth Browser ready')"]
+CMD []

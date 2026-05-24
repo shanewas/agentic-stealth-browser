@@ -1173,6 +1173,15 @@ class StealthMCPServer:
         if method == "ping":
             return self._jsonrpc_result(msg_id, {"ok": True})
 
+        if method == "health":
+            return self._jsonrpc_result(msg_id, {
+                "status": "healthy",
+                "server": SERVER_NAME,
+                "version": SERVER_VERSION,
+                "active_sessions": len(self._sessions),
+                "uptime_seconds": int(time.monotonic() - getattr(self, "_start_time", time.monotonic())),
+            })
+
         if method == "tools/list":
             return self._jsonrpc_result(msg_id, self.list_tools())
 

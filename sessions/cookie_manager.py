@@ -443,7 +443,7 @@ class CookieManager:
 
             if "expires" in cookie and cookie["expires"]:
                 try:
-                    expiry = datetime.fromtimestamp(cookie["expires"])
+                    expiry = datetime.fromtimestamp(cookie["expires"], tz=timezone.utc)
                     if expiry < now:
                         expired += 1
                     elif (expiry - now).total_seconds() < (24 * 3600):
