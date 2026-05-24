@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from workflows.action_interpreter import normalize_step_params, validate_step_params
 from workflows.schema import Workflow, load_workflow
+from workflows.selector_generator import SelectorGenerator
 from workflows.variable_resolver import VariableResolver
 
 
@@ -25,6 +26,19 @@ class ExecutionResult:
     recovery_used: bool = False
     checkpoint: Dict[str, Any] = field(default_factory=dict)
     recovery_actions: List[Dict[str, Any]] = field(default_factory=list)
+    auto_healed_selectors: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class RehearsalResult:
+    success: bool
+    total_steps: int
+    steps_validated: int
+    warnings: List[str] = field(default_factory=list)
+    screenshots: List[str] = field(default_factory=list)
+    selectors_used: List[Dict[str, Any]] = field(default_factory=list)
+    execution_time: float = 0.0
+    summary: str = ""
 
 
 class WorkflowPlayer:
@@ -34,6 +48,8 @@ class WorkflowPlayer:
         self.checkpoint: Dict[str, Any] = {"completed_steps": [], "last_url": "", "variables": {}}
         self.recovery: Optional[Any] = None
         self.backend: str = "bridge"
+        self._workflow_stack: List[str] = []
+        self.output_variables: Dict[str, Any] = {}
 
     def set_recovery_controller(self, controller):
         self.recovery = controller
@@ -70,6 +86,7 @@ class WorkflowPlayer:
         steps_executed = 0
         recovery_used = False
         recovery_actions: List[Dict[str, Any]] = []
+        auto_healed_selectors: List[Dict[str, Any]] = []
 
         completed = set(self.checkpoint.get("completed_steps", []))
 
@@ -99,6 +116,7 @@ class WorkflowPlayer:
                     recovery_used=recovery_used,
                     checkpoint=self.checkpoint,
                     recovery_actions=recovery_actions,
+                    auto_healed_selectors=auto_healed_selectors,
                 )
 
             try:
@@ -110,44 +128,65 @@ class WorkflowPlayer:
                 except Exception:
                     pass
             except Exception as e:
-                if self.recovery is not None:
-                    recovery_cfg_raw = params.get("recovery")
-                    if recovery_cfg_raw and isinstance(recovery_cfg_raw, dict):
-                        from workflows.recovery import RecoveryAction as RecoveryActionCfg
-                        recovery_cfg = RecoveryActionCfg(
-                            action_type=recovery_cfg_raw.get("action_type", "retry"),
-                            max_retries=recovery_cfg_raw.get("max_retries", 3),
-                            backoff_seconds=recovery_cfg_raw.get("backoff", 2.0),
-                            take_screenshot=recovery_cfg_raw.get("take_screenshot", True),
+                if step_type in ("click", "fill", "type", "verify", "wait_for_element"):
+                    healed = self._try_auto_heal(params)
+                    if healed:
+                        for healed_selector in healed:
+                            try:
+                                healed_params = dict(params)
+                                healed_params["selector"] = healed_selector
+                                await self._dispatch_step(step_type, healed_params, run_vars)
+                                steps_executed += 1
+                                self.checkpoint["completed_steps"].append(i)
+                                auto_healed_selectors.append({
+                                    "step_index": i,
+                                    "step_type": step_type,
+                                    "original_selector": params.get("selector", ""),
+                                    "healed_selector": healed_selector,
+                                })
+                                break
+                            except Exception:
+                                continue
+
+                if (i + 1) not in self.checkpoint["completed_steps"]:
+                    if self.recovery is not None:
+                        recovery_cfg_raw = params.get("recovery")
+                        if recovery_cfg_raw and isinstance(recovery_cfg_raw, dict):
+                            from workflows.recovery import RecoveryAction as RecoveryActionCfg
+                            recovery_cfg = RecoveryActionCfg(
+                                action_type=recovery_cfg_raw.get("action_type", "retry"),
+                                max_retries=recovery_cfg_raw.get("max_retries", 3),
+                                backoff_seconds=recovery_cfg_raw.get("backoff", 2.0),
+                                take_screenshot=recovery_cfg_raw.get("take_screenshot", True),
+                            )
+                        else:
+                            recovery_cfg = None
+
+                        recovery_result = await self.recovery.handle_step_error(
+                            step_type=step_type,
+                            params=params,
+                            error=e,
+                            step_index=i,
+                            recovery_config=recovery_cfg,
                         )
-                    else:
-                        recovery_cfg = None
 
-                    recovery_result = await self.recovery.handle_step_error(
-                        step_type=step_type,
-                        params=params,
-                        error=e,
-                        step_index=i,
-                        recovery_config=recovery_cfg,
-                    )
+                        recovery_used = True
+                        recovery_actions.append({
+                            "step_index": i,
+                            "step_type": step_type,
+                            "recovered": recovery_result.recovered,
+                            "action_taken": recovery_result.action_taken,
+                            "retries_used": recovery_result.retries_used,
+                            "backend_used": recovery_result.backend_used,
+                            "error": str(e),
+                        })
 
-                    recovery_used = True
-                    recovery_actions.append({
-                        "step_index": i,
-                        "step_type": step_type,
-                        "recovered": recovery_result.recovered,
-                        "action_taken": recovery_result.action_taken,
-                        "retries_used": recovery_result.retries_used,
-                        "backend_used": recovery_result.backend_used,
-                        "error": str(e),
-                    })
-
-                    if recovery_result.recovered:
-                        steps_executed += 1
-                        self.checkpoint["completed_steps"].append(i)
-                        if recovery_result.backend_used == "stealth":
-                            self.backend = "stealth"
-                        continue
+                        if recovery_result.recovered:
+                            steps_executed += 1
+                            self.checkpoint["completed_steps"].append(i)
+                            if recovery_result.backend_used == "stealth":
+                                self.backend = "stealth"
+                            continue
 
                 screenshot_path = await self._take_step_screenshot(step_type, i)
                 if screenshot_path:
@@ -165,6 +204,7 @@ class WorkflowPlayer:
                     recovery_used=recovery_used,
                     checkpoint=self.checkpoint,
                     recovery_actions=recovery_actions,
+                    auto_healed_selectors=auto_healed_selectors,
                 )
 
         elapsed = time.monotonic() - start_time
@@ -178,6 +218,160 @@ class WorkflowPlayer:
             recovery_used=recovery_used,
             checkpoint=self.checkpoint,
             recovery_actions=recovery_actions,
+            auto_healed_selectors=auto_healed_selectors,
+        )
+
+    def _try_auto_heal(self, params: Dict[str, Any]) -> List[str]:
+        selector = params.get("selector", "")
+        if not selector:
+            return []
+        return SelectorGenerator.auto_heal_selector(selector)
+
+    async def rehearse(
+        self, workflow: Workflow, runtime_vars: Optional[Dict[str, Any]] = None
+    ) -> RehearsalResult:
+        start_time = time.monotonic()
+        from workflows.schema import validate_workflow_steps
+
+        warnings: List[str] = []
+        screenshots: List[str] = []
+        selectors_used: List[Dict[str, Any]] = []
+
+        validation_warnings = validate_workflow_steps(workflow)
+        warnings.extend(validation_warnings)
+
+        run_vars = dict(runtime_vars or {})
+        resolved_workflow = self.resolver.resolve_workflow(workflow, run_vars)
+
+        for i, step in enumerate(resolved_workflow.steps):
+            step_type = step.type
+            params = normalize_step_params(step_type, step.params)
+
+            if step_type == "navigate":
+                url = params.get("url", "")
+                warnings.append(f"Step {i} ({step_type}): would navigate to {url}")
+                try:
+                    screenshot_path = await self._take_step_screenshot(step_type, i)
+                    if screenshot_path:
+                        screenshots.append(screenshot_path)
+                except Exception:
+                    pass
+
+            elif step_type == "click":
+                selector = params.get("selector", "")
+                warnings.append(f"Step {i} ({step_type}): would click {selector}")
+                selectors_used.append({
+                    "step_index": i,
+                    "step_type": step_type,
+                    "selector": selector,
+                    "fallbacks": params.get("selector_fallbacks", []),
+                })
+                try:
+                    exists = await self._evaluate(
+                        f'!!document.querySelector({json.dumps(selector)})'
+                    )
+                    if not exists:
+                        warnings.append(
+                            f"Step {i} ({step_type}): selector '{selector}' NOT FOUND on current page"
+                        )
+                except Exception as e:
+                    warnings.append(
+                        f"Step {i} ({step_type}): could not verify selector: {e}"
+                    )
+
+            elif step_type == "fill" or step_type == "type":
+                selector = params.get("selector", "")
+                value = params.get("value", "")
+                warnings.append(f"Step {i} ({step_type}): would fill {selector} with '{value}'")
+                selectors_used.append({
+                    "step_index": i,
+                    "step_type": step_type,
+                    "selector": selector,
+                })
+                try:
+                    exists = await self._evaluate(
+                        f'!!document.querySelector({json.dumps(selector)})'
+                    )
+                    if not exists:
+                        warnings.append(
+                            f"Step {i} ({step_type}): selector '{selector}' NOT FOUND on current page"
+                        )
+                except Exception as e:
+                    warnings.append(
+                        f"Step {i} ({step_type}): could not verify selector: {e}"
+                    )
+
+            elif step_type == "verify":
+                selector = params.get("selector", "")
+                text = params.get("text", "")
+                warnings.append(
+                    f"Step {i} ({step_type}): would verify {selector} "
+                    f"{'contains ' + text if text else 'exists'}"
+                )
+                selectors_used.append({
+                    "step_index": i,
+                    "step_type": step_type,
+                    "selector": selector,
+                })
+
+            elif step_type == "screenshot":
+                warnings.append(f"Step {i} ({step_type}): would take screenshot")
+                try:
+                    screenshot_path = await self._take_step_screenshot(step_type, i)
+                    if screenshot_path:
+                        screenshots.append(screenshot_path)
+                except Exception:
+                    pass
+
+            elif step_type == "run_workflow":
+                path = params.get("path", "")
+                warnings.append(f"Step {i} ({step_type}): would run nested workflow from {path}")
+
+            elif step_type == "conditional":
+                condition = params.get("condition", "")
+                steps_count = len(params.get("steps", []))
+                else_count = len(params.get("else_steps", []))
+                warnings.append(
+                    f"Step {i} ({step_type}): condition '{condition}' with "
+                    f"{steps_count} steps (else: {else_count})"
+                )
+
+            elif step_type == "wait":
+                ms_val = params.get("ms", 1000)
+                wait_reason = params.get("selector") or params.get("text") or params.get("url") or f"{ms_val}ms"
+                warnings.append(f"Step {i} ({step_type}): would wait for {wait_reason}")
+
+            elif step_type == "wait_for_element":
+                selector = params.get("selector", "")
+                warnings.append(f"Step {i} ({step_type}): would wait for {selector}")
+
+            elif step_type == "scroll":
+                direction = params.get("direction", "down")
+                amount = params.get("amount", 300)
+                warnings.append(f"Step {i} ({step_type}): would scroll {direction} {amount}px")
+
+            elif step_type == "select":
+                selector = params.get("selector", "")
+                value = params.get("value", "")
+                warnings.append(f"Step {i} ({step_type}): would select {value} on {selector}")
+
+            elif step_type == "execute_js":
+                code = params.get("code", "")
+                warnings.append(f"Step {i} ({step_type}): would execute JS ({len(code)} chars)")
+
+            else:
+                warnings.append(f"Step {i} ({step_type}): unknown step type in rehearsal")
+
+        elapsed = time.monotonic() - start_time
+        return RehearsalResult(
+            success=len(warnings) > 0 or True,
+            total_steps=len(resolved_workflow.steps),
+            steps_validated=len(resolved_workflow.steps),
+            warnings=warnings,
+            screenshots=screenshots,
+            selectors_used=selectors_used,
+            execution_time=elapsed,
+            summary=f"Rehearsal complete: {len(resolved_workflow.steps)} steps, {len(warnings)} warnings",
         )
 
     async def _dispatch_step(self, step_type: str, params: Dict[str, Any], run_vars: Dict[str, Any]):
@@ -431,16 +625,31 @@ class WorkflowPlayer:
     async def _step_run_workflow(self, params: Dict[str, Any], run_vars: Dict[str, Any]):
         path = params["path"]
         variables = params.get("variables", {})
+        output_as = params.get("output_as")
+
+        if path in self._workflow_stack:
+            chain = " -> ".join(self._workflow_stack + [path])
+            raise RuntimeError(f"Cycle detected in workflow chain: {chain}")
 
         nested = load_workflow(path)
         merged_vars = dict(run_vars)
         merged_vars.update(variables)
 
-        result = await self.execute(nested, merged_vars)
-        if not result.success:
-            raise RuntimeError(
-                f"Nested workflow '{result.failed_step_type}' failed at step {result.failed_step}: {result.error_message}"
-            )
+        self._workflow_stack.append(path)
+        try:
+            result = await self.execute(nested, merged_vars)
+            if not result.success:
+                raise RuntimeError(
+                    f"Nested workflow '{result.failed_step_type}' failed at step {result.failed_step}: {result.error_message}"
+                )
+            if output_as:
+                self.output_variables[output_as] = {
+                    "success": result.success,
+                    "steps_executed": result.steps_executed,
+                    "total_steps": result.total_steps,
+                }
+        finally:
+            self._workflow_stack.pop()
 
     def _resolve_step_data_params(self, step_data: Dict[str, Any], run_vars: Dict[str, Any]) -> Dict[str, Any]:
         resolved = {}

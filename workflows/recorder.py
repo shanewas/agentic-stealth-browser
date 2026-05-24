@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from workflows.schema import Workflow, WorkflowStep, workflow_to_yaml_str
+from workflows.schema import SCHEMA_VERSION, Workflow, WorkflowStep, workflow_to_yaml_str
 from workflows.selector_generator import SelectorGenerator
 
 _NOISE_EVENTS = {
@@ -378,8 +378,11 @@ class WorkflowRecorder:
 
                 selector = ""
                 fallbacks: List[str] = []
+                confidence = 0.5
                 if event.element_info:
-                    selector = SelectorGenerator.get_best_selector(event.element_info)
+                    selector, confidence = SelectorGenerator.get_best_selector_with_confidence(
+                        event.element_info
+                    )
                     fallbacks = SelectorGenerator.get_fallback_set(event.element_info)
                     if len(fallbacks) > 1:
                         fallbacks = fallbacks[1:]
@@ -391,7 +394,7 @@ class WorkflowRecorder:
                     step_type="click",
                     params=params,
                     raw_events=group,
-                    confidence=1.0 if selector else 0.6,
+                    confidence=confidence,
                 ))
                 i = j
                 continue
@@ -401,18 +404,16 @@ class WorkflowRecorder:
                 j = i + 1
                 while j < len(self._events):
                     if self._events[j].type != "input":
-                        break  # stop at non-input (nav, click, scroll)
+                        break
                     if self._events[j].timestamp - event.timestamp < self._group_timeout:
                         group.append(self._events[j])
                         j += 1
                     else:
                         break
 
-                # If this input group is followed immediately by a navigation,
-                # the input was abandoned (user navigated away). Discard it.
                 next_event = self._events[j] if j < len(self._events) else None
                 if next_event and next_event.type == "navigation":
-                    i = j  # skip this group, continue from navigation
+                    i = j
                     continue
 
                 full_text = ""
@@ -433,8 +434,11 @@ class WorkflowRecorder:
                 variable = _detect_variable(full_text, event.element_info)
 
                 selector = ""
+                confidence = 0.5
                 if event.element_info:
-                    selector = SelectorGenerator.get_best_selector(event.element_info)
+                    selector, confidence = SelectorGenerator.get_best_selector_with_confidence(
+                        event.element_info
+                    )
 
                 if has_enter:
                     steps.append(RecordedStep(
@@ -445,7 +449,7 @@ class WorkflowRecorder:
                             "submit": True,
                         },
                         raw_events=group,
-                        confidence=0.9 if selector else 0.5,
+                        confidence=confidence,
                     ))
                 else:
                     steps.append(RecordedStep(
@@ -455,7 +459,7 @@ class WorkflowRecorder:
                             "value": variable if variable else full_text,
                         },
                         raw_events=group,
-                        confidence=0.9 if selector else 0.5,
+                        confidence=confidence,
                     ))
                 i = j
                 continue
@@ -494,17 +498,51 @@ class WorkflowRecorder:
             for rs in recorded_steps
         ]
 
+        avg_confidence = 0.0
+        if recorded_steps:
+            avg_confidence = sum(rs.confidence for rs in recorded_steps) / len(recorded_steps)
+        low_confidence_steps = [
+            {"index": i, "type": rs.step_type, "confidence": rs.confidence}
+            for i, rs in enumerate(recorded_steps)
+            if rs.confidence < 0.6
+        ]
+
         metadata = {
             "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "event_count": len(self._events),
             "step_count": len(workflow_steps),
+            "average_confidence": round(avg_confidence, 3),
+            "low_confidence_steps": low_confidence_steps,
+            "changelog": [
+                {
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "action": "recorded",
+                    "description": f"Recorded {len(workflow_steps)} steps from {len(self._events)} events",
+                }
+            ],
         }
 
         return Workflow(
             name=name,
             steps=workflow_steps,
             description=description or f"Recorded workflow with {len(workflow_steps)} steps",
+            metadata=metadata,
         )
+
+    def append_changelog(self, workflow: Workflow, action: str, description: str) -> Workflow:
+        if workflow.metadata is None:
+            workflow.metadata = {}
+        changelog = workflow.metadata.get("changelog", [])
+        if not isinstance(changelog, list):
+            changelog = []
+        changelog.append({
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "action": action,
+            "description": description,
+        })
+        workflow.metadata["changelog"] = changelog
+        workflow.metadata["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        return workflow
 
     def to_workflow_yaml(self, name: str = "recorded-workflow", description: Optional[str] = None) -> str:
         workflow = self.to_workflow(name=name, description=description)

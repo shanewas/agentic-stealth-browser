@@ -1,0 +1,8 @@
+{
+  "job_id": "job-1",
+  "saved_at": 1779607882.1091702,
+  "variables": {
+    "last_url": "https://example.com",
+    "step": 5
+  }
+}
