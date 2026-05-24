@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install "pytest>=8" pytest-asyncio playwright
+          pip install "pytest>=8" pytest-asyncio playwright httpx
           playwright install chromium --with-deps
       - name: Run fast non-E2E tests
         run: python -m pytest tests/ -q -m "not e2e" --strict-markers --tb=line
@@ -55,7 +55,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install "pytest>=8" pytest-asyncio playwright
+          pip install "pytest>=8" pytest-asyncio playwright httpx
           playwright install chromium --with-deps
       - name: Run solid E2E test
         run: python -m pytest tests/test_e2e_anti_block_recovery.py -q -s --tb=short
