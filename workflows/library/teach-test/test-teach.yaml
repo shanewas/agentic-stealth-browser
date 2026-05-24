@@ -1,5 +1,6 @@
 name: test-teach
 description: A test workflow
+version: 1.0.0
 steps:
 - type: navigate
   url: https://example.com

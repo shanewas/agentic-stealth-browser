@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.0] — Hermes Browser Dashboard (2026-05-30)
+
+### Added
+- **Hermes Browser Dashboard** (`production/hermes_dashboard.py`): Single-user operator dashboard with live browser view, execution control, workflow recording/replay, activity timeline, session auth, and CSRF protection. (#434)
+- **`stealth-browser dashboard` CLI subcommand**: Starts the dashboard server on `127.0.0.1:8443` with configurable password. (#434)
+- **Dashboard tests** (`tests/test_hermes_dashboard.py`): 6 contract tests covering start/stop, recording/replay, intervention state, devtools URL generation, auth+CSRF, and schedules. (#434)
+
+### Fixed
+- CI: `setup-python` bumped to v6 across all workflows
+- CI: Install `httpx` in stealth recovery workflow
+- CI: Python 3.11 test compatibility fixes
+- CI: Dashboard file formatting for ruff compliance
+
+### Changed
+- `SERVER_VERSION` → `2.1.0`
+- `pyproject.toml` version → `2.1.0`
+
 ## [2.0.0] — Workflow Platform GA (Major Release) (2026-05-25)
 
 ### v1.6.0 — API/SDK and Plugin Ecosystem (incremental)
