@@ -20,7 +20,9 @@ class SessionBinding:
 
     __slots__ = ("session_name", "token", "created_at", "last_access", "browser")
 
-    def __init__(self, session_name: str, token: Optional[str] = None, browser: Any = None):
+    def __init__(
+        self, session_name: str, token: Optional[str] = None, browser: Any = None
+    ):
         self.session_name = session_name
         self.token = token or secrets.token_hex(16)
         self.created_at = time.time()
@@ -35,7 +37,9 @@ class SessionIsolationError(Exception):
     def __init__(self, session_name: str, reason: str):
         self.session_name = session_name
         self.reason = reason
-        super().__init__(f"Session isolation violation: {reason} (session={session_name})")
+        super().__init__(
+            f"Session isolation violation: {reason} (session={session_name})"
+        )
 
 
 class SessionEnforcer:
@@ -51,7 +55,9 @@ class SessionEnforcer:
         self._contexts: Dict[str, str] = {}  # context_token -> session_name
         self._lock = asyncio.Lock()
 
-    async def bind_session(self, session_name: str, context_token: str, browser: Any = None) -> SessionBinding:
+    async def bind_session(
+        self, session_name: str, context_token: str, browser: Any = None
+    ) -> SessionBinding:
         async with self._lock:
             if context_token in self._contexts:
                 existing = self._contexts[context_token]
@@ -59,7 +65,9 @@ class SessionEnforcer:
                     self._unbind_context(context_token)
             binding = self._bindings.get(session_name)
             if binding is None:
-                binding = SessionBinding(session_name, token=secrets.token_hex(16), browser=browser)
+                binding = SessionBinding(
+                    session_name, token=secrets.token_hex(16), browser=browser
+                )
                 self._bindings[session_name] = binding
             self._contexts[context_token] = session_name
             return binding

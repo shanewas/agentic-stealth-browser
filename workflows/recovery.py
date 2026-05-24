@@ -1,8 +1,8 @@
 import asyncio
 import json
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import List, Optional
 
 
 @dataclass
@@ -38,7 +38,10 @@ class FallbackController:
     ) -> RecoveryResult:
         error_str = str(error).lower()
 
-        if any(kw in error_str for kw in ("element", "not found", "selector", "queryselector")):
+        if any(
+            kw in error_str
+            for kw in ("element", "not found", "selector", "queryselector")
+        ):
             return await self._handle_element_not_found_error(
                 params=params,
                 step_type=step_type,
@@ -71,7 +74,9 @@ class FallbackController:
             error_message=str(error),
         )
 
-    async def handle_element_not_found(self, selector: str, params: dict) -> RecoveryResult:
+    async def handle_element_not_found(
+        self, selector: str, params: dict
+    ) -> RecoveryResult:
         return await self._handle_element_not_found_error(
             params=params,
             step_type="unknown",
@@ -107,7 +112,9 @@ class FallbackController:
                 if hasattr(self.browser, "safe_click"):
                     await self.browser.safe_click(selector)
                 else:
-                    await self._evaluate(f'document.querySelector({json.dumps(selector)}).click()')
+                    await self._evaluate(
+                        f"document.querySelector({json.dumps(selector)}).click()"
+                    )
                 return RecoveryResult(
                     recovered=True,
                     action_taken="retry",
@@ -123,7 +130,9 @@ class FallbackController:
                 if hasattr(self.browser, "safe_click"):
                     await self.browser.safe_click(fallback_sel)
                 else:
-                    await self._evaluate(f'document.querySelector({json.dumps(fallback_sel)}).click()')
+                    await self._evaluate(
+                        f"document.querySelector({json.dumps(fallback_sel)}).click()"
+                    )
                 return RecoveryResult(
                     recovered=True,
                     action_taken="fallback_to_stealth",
@@ -174,7 +183,9 @@ class FallbackController:
                 url = params.get("url", "")
                 if hasattr(self.browser, "safe_goto"):
                     await asyncio.wait_for(
-                        self.browser.safe_goto(url, platform=params.get("platform", "unknown")),
+                        self.browser.safe_goto(
+                            url, platform=params.get("platform", "unknown")
+                        ),
                         timeout=timeout_s,
                     )
                 elif hasattr(self.browser, "goto"):
@@ -183,7 +194,7 @@ class FallbackController:
                         timeout=timeout_s,
                     )
                 else:
-                    await self._evaluate(f'window.location.href = {json.dumps(url)}')
+                    await self._evaluate(f"window.location.href = {json.dumps(url)}")
             elif step_type in ("click", "fill", "type", "verify", "wait_for_element"):
                 selector = params.get("selector", "")
                 if step_type == "click" and hasattr(self.browser, "safe_click"):
@@ -191,7 +202,9 @@ class FallbackController:
                         self.browser.safe_click(selector),
                         timeout=timeout_s,
                     )
-                elif step_type in ("fill", "type") and hasattr(self.browser, "safe_type"):
+                elif step_type in ("fill", "type") and hasattr(
+                    self.browser, "safe_type"
+                ):
                     value = params.get("value", "")
                     await asyncio.wait_for(
                         self.browser.safe_type(selector, value),
@@ -246,7 +259,9 @@ class FallbackController:
         retries_used = 0
 
         if self.anti_block_orchestrator is not None:
-            recovery_ctx = self._make_recovery_ctx(params, step_index, "block/challenge detected")
+            recovery_ctx = self._make_recovery_ctx(
+                params, step_index, "block/challenge detected"
+            )
             try:
                 await self.anti_block_orchestrator.recover(recovery_ctx)
                 retries_used = 1
@@ -279,11 +294,17 @@ class FallbackController:
     async def is_blocked(self) -> bool:
         try:
             url = self._get_current_url()
-            if any(ind in url.lower() for ind in ("challenge", "blocked", "captcha", "verify", "accessdenied")):
+            if any(
+                ind in url.lower()
+                for ind in ("challenge", "blocked", "captcha", "verify", "accessdenied")
+            ):
                 return True
 
-            if self.anti_block_orchestrator is not None and hasattr(self.anti_block_orchestrator, "detect_block"):
+            if self.anti_block_orchestrator is not None and hasattr(
+                self.anti_block_orchestrator, "detect_block"
+            ):
                 from recovery.anti_block_orchestrator import RecoveryContext, BlockType
+
                 ctx = RecoveryContext(
                     platform="unknown",
                     url=url,
@@ -291,7 +312,9 @@ class FallbackController:
                 )
                 page = self._get_page()
                 if page and hasattr(page, "content"):
-                    content_preview = await asyncio.wait_for(page.content(), timeout=3.0)
+                    content_preview = await asyncio.wait_for(
+                        page.content(), timeout=3.0
+                    )
                 else:
                     content_preview = ""
                 result = self.anti_block_orchestrator.detect_block(
@@ -306,6 +329,7 @@ class FallbackController:
 
     def _make_recovery_ctx(self, params: dict, step_index: int, error_str: str):
         from recovery.anti_block_orchestrator import RecoveryContext
+
         return RecoveryContext(
             platform=params.get("platform", "unknown"),
             url=self._get_current_url(),
@@ -337,7 +361,9 @@ class FallbackController:
             name = f"recovery_step_{step_index}_attempt_{attempt}"
             if hasattr(self.browser, "screenshot_on_error"):
                 return await self.browser.screenshot_on_error(name)
-            if hasattr(self.browser, "page") and hasattr(self.browser.page, "screenshot"):
+            if hasattr(self.browser, "page") and hasattr(
+                self.browser.page, "screenshot"
+            ):
                 buf = await self.browser.page.screenshot()
                 if buf:
                     return f"screenshots/{name}_{int(time.time())}.png"

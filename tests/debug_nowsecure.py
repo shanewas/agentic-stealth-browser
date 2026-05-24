@@ -29,7 +29,9 @@ async def debug_nowsecure():
         page = browser.page
 
         try:
-            response = await page.goto("https://nowsecure.nl", wait_until="domcontentloaded", timeout=30000)
+            response = await page.goto(
+                "https://nowsecure.nl", wait_until="domcontentloaded", timeout=30000
+            )
             print(f"    Status: {response.status if response else 'No response'}")
         except Exception as e:
             print(f"    Navigation error: {e}")
@@ -82,7 +84,7 @@ async def debug_nowsecure():
                 "div.cf-browser-verification",
                 "#cf-challenge",
                 "form[action*='challenge']",
-                "input[name*='cf-challenge']"
+                "input[name*='cf-challenge']",
             ]
 
             found_elements = []
@@ -95,7 +97,9 @@ async def debug_nowsecure():
                     # Selector may not exist on this page; continue checking others
                     pass
 
-            print(f"    Challenge elements found: {found_elements if found_elements else 'None'}")
+            print(
+                f"    Challenge elements found: {found_elements if found_elements else 'None'}"
+            )
 
         except Exception as e:
             print(f"    Element check error: {e}")
@@ -107,6 +111,7 @@ async def debug_nowsecure():
     except Exception as e:
         print(f"\nFATAL ERROR: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         if browser.browser:

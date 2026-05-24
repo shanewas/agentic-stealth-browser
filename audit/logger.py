@@ -48,23 +48,28 @@ class AuditLogger:
     Comprehensive logging system for agentic browser operations.
     Supports both file logging and structured JSON audit trails.
     """
-    
-    def __init__(self, session_name: str, log_dir: Optional[str] = None, correlation_id: Optional[str] = None):
+
+    def __init__(
+        self,
+        session_name: str,
+        log_dir: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+    ):
         self.session_name = session_name
         if log_dir is None:
             log_dir = _resolve_log_dir()
         self.log_dir = Path(log_dir).expanduser()
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Structured audit log
         self.audit_file = self.log_dir / f"{session_name}_audit.jsonl"
-        
+
         # Human-readable log
         self.log_file = self.log_dir / f"{session_name}.log"
-        
+
         # P2 #128: Correlation ID for multi-account run tracing
         self.correlation_id: str = correlation_id or str(uuid.uuid4())[:8]
-        
+
         # === Non-blocking queued writers for #44 P1 perf ===
         # audit JSONL uses dedicated queue + background drainer thread (single writer, no per-call threads)
         self._audit_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue(maxsize=5000)
@@ -72,7 +77,7 @@ class AuditLogger:
         self._writer_thread = threading.Thread(
             target=self._drain_audit_queue,
             daemon=True,
-            name=f"audit-writer-{session_name[:16]}"
+            name=f"audit-writer-{session_name[:16]}",
         )
         self._writer_thread.start()
 
@@ -88,14 +93,15 @@ class AuditLogger:
             except Exception:
                 pass
 
-        self._std_log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(maxsize=2000)
+        self._std_log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(
+            maxsize=2000
+        )
         qhandler = logging.handlers.QueueHandler(self._std_log_queue)
         self.logger.addHandler(qhandler)
 
         file_handler = logging.FileHandler(self.log_file)
         formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         file_handler.setFormatter(formatter)
         self._listener = logging.handlers.QueueListener(
@@ -105,17 +111,21 @@ class AuditLogger:
 
         self._debug_enabled = False
         self._debug_log_file = self.log_dir / f"{session_name}_debug.jsonl"
-    
+
     def enable_debug_mode(self):
         """Enable verbose debug logging for fingerprint/stealth analysis (DX #265)."""
         self._debug_enabled = True
         # Ensure debug handler exists (idempotent). Note: when debug on, direct FileHandler on logger
         # means its writes are sync (rare, non-hotpath for normal operation; debug is explicit DX).
-        if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '').endswith('debug.jsonl') for h in self.logger.handlers):
+        if not any(
+            isinstance(h, logging.FileHandler)
+            and getattr(h, "baseFilename", "").endswith("debug.jsonl")
+            for h in self.logger.handlers
+        ):
             debug_handler = logging.FileHandler(self._debug_log_file)
-            debug_handler.setFormatter(logging.Formatter('%(message)s'))
+            debug_handler.setFormatter(logging.Formatter("%(message)s"))
             self.logger.addHandler(debug_handler)
-    
+
     @staticmethod
     def _redact_sensitive_values(value: str) -> str:
         """Redact sensitive VALUE patterns from a string (issue #167).
@@ -132,62 +142,62 @@ class AuditLogger:
 
         # Bearer tokens: "Bearer <token>"
         value = re.sub(
-            r'\bBearer\s+\S+',
-            'Bearer [REDACTED]',
+            r"\bBearer\s+\S+",
+            "Bearer [REDACTED]",
             value,
             flags=re.IGNORECASE,
         )
 
         # URLs with credentials: scheme://user:pass@host → scheme://user:[REDACTED]@host
         value = re.sub(
-            r'(://[^:@/]+:)([^@]+)(@)',
-            r'\1[REDACTED]\3',
+            r"(://[^:@/]+:)([^@]+)(@)",
+            r"\1[REDACTED]\3",
             value,
         )
 
         # Sensitive query parameters: ?key=xxx where key is token/api_key/etc.
         _SENSITIVE_QP_KEYS = (
-            r'token|api_key|apikey|access_key|secret|password|passwd|'
-            r'private_key|auth|session_id|sessionid|credentials'
+            r"token|api_key|apikey|access_key|secret|password|passwd|"
+            r"private_key|auth|session_id|sessionid|credentials"
         )
         value = re.sub(
-            rf'([?&](?:{_SENSITIVE_QP_KEYS})=)[^&#\s]+',
-            r'\1[REDACTED]',
+            rf"([?&](?:{_SENSITIVE_QP_KEYS})=)[^&#\s]+",
+            r"\1[REDACTED]",
             value,
             flags=re.IGNORECASE,
         )
 
         # Common API key prefixes (must come after query-param pass so full URL context is preserved)
         value = re.sub(
-            r'\b(ghp_[A-Za-z0-9]{20,})\b',
-            '[REDACTED_KEY]',
+            r"\b(ghp_[A-Za-z0-9]{20,})\b",
+            "[REDACTED_KEY]",
             value,
         )
         value = re.sub(
-            r'\b(sk-[A-Za-z0-9]{20,})\b',
-            '[REDACTED_KEY]',
+            r"\b(sk-[A-Za-z0-9]{20,})\b",
+            "[REDACTED_KEY]",
             value,
         )
         value = re.sub(
-            r'\b(xai-[A-Za-z0-9]{20,})\b',
-            '[REDACTED_KEY]',
+            r"\b(xai-[A-Za-z0-9]{20,})\b",
+            "[REDACTED_KEY]",
             value,
         )
         value = re.sub(
-            r'\b(AIza[A-Za-z0-9_-]{20,})\b',
-            '[REDACTED_KEY]',
+            r"\b(AIza[A-Za-z0-9_-]{20,})\b",
+            "[REDACTED_KEY]",
             value,
         )
         value = re.sub(
-            r'\b(AKIA[A-Z0-9]{12,})\b',
-            '[REDACTED_KEY]',
+            r"\b(AKIA[A-Z0-9]{12,})\b",
+            "[REDACTED_KEY]",
             value,
         )
 
         # Email addresses: user@domain → [user@REDACTED]
         value = re.sub(
-            r'\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b',
-            r'[\1@REDACTED]',
+            r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b",
+            r"[\1@REDACTED]",
             value,
         )
 
@@ -205,13 +215,32 @@ class AuditLogger:
         Redaction is mandatory by default (opt-in to disable via AGENTIC_STEALTH_NO_REDACT
         env var, intended ONLY for local debugging).
         """
-        if os.getenv("AGENTIC_STEALTH_NO_REDACT", "").strip().lower() in ("1", "true", "yes"):
+        if os.getenv("AGENTIC_STEALTH_NO_REDACT", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
             return details if isinstance(details, dict) else details
-        SENSITIVE_KEYS = frozenset([
-            "password", "passwd", "secret", "token", "api_key", "apikey",
-            "access_key", "private_key", "auth", "credentials", "cookie",
-            "session_id", "sessionid", "session_token", "session_secret", "session_key",
-        ])
+        SENSITIVE_KEYS = frozenset(
+            [
+                "password",
+                "passwd",
+                "secret",
+                "token",
+                "api_key",
+                "apikey",
+                "access_key",
+                "private_key",
+                "auth",
+                "credentials",
+                "cookie",
+                "session_id",
+                "sessionid",
+                "session_token",
+                "session_secret",
+                "session_key",
+            ]
+        )
         if not isinstance(details, dict):
             return details
         redacted = {}
@@ -227,7 +256,9 @@ class AuditLogger:
                 redacted[k] = v
         return redacted
 
-    def log_action(self, action: str, details: Optional[Dict] = None, level: str = "info"):
+    def log_action(
+        self, action: str, details: Optional[Dict] = None, level: str = "info"
+    ):
         """Log a browser action with structured data (non-blocking for #44).
 
         Automatically redacts sensitive keys (passwords, tokens, etc.) from details
@@ -244,41 +275,42 @@ class AuditLogger:
             "action": action,
             "details": safe_details,
         }
-        
+
         # Queue the audit JSONL entry (drained by background thread; never blocks caller)
         try:
             self._audit_queue.put_nowait(entry)
         except queue.Full:
             # Extremely high volume: drop (never block hot path or OOM)
             pass
-        
+
         # Stdlib log goes through QueueHandler -> non-blocking (listener drains to FileHandler)
         msg = f"{action}"
         if safe_details:
             msg += f" | {safe_details}"
-        
+
         if level == "error":
             self.logger.error(msg)
         elif level == "warning":
             self.logger.warning(msg)
         else:
             self.logger.info(msg)
-    
+
     def log_error(self, action: str, error: str, details: Optional[Dict] = None):
         """Log errors with full context"""
-        self.log_action(action, {
-            "error": error,
-            **(details or {})
-        }, level="error")
-    
+        self.log_action(action, {"error": error, **(details or {})}, level="error")
+
     def log_block_detected(self, platform: str, details: Optional[Dict] = None):
         """Special logging for blocks / rate limits"""
-        self.log_action("BLOCK_DETECTED", {
-            "platform": platform,
-            **(details or {})
-        }, level="warning")
-    
-    def get_recent_actions(self, limit: int = 50, since_ts: Optional[str] = None, before_ts: Optional[str] = None) -> list:
+        self.log_action(
+            "BLOCK_DETECTED", {"platform": platform, **(details or {})}, level="warning"
+        )
+
+    def get_recent_actions(
+        self,
+        limit: int = 50,
+        since_ts: Optional[str] = None,
+        before_ts: Optional[str] = None,
+    ) -> list:
         """Read recent audit entries (sync read is acceptable; only called from debug/report paths)
 
         Supports optional time filtering for pagination (#381):
@@ -311,17 +343,26 @@ class AuditLogger:
 
         return entries[-limit:]
 
-    def replay_sequence(self, limit: int = 30, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> list:
+    def replay_sequence(
+        self,
+        limit: int = 30,
+        cursor: Optional[str] = None,
+        since_ts: Optional[str] = None,
+    ) -> list:
         """#253 lightweight replay from audit logs. Extended for #381 cursor/since_ts pagination (minimal keyset on timestamp)."""
         if not self.audit_file.exists():
             return []
         before_ts = cursor if cursor else None
         fetch_n = (limit * 5) if (cursor or since_ts) else (limit * 3)
-        entries = self.get_recent_actions(fetch_n, since_ts=since_ts, before_ts=before_ts)
+        entries = self.get_recent_actions(
+            fetch_n, since_ts=since_ts, before_ts=before_ts
+        )
         seq = []
         for e in entries:
             a = str(e.get("action", "")).lower()
-            if any(k in a for k in ("click", "type", "goto", "submit", "think", "safe")):
+            if any(
+                k in a for k in ("click", "type", "goto", "submit", "think", "safe")
+            ):
                 seq.append({"timestamp": e.get("timestamp"), "action": e.get("action")})
         return seq[:limit]
 
@@ -395,12 +436,17 @@ class DebugReporter:
     """
     DX helper (#265) that captures and reports the exact stealth configuration
     applied to a browser instance: TLS fingerprint, headers, and applied patches.
-    
+
     Allows operators to verify "what actually ran" for a given launch/preset.
     Safe no-op when debug=False; fully populated when debug=True or on explicit debug_report().
     """
 
-    def __init__(self, logger: Optional[AuditLogger] = None, tls_manager=None, extra_headers: Optional[Dict[str, str]] = None):
+    def __init__(
+        self,
+        logger: Optional[AuditLogger] = None,
+        tls_manager=None,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ):
         self.logger = logger
         self.tls_manager = tls_manager
         self.extra_headers = extra_headers or {}
@@ -410,7 +456,14 @@ class DebugReporter:
     def record_patch(self, name: str, data: Dict[str, Any]):
         """Record a stealth patch application for later reporting."""
         self.patches[name] = data
-        self.records.append({"type": "patch", "name": name, "data": data, "ts": datetime.now(timezone.utc).isoformat()})
+        self.records.append(
+            {
+                "type": "patch",
+                "name": name,
+                "data": data,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     def dump_fingerprint(self) -> Dict[str, Any]:
         """Return the TLS / fingerprint profile chosen for this session."""
@@ -420,18 +473,34 @@ class DebugReporter:
             except Exception:
                 pass
         if self.tls_manager and hasattr(self.tls_manager, "region"):
-            return {"region": getattr(self.tls_manager, "region", "global"), "note": "partial profile"}
-        return {"region": "global", "note": "default (no tls_manager available at report time)"}
+            return {
+                "region": getattr(self.tls_manager, "region", "global"),
+                "note": "partial profile",
+            }
+        return {
+            "region": "global",
+            "note": "default (no tls_manager available at report time)",
+        }
 
     def dump_headers(self) -> Dict[str, Any]:
         """Return the extra HTTP headers that were applied."""
-        return dict(self.extra_headers) if self.extra_headers else {"note": "headers not captured"}
+        return (
+            dict(self.extra_headers)
+            if self.extra_headers
+            else {"note": "headers not captured"}
+        )
 
     def dump_patches(self) -> Dict[str, Any]:
         """Return all recorded stealth patches."""
         return dict(self.patches)
 
-    def full_debug_report(self, include_recent_logs: bool = True, recent_limit: Optional[int] = None, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> Dict[str, Any]:
+    def full_debug_report(
+        self,
+        include_recent_logs: bool = True,
+        recent_limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+        since_ts: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Produce a comprehensive debug bundle for the current browser state.
         #381: recent_limit/cursor/since_ts control the recent_audit list via get_recent_actions (pagination support).
         """
@@ -446,7 +515,9 @@ class DebugReporter:
             try:
                 rlimit = recent_limit if recent_limit is not None else 15
                 before = cursor
-                report["recent_audit"] = self.logger.get_recent_actions(rlimit, since_ts=since_ts, before_ts=before)
+                report["recent_audit"] = self.logger.get_recent_actions(
+                    rlimit, since_ts=since_ts, before_ts=before
+                )
             except Exception:
                 report["recent_audit"] = ["<error reading audit>"]
         return report
@@ -455,7 +526,11 @@ class DebugReporter:
         """Pretty(ish) console dump of the debug report. Redacts sensitive data before printing."""
         if report is None:
             report = self.full_debug_report()
-        safe_report = AuditLogger._redact_sensitive(report) if isinstance(report, dict) else report
+        safe_report = (
+            AuditLogger._redact_sensitive(report)
+            if isinstance(report, dict)
+            else report
+        )
         print("\n" + "=" * 60)
         print("AGENTIC-STEALTH-BROWSER DEBUG REPORT (#265)")
         print("=" * 60)

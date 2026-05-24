@@ -48,15 +48,28 @@ def test_session_orchestrator_mcp_friendly():
 
 def test_rate_limiter_mcp_safe_path():
     """Rate limiter usable from MCP paths (#148)"""
-    domain_limiter.set_limit("mcp.test", RateLimitConfig(requests_per_minute=100, cooldown_seconds=0))
+    domain_limiter.set_limit(
+        "mcp.test", RateLimitConfig(requests_per_minute=100, cooldown_seconds=0)
+    )
     # sync check
-    assert hasattr(domain_limiter, 'wait_if_needed')
+    assert hasattr(domain_limiter, "wait_if_needed")
 
 
 def test_cookie_manager_contract():
     """CookieManager load + health contract"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        json.dump([{"name": "t", "value": "1", "domain": ".ex.com", "path": "/", "sameSite": "None"}], f)
+        json.dump(
+            [
+                {
+                    "name": "t",
+                    "value": "1",
+                    "domain": ".ex.com",
+                    "path": "/",
+                    "sameSite": "None",
+                }
+            ],
+            f,
+        )
         path = f.name
 
     async def _run():
@@ -66,11 +79,13 @@ def test_cookie_manager_contract():
         health = await cm.get_cookie_health()
         assert health["total"] > 0
         Path(path).unlink()
+
     asyncio.run(_run())
 
 
 def test_agentbrowser_session_and_bundle_contract():
     """MCP persist/resume + distributed bundle (#236 #298) - logic only"""
+
     async def _run():
         with tempfile.TemporaryDirectory() as tmp:
             bundle_path = str(Path(tmp) / "bundle.json")
@@ -89,14 +104,18 @@ def test_agentbrowser_session_and_bundle_contract():
             assert export_res["status"] == "success"
             assert Path(bundle_path).exists()
 
-            import_res = await orch.import_session_bundle(bundle_path, "imported-contract")
+            import_res = await orch.import_session_bundle(
+                bundle_path, "imported-contract"
+            )
             assert import_res["status"] == "success"
+
     asyncio.run(_run())
 
 
 def test_tls_profile_selection_contract():
     """Critical testing gap: TLSFingerprintManager region/profile selection shapes (#P2 TLS)"""
     from stealth.tls_fingerprint import get_tls_manager, Region
+
     mgr = get_tls_manager("us")
     assert mgr.region == Region.US
     prof = mgr.get_profile()
@@ -109,9 +128,12 @@ def test_tls_profile_selection_contract():
 
 def test_health_status_contract_shape():
     """Critical testing gap: MCP/CLI health status return shape contract (#281) + preset wiring"""
+
     async def _run():
         # Use ephemeral anonymous browser (no real net if possible, but launch needs pw)
-        b = AgentBrowser(session_name="health-contract-test", anonymous=True, ephemeral=True)
+        b = AgentBrowser(
+            session_name="health-contract-test", anonymous=True, ephemeral=True
+        )
         await b.launch(headless=True, preset="linkedin_2026", region="us", debug=False)
         try:
             health = await b.get_health_status()
@@ -138,6 +160,7 @@ def test_health_status_contract_shape():
             assert "report" in dr
         finally:
             await b.close()
+
     asyncio.run(_run())
 
 

@@ -93,16 +93,12 @@ class TestMutationBehaviorPatches:
 
         rng = random.Random(42)
         hb = HumanBehavior(FakePage(), rng=rng)
-        original = asyncio.run(
-            hb._bezier_curve((100, 100), (400, 300), steps=10)
-        )
+        original = asyncio.run(hb._bezier_curve((100, 100), (400, 300), steps=10))
 
         # Different RNG should produce different wobble
         rng2 = random.Random(99)
         hb2 = HumanBehavior(FakePage(), rng=rng2)
-        mutated = asyncio.run(
-            hb2._bezier_curve((100, 100), (400, 300), steps=10)
-        )
+        mutated = asyncio.run(hb2._bezier_curve((100, 100), (400, 300), steps=10))
 
         # Paths should be different due to different wobble
         assert original != mutated
@@ -141,6 +137,7 @@ class TestMutationTLSPatches:
     def test_tls_cipher_mutation_detectable(self):
         """Changing TLS ciphers should produce different fingerprint."""
         from stealth.tls_fingerprint import get_tls_manager
+
         manager = get_tls_manager("us")
         original = manager.get_profile()
 
@@ -151,12 +148,11 @@ class TestMutationTLSPatches:
     def test_ja3_mutation_detectable(self):
         """Changing JA3 components should produce different hash."""
         from stealth.tls_ja3_ja4 import JA3Fingerprint
+
         original = JA3Fingerprint.get_chrome_ja3()
 
         # Mutate ciphers
-        mutated_ja3 = JA3Fingerprint.generate_ja3(
-            "772", ["9999"], ["0"], ["29"], ["0"]
-        )
+        mutated_ja3 = JA3Fingerprint.generate_ja3("772", ["9999"], ["0"], ["29"], ["0"])
         mutated_hash = JA3Fingerprint.generate_ja3_hash(mutated_ja3)
 
         assert original["ja3_hash"] != mutated_hash

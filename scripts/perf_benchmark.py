@@ -22,7 +22,7 @@ import json
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -110,7 +110,9 @@ class PerfBenchmark:
             elapsed = time.perf_counter() - t0
             result.samples.append(elapsed)
             if self.verbose:
-                print(f"  [{name}] iter {i + 1}/{self.iterations}: {elapsed * 1000:.1f}ms")
+                print(
+                    f"  [{name}] iter {i + 1}/{self.iterations}: {elapsed * 1000:.1f}ms"
+                )
 
         self.results[name] = result
         return result
@@ -118,8 +120,13 @@ class PerfBenchmark:
     def bench_imports(self) -> BenchmarkResult:
         def _import_core():
             import importlib
-            for mod in ("core.agent_browser", "core.types", "core.session_checkpoint",
-                         "core.connection_pool"):
+
+            for mod in (
+                "core.agent_browser",
+                "core.types",
+                "core.session_checkpoint",
+                "core.connection_pool",
+            ):
                 importlib.import_module(mod)
 
         return self._run("import_core_modules", _import_core)
@@ -139,32 +146,39 @@ class PerfBenchmark:
         from production.mcp_input_validator import validate_tool_input
 
         def _validate() -> None:
-            validate_tool_input("stealth_navigate", {"url": "https://example.com", "warm_up": True})
-            validate_tool_input("stealth_launch", {"session_name": "test", "headless": True})
+            validate_tool_input(
+                "stealth_navigate", {"url": "https://example.com", "warm_up": True}
+            )
+            validate_tool_input(
+                "stealth_launch", {"session_name": "test", "headless": True}
+            )
 
         return self._run("input_validation", _validate)
 
     def bench_audit_logging(self) -> BenchmarkResult:
         import tempfile
-        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp:
             from audit.logger import AuditLogger
+
             logger = AuditLogger("perf-bench", log_dir=tmp)
 
             def _log() -> None:
-                logger.log_action("safe_goto", {"url": "https://example.com", "duration_ms": 234})
+                logger.log_action(
+                    "safe_goto", {"url": "https://example.com", "duration_ms": 234}
+                )
                 logger.log_action("safe_click", {"selector": "#btn", "duration_ms": 45})
 
             return self._run("audit_logging", _log)
 
     async def bench_rate_limiter(self) -> BenchmarkResult:
-        import asyncio
-        from production.rate_limiter import ToolRateLimiter, DomainRateLimiter, RateLimitConfig
+        from production.rate_limiter import ToolRateLimiter
 
         limiter = ToolRateLimiter(tool_calls_per_minute=10000, total_calls_cap=50000)
 
-        result = BenchmarkResult(name="tool_rate_limiter_check", iterations=self.iterations)
+        result = BenchmarkResult(
+            name="tool_rate_limiter_check", iterations=self.iterations
+        )
 
         async def _check() -> None:
             await limiter.check_and_wait("goto")
@@ -187,7 +201,9 @@ class PerfBenchmark:
             elapsed = time.perf_counter() - t0
             result.samples.append(elapsed)
             if self.verbose:
-                print(f"  [tool_rate_limiter_check] iter {i + 1}/{self.iterations}: {elapsed * 1000:.1f}ms")
+                print(
+                    f"  [tool_rate_limiter_check] iter {i + 1}/{self.iterations}: {elapsed * 1000:.1f}ms"
+                )
 
         self.results[result.name] = result
         return result
@@ -212,7 +228,7 @@ class PerfBenchmark:
 
     def print_report(self) -> None:
         print(f"\n{'=' * 60}")
-        print(f"PERFORMANCE BENCHMARK")
+        print("PERFORMANCE BENCHMARK")
         print(f"{'=' * 60}")
         print(f"  iterations: {self.iterations}")
         print(f"  warmup:     {self.warmup}")
@@ -251,12 +267,8 @@ async def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--warmup", type=int, default=3, help="Number of warmup iterations"
     )
-    parser.add_argument(
-        "--json", action="store_true", help="Output results as JSON"
-    )
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Verbose output"
-    )
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args(argv)
 
     bench = PerfBenchmark(

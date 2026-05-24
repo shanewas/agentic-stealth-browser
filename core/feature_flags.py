@@ -92,7 +92,9 @@ def get_client_capabilities(browser_backend: str = "") -> Dict[str, Any]:
     return caps
 
 
-def unsupported_feature_message(feature: str, reason: str = "not available for this backend") -> str:
+def unsupported_feature_message(
+    feature: str, reason: str = "not available for this backend"
+) -> str:
     """Produce an actionable error message when a feature is not supported."""
     caps = get_client_capabilities()
     backend = caps.get("browser_backend", "unknown")

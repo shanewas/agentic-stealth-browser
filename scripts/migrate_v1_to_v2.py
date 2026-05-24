@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-def migrate_workflow_yaml(input_path: str, output_path: Optional[str] = None) -> Dict[str, Any]:
+def migrate_workflow_yaml(
+    input_path: str, output_path: Optional[str] = None
+) -> Dict[str, Any]:
     """Convert a v1 workflow YAML to v2 format.
 
     Key changes:
@@ -38,7 +40,10 @@ def migrate_workflow_yaml(input_path: str, output_path: Optional[str] = None) ->
     raw = in_path.read_text()
     data = yaml.safe_load(raw)
     if not isinstance(data, dict):
-        print(f"Invalid YAML: expected top-level mapping, got {type(data).__name__}", file=sys.stderr)
+        print(
+            f"Invalid YAML: expected top-level mapping, got {type(data).__name__}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     migrated: Dict[str, Any] = {}
@@ -69,7 +74,9 @@ def migrate_workflow_yaml(input_path: str, output_path: Optional[str] = None) ->
 
     if output_path:
         out_path = Path(output_path)
-        out_path.write_text(yaml.dump(migrated, default_flow_style=False, sort_keys=False))
+        out_path.write_text(
+            yaml.dump(migrated, default_flow_style=False, sort_keys=False)
+        )
         print(f"Migrated workflow written to {output_path}")
 
     return migrated
@@ -98,7 +105,9 @@ def validate_v1_vs_v2(v1_path: str, v2_path: str) -> Dict[str, Any]:
     if v1.get("name") != v2.get("name"):
         issues.append(f"name mismatch: {v1.get('name')} vs {v2.get('name')}")
     if len(v1.get("steps", [])) != len(v2.get("steps", [])):
-        issues.append(f"step count mismatch: {len(v1.get('steps', []))} vs {len(v2.get('steps', []))}")
+        issues.append(
+            f"step count mismatch: {len(v1.get('steps', []))} vs {len(v2.get('steps', []))}"
+        )
 
     return {
         "valid": len(issues) == 0,
@@ -111,10 +120,18 @@ def validate_v1_vs_v2(v1_path: str, v2_path: str) -> Dict[str, Any]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Migrate v1 workflow YAMLs to v2 format.")
+    parser = argparse.ArgumentParser(
+        description="Migrate v1 workflow YAMLs to v2 format."
+    )
     parser.add_argument("--input", required=True, help="Input v1 workflow YAML path")
-    parser.add_argument("--output", help="Output v2 workflow YAML path (default: <input>_v2.yaml)")
-    parser.add_argument("--validate", action="store_true", help="Validate v1 workflow loads under v2 shim")
+    parser.add_argument(
+        "--output", help="Output v2 workflow YAML path (default: <input>_v2.yaml)"
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate v1 workflow loads under v2 shim",
+    )
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     args = parser.parse_args(argv)
 

@@ -48,13 +48,13 @@ class TestBehaviorTunerOptimization:
         for _ in range(5):
             tuner.record_feedback(
                 blocked=False,
-                behavior_params={"typing_speed": 0.3, "mouse_precision": 0.7}
+                behavior_params={"typing_speed": 0.3, "mouse_precision": 0.7},
             )
         # Record failed sessions with high typing speed
         for _ in range(3):
             tuner.record_feedback(
                 blocked=True,
-                behavior_params={"typing_speed": 0.9, "mouse_precision": 0.2}
+                behavior_params={"typing_speed": 0.9, "mouse_precision": 0.2},
             )
 
         optimized = tuner.get_optimized_params()
@@ -78,7 +78,7 @@ class TestBehaviorTunerOptimization:
         tuner.record_feedback(blocked=False, platform="amazon")
 
         rates = tuner.get_platform_success_rates()
-        assert rates["linkedin"] == pytest.approx(2/3)
+        assert rates["linkedin"] == pytest.approx(2 / 3)
         assert rates["amazon"] == 1.0
 
     def test_block_type_distribution(self):

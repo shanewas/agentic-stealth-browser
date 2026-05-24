@@ -10,6 +10,7 @@ Covers:
 - load_workflow from dict/YAML
 - workflow_to_dict / workflow_to_yaml_str roundtrips
 """
+
 from copy import deepcopy
 
 import pytest
@@ -19,13 +20,14 @@ from workflows.schema import (
     validate_workflow,
     workflow_to_dict,
     workflow_to_yaml_str,
-    STEP_SCHEMAS,
 )
 
 
 class TestWorkflowValidation:
     def test_empty_name(self):
-        wf = load_workflow({"name": "", "steps": [{"type": "navigate", "url": "https://example.com"}]})
+        wf = load_workflow(
+            {"name": "", "steps": [{"type": "navigate", "url": "https://example.com"}]}
+        )
         result = validate_workflow(wf)
         assert result.valid is False
         assert any("name" in e for e in result.errors)
@@ -43,7 +45,14 @@ class TestWorkflowValidation:
         assert any("unknown step type" in e for e in result.errors)
 
     def test_unknown_field_in_step(self):
-        wf = load_workflow({"name": "test", "steps": [{"type": "navigate", "url": "https://example.com", "bogus": 123}]})
+        wf = load_workflow(
+            {
+                "name": "test",
+                "steps": [
+                    {"type": "navigate", "url": "https://example.com", "bogus": 123}
+                ],
+            }
+        )
         result = validate_workflow(wf)
         assert result.valid is False
         assert any("unknown field" in e.lower() for e in result.errors)
@@ -76,7 +85,9 @@ class TestMissingRequiredFields:
         assert any("value" in e for e in result.errors)
 
     def test_select_missing_params(self):
-        wf = load_workflow({"name": "t", "steps": [{"type": "select", "value": "opt1"}]})
+        wf = load_workflow(
+            {"name": "t", "steps": [{"type": "select", "value": "opt1"}]}
+        )
         result = validate_workflow(wf)
         assert result.valid is False
         assert any("selector" in e for e in result.errors)
@@ -114,7 +125,13 @@ class TestAllStepTypesValid:
         ("scroll", {}),
         ("screenshot", {}),
         ("execute_js", {"code": "console.log('hi')"}),
-        ("conditional", {"condition": "true", "steps": [{"type": "navigate", "url": "https://example.com"}]}),
+        (
+            "conditional",
+            {
+                "condition": "true",
+                "steps": [{"type": "navigate", "url": "https://example.com"}],
+            },
+        ),
         ("run_workflow", {"path": "some/path.yaml"}),
     ]
 
@@ -145,7 +162,12 @@ class TestWorkflowRoundtrip:
             "name": "test",
             "steps": [{"type": "navigate", "url": "{{base}}"}],
             "variables": {
-                "base": {"type": "string", "default": "https://example.com", "required": True, "description": "base url"},
+                "base": {
+                    "type": "string",
+                    "default": "https://example.com",
+                    "required": True,
+                    "description": "base url",
+                },
             },
         }
         wf = load_workflow(deepcopy(data))
@@ -157,14 +179,23 @@ class TestWorkflowRoundtrip:
 
 class TestLoadWorkflow:
     def test_load_from_dict(self):
-        wf = load_workflow({"name": "t", "steps": [{"type": "navigate", "url": "https://x.com"}]})
+        wf = load_workflow(
+            {"name": "t", "steps": [{"type": "navigate", "url": "https://x.com"}]}
+        )
         assert wf.name == "t"
         assert len(wf.steps) == 1
 
     def test_load_preserves_optional_params(self):
         data = {
             "name": "t",
-            "steps": [{"type": "navigate", "url": "https://x.com", "timeout": 30000, "wait_until": "load"}],
+            "steps": [
+                {
+                    "type": "navigate",
+                    "url": "https://x.com",
+                    "timeout": 30000,
+                    "wait_until": "load",
+                }
+            ],
         }
         wf = load_workflow(data)
         assert wf.steps[0].params["timeout"] == 30000
@@ -175,7 +206,9 @@ class TestLoadWorkflow:
             "name": "t",
             "description": "desc",
             "steps": [{"type": "navigate", "url": "https://x.com"}],
-            "variables": {"v": {"type": "string", "required": False, "description": ""}},
+            "variables": {
+                "v": {"type": "string", "required": False, "description": ""}
+            },
         }
         wf = load_workflow(data)
         assert wf.description == "desc"

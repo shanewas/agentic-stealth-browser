@@ -33,6 +33,7 @@ class DeviceProfile:
     Minimal solid set of attributes used by launch, stealth injection,
     and behavior simulation. Frozen for safety when passed around.
     """
+
     name: str = "win_chrome_124_desktop"
     viewport: Dict[str, int] = field(
         default_factory=lambda: {"width": 1366, "height": 768}
@@ -50,10 +51,14 @@ class DeviceProfile:
     # screen profile for #124 viewport variety + #198 screen/orient/DPR consistency (per-persona stable)
     screen: Dict[str, Any] = field(
         default_factory=lambda: {
-            "width": 1920, "height": 1080,
-            "availWidth": 1920, "availHeight": 1055,
-            "colorDepth": 24, "pixelDepth": 24,
-            "devicePixelRatio": 1.0, "orientation": "landscape-primary"
+            "width": 1920,
+            "height": 1080,
+            "availWidth": 1920,
+            "availHeight": 1055,
+            "colorDepth": 24,
+            "pixelDepth": 24,
+            "devicePixelRatio": 1.0,
+            "orientation": "landscape-primary",
         }
     )
 
@@ -78,10 +83,14 @@ class DeviceProfile:
         base = getattr(self, "screen", None)
         if base is None:
             base = {
-                "width": 1920, "height": 1080,
-                "availWidth": 1920, "availHeight": 1055,
-                "colorDepth": 24, "pixelDepth": 24,
-                "devicePixelRatio": 1.0, "orientation": "landscape-primary"
+                "width": 1920,
+                "height": 1080,
+                "availWidth": 1920,
+                "availHeight": 1055,
+                "colorDepth": 24,
+                "pixelDepth": 24,
+                "devicePixelRatio": 1.0,
+                "orientation": "landscape-primary",
             }
         return base
 
@@ -97,6 +106,7 @@ class Persona:
     Wraps a DeviceProfile + persona-level overrides and metadata.
     This is the main object operators and higher layers will hold per session/account.
     """
+
     name: str
     device: DeviceProfile = field(default_factory=DeviceProfile.default)
     description: str = ""
@@ -149,10 +159,14 @@ DEFAULT_PERSONA = Persona(
         device_memory=8,
         power_level="medium",
         screen={
-            "width": 1920, "height": 1080,
-            "availWidth": 1920, "availHeight": 1055,
-            "colorDepth": 24, "pixelDepth": 24,
-            "devicePixelRatio": 1.0, "orientation": "landscape-primary"
+            "width": 1920,
+            "height": 1080,
+            "availWidth": 1920,
+            "availHeight": 1055,
+            "colorDepth": 24,
+            "pixelDepth": 24,
+            "devicePixelRatio": 1.0,
+            "orientation": "landscape-primary",
         },
     ),
     description="Baseline professional US desktop persona (2026 stealth default).",
@@ -176,10 +190,14 @@ EU_PROFESSIONAL = Persona(
         device_memory=8,
         power_level="low",
         screen={
-            "width": 1440, "height": 900,
-            "availWidth": 1440, "availHeight": 860,
-            "colorDepth": 24, "pixelDepth": 24,
-            "devicePixelRatio": 1.25, "orientation": "landscape-primary"
+            "width": 1440,
+            "height": 900,
+            "availWidth": 1440,
+            "availHeight": 860,
+            "colorDepth": 24,
+            "pixelDepth": 24,
+            "devicePixelRatio": 1.25,
+            "orientation": "landscape-primary",
         },
     ),
     description="European professional desktop (en-GB + London TZ).",

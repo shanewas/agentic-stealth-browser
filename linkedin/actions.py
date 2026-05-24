@@ -40,7 +40,9 @@ class LinkedInActions:
                 await self.human.scroll_naturally(random.randint(50, 150))
             elapsed += 1
 
-    async def send_connection_request(self, username: str, message: Optional[str] = None):
+    async def send_connection_request(
+        self, username: str, message: Optional[str] = None
+    ):
         """Send a connection request naturally."""
         await self.view_profile(username, duration_seconds=3.0)
 
@@ -104,7 +106,9 @@ class LinkedInActions:
             # Next page
             if page_num < max_pages - 1:
                 try:
-                    next_btn = await self.page.query_selector("button[aria-label*='Next']")
+                    next_btn = await self.page.query_selector(
+                        "button[aria-label*='Next']"
+                    )
                     if next_btn:
                         await self.human.human_click("button[aria-label*='Next']")
                         await self.human.think(2000, 4000)
@@ -115,7 +119,9 @@ class LinkedInActions:
 
     async def post_update(self, text: str):
         """Post a LinkedIn update naturally."""
-        await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+        await self.page.goto(
+            "https://www.linkedin.com/feed/", wait_until="domcontentloaded"
+        )
         await self.human.think(1000, 2000)
 
         # Click start post

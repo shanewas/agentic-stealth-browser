@@ -19,6 +19,7 @@ class TestMultiAccountStress:
     def test_concurrent_account_health_tracking(self):
         """Multiple accounts should track health independently."""
         from core.account_health import AccountHealth
+
         accounts = []
         for i in range(10):
             health = AccountHealth(f"account_{i}")
@@ -38,6 +39,7 @@ class TestMultiAccountStress:
     def test_concurrent_proxy_health_tracking(self):
         """Multiple proxy sessions should track health independently."""
         from proxy.proxy_manager import ProxyManager
+
         manager = ProxyManager()
 
         # Record results for multiple sessions
@@ -59,10 +61,14 @@ class TestRateLimiterStress:
     def test_many_domains_rate_limiting(self):
         """Rate limiter should handle many domains without degradation."""
         from production.rate_limiter import DomainRateLimiter, RateLimitConfig
+
         lim = DomainRateLimiter()
 
         for i in range(50):
-            lim.set_limit(f"domain_{i}.com", RateLimitConfig(requests_per_minute=100, cooldown_seconds=0))
+            lim.set_limit(
+                f"domain_{i}.com",
+                RateLimitConfig(requests_per_minute=100, cooldown_seconds=0),
+            )
 
         async def _run():
             for i in range(50):
@@ -78,8 +84,11 @@ class TestRateLimiterStress:
     def test_rapid_requests_same_domain(self):
         """Rapid requests to same domain should trigger rate limiting."""
         from production.rate_limiter import DomainRateLimiter, RateLimitConfig
+
         lim = DomainRateLimiter()
-        lim.set_limit("rapid.test", RateLimitConfig(requests_per_minute=100, cooldown_seconds=0))
+        lim.set_limit(
+            "rapid.test", RateLimitConfig(requests_per_minute=100, cooldown_seconds=0)
+        )
         lim.request_times["rapid.test"].clear()
         lim.last_request.pop("rapid.test", None)
 
@@ -103,6 +112,7 @@ class TestAccountWarmingStress:
     def test_multiple_accounts_warming(self):
         """Multiple accounts should warm independently."""
         from core.account_warming import AccountWarmer
+
         warmers = []
         for i in range(5):
             warmer = AccountWarmer(f"account_{i}", data_dir="/tmp/test_warming_stress")
@@ -122,6 +132,7 @@ class TestPersonaRotatorStress:
     def test_multiple_accounts_rotating(self):
         """Multiple accounts should rotate personas independently."""
         from behavior.persona_rotator import PersonaRotator
+
         rotators = []
         for i in range(5):
             rotator = PersonaRotator(f"account_{i}")
@@ -144,6 +155,7 @@ class TestSessionCheckpointStress:
     def test_multiple_checkpoints_same_account(self, tmp_path):
         """Multiple checkpoints for same account should not conflict."""
         from core.session_checkpoint import SessionManager
+
         manager = SessionManager(data_dir=str(tmp_path))
 
         for i in range(10):

@@ -19,6 +19,7 @@ Usage examples:
 
 Also supports smoke, metrics, debug-report for operators.
 """
+
 import argparse
 import asyncio
 import json
@@ -57,7 +58,9 @@ def _print_json(obj: Dict[str, Any], pretty: bool = True) -> None:
 async def _cmd_health(args: argparse.Namespace) -> int:
     """Launch (optionally) and print rich health/status snapshot. Core of #281."""
     print("[stealth-browser] Health/Status command (P2/P3 DX observability)")
-    print(f"  preset={args.preset} region={args.region} headless={args.headless} debug={args.debug}")
+    print(
+        f"  preset={args.preset} region={args.region} headless={args.headless} debug={args.debug}"
+    )
 
     try:
         browser = AgentBrowser(
@@ -73,23 +76,31 @@ async def _cmd_health(args: argparse.Namespace) -> int:
         )
 
         health = await browser.get_health_status()
-        safe_health = AuditLogger._redact_sensitive(health) if isinstance(health, dict) else health
+        safe_health = (
+            AuditLogger._redact_sensitive(health)
+            if isinstance(health, dict)
+            else health
+        )
         _print_json(safe_health)
 
         # Also surface proxy/account/block highlights for quick human reading
         print("\n=== QUICK OBSERVABILITY SUMMARY ===")
         print(f"  Launched: {safe_health.get('launched')}")
         print(f"  Preset: {safe_health.get('preset')}")
-        print(f"  Region / TLS: {safe_health.get('region')} / {safe_health.get('tls_profile', {}).get('name')}")
+        print(
+            f"  Region / TLS: {safe_health.get('region')} / {safe_health.get('tls_profile', {}).get('name')}"
+        )
         print(f"  Proxy: {safe_health.get('proxy')}")
         print(f"  Account State: {safe_health.get('account_state')}")
         print(f"  Block Rate: {safe_health.get('block_rate_pct')}%")
         print(f"  Cookies: {safe_health.get('cookies', {}).get('status')}")
-        print(f"  Recovery: {safe_health.get('recovery', {}).get('last_block', 'none')}")
+        print(
+            f"  Recovery: {safe_health.get('recovery', {}).get('last_block', 'none')}"
+        )
         print("====================================\n")
 
         if args.debug:
-            dbg = await browser.debug_report(print_report=True)
+            await browser.debug_report(print_report=True)
             print("Debug report included above.")
 
         await browser.close()
@@ -120,7 +131,9 @@ async def _cmd_replay(args: argparse.Namespace) -> int:
     """#253 replay from audit logs (lightweight)."""
     log = AuditLogger(args.session or "default")
     seq = log.replay_sequence(getattr(args, "limit", 15))
-    safe_seq = AuditLogger._redact_sensitive({"session": log.session_name, "replay_sequence": seq, "count": len(seq)})
+    safe_seq = AuditLogger._redact_sensitive(
+        {"session": log.session_name, "replay_sequence": seq, "count": len(seq)}
+    )
     _print_json(safe_seq)
     return 0
 
@@ -164,13 +177,16 @@ async def _cmd_scrape(args: argparse.Namespace) -> int:
 
             # Output content
             if args.max_length and len(content) > args.max_length:
-                content = content[:args.max_length] + "\n... [truncated]"
+                content = content[: args.max_length] + "\n... [truncated]"
 
             print(content)
 
             # Print summary to stderr so it doesn't mix with content
             health = await browser.get_health_status()
-            print(f"\n[stealth-browser] Scrape complete. Block rate: {health.get('block_rate_pct', 0)}%", file=sys.stderr)
+            print(
+                f"\n[stealth-browser] Scrape complete. Block rate: {health.get('block_rate_pct', 0)}%",
+                file=sys.stderr,
+            )
 
         return 0
 
@@ -182,18 +198,37 @@ async def _cmd_scrape(args: argparse.Namespace) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="stealth-browser",
-        description="Agentic Stealth Browser Production CLI - DX & Observability (#281)"
+        description="Agentic Stealth Browser Production CLI - DX & Observability (#281)",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # health (primary high-value DX command)
-    h = subparsers.add_parser("health", help="Rich health snapshot: proxy usage, block rate, account state, TLS/preset")
-    h.add_argument("--preset", default=None, choices=[None] + list_presets(), help="Apply 2026 platform preset")
-    h.add_argument("--region", default="global", help="TLS region (us/eu/japan/korea/global)")
+    h = subparsers.add_parser(
+        "health",
+        help="Rich health snapshot: proxy usage, block rate, account state, TLS/preset",
+    )
+    h.add_argument(
+        "--preset",
+        default=None,
+        choices=[None] + list_presets(),
+        help="Apply 2026 platform preset",
+    )
+    h.add_argument(
+        "--region", default="global", help="TLS region (us/eu/japan/korea/global)"
+    )
     h.add_argument("--session", default=None, help="Named session (persistent cookies)")
-    h.add_argument("--headless", action="store_true", default=True, help="Run headless (default)")
-    h.add_argument("--no-headless", dest="headless", action="store_false", help="Run headed for visual debug")
-    h.add_argument("--debug", action="store_true", help="Enable debug mode + fingerprint dump")
+    h.add_argument(
+        "--headless", action="store_true", default=True, help="Run headless (default)"
+    )
+    h.add_argument(
+        "--no-headless",
+        dest="headless",
+        action="store_false",
+        help="Run headed for visual debug",
+    )
+    h.add_argument(
+        "--debug", action="store_true", help="Enable debug mode + fingerprint dump"
+    )
     h.add_argument("--json", action="store_true", help="Raw JSON only output")
     h.set_defaults(func=_cmd_health)
 
@@ -205,26 +240,52 @@ def main() -> None:
     s.set_defaults(func=_cmd_status)
 
     # list-presets
-    lp = subparsers.add_parser("list-presets", help="List available platform presets (#288)")
+    lp = subparsers.add_parser(
+        "list-presets", help="List available platform presets (#288)"
+    )
     lp.set_defaults(func=_cmd_list_presets)
 
-    rp = subparsers.add_parser("replay", help="Replay/inspect actions from audit logs (#253 light)")
+    rp = subparsers.add_parser(
+        "replay", help="Replay/inspect actions from audit logs (#253 light)"
+    )
     rp.add_argument("--session", default="default")
     rp.add_argument("--limit", type=int, default=15)
     rp.set_defaults(func=_cmd_replay)
 
     # future: metrics, smoke, debug-report, explain etc. (scaffolded)
     m = subparsers.add_parser("metrics", help="Show aggregated metrics (stub)")
-    m.set_defaults(func=lambda a: (print("Metrics: use AgentOrchestrator.get_stats() in code"), 0))
+    m.set_defaults(
+        func=lambda a: (print("Metrics: use AgentOrchestrator.get_stats() in code"), 0)
+    )
 
     # #173: One-liner stealth scrape
-    sc = subparsers.add_parser("scrape", help="One-liner stealth scrape from terminal (#173)")
+    sc = subparsers.add_parser(
+        "scrape", help="One-liner stealth scrape from terminal (#173)"
+    )
     sc.add_argument("url", help="URL to scrape")
-    sc.add_argument("--extract", choices=["text", "html", "title"], default="text", help="Content extraction type")
-    sc.add_argument("--platform", default=None, help="Platform for recovery tuning (e.g. linkedin, amazon)")
-    sc.add_argument("--preset", default=None, choices=[None] + list_presets(), help="Apply platform preset")
-    sc.add_argument("--region", default="global", help="TLS region (us/eu/japan/korea/global)")
-    sc.add_argument("--max-length", type=int, default=None, help="Truncate output to N characters")
+    sc.add_argument(
+        "--extract",
+        choices=["text", "html", "title"],
+        default="text",
+        help="Content extraction type",
+    )
+    sc.add_argument(
+        "--platform",
+        default=None,
+        help="Platform for recovery tuning (e.g. linkedin, amazon)",
+    )
+    sc.add_argument(
+        "--preset",
+        default=None,
+        choices=[None] + list_presets(),
+        help="Apply platform preset",
+    )
+    sc.add_argument(
+        "--region", default="global", help="TLS region (us/eu/japan/korea/global)"
+    )
+    sc.add_argument(
+        "--max-length", type=int, default=None, help="Truncate output to N characters"
+    )
     sc.set_defaults(func=_cmd_scrape)
 
     args = parser.parse_args()

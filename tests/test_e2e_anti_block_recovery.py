@@ -83,7 +83,9 @@ async def _run_e2e_anti_block_recovery():
 
     try:
         async with browser:
-            assert browser.recovery is not None, "AntiBlockOrchestrator must be wired in launch()"
+            assert browser.recovery is not None, (
+                "AntiBlockOrchestrator must be wired in launch()"
+            )
             print("[OK] AgentBrowser launched with recovery orchestrator")
 
             # Instrument the real orchestrator's recover() so we can prove
@@ -91,12 +93,16 @@ async def _run_e2e_anti_block_recovery():
             original_recover = browser.recovery.recover
 
             async def instrumented_recover(ctx):
-                real_site_recoveries.append({
-                    "attempt": ctx.attempt,
-                    "block_type": ctx.block_type.value if ctx.block_type else "none",
-                    "platform": ctx.platform,
-                    "url": ctx.url[:60] + "..." if len(ctx.url) > 60 else ctx.url,
-                })
+                real_site_recoveries.append(
+                    {
+                        "attempt": ctx.attempt,
+                        "block_type": ctx.block_type.value
+                        if ctx.block_type
+                        else "none",
+                        "platform": ctx.platform,
+                        "url": ctx.url[:60] + "..." if len(ctx.url) > 60 else ctx.url,
+                    }
+                )
                 return await original_recover(ctx)
 
             browser.recovery.recover = instrumented_recover
@@ -106,8 +112,12 @@ async def _run_e2e_anti_block_recovery():
             platform = "cloudflare"
 
             print(f"\n[1/2] REAL SITE: safe_goto → {protected_url}")
-            print("      (This path exercises: _navigate → detect_block(page.content) → recover → retry)")
-            print("      Expected: likely triggers CAPTCHA/Cloudflare block detection + backoffs")
+            print(
+                "      (This path exercises: _navigate → detect_block(page.content) → recover → retry)"
+            )
+            print(
+                "      Expected: likely triggers CAPTCHA/Cloudflare block detection + backoffs"
+            )
 
             success = await browser.safe_goto(
                 protected_url,
@@ -116,24 +126,38 @@ async def _run_e2e_anti_block_recovery():
             )
 
             print(f"      safe_goto returned: {success}")
-            print(f"      Recoveries recorded from real site: {len(real_site_recoveries)}")
+            print(
+                f"      Recoveries recorded from real site: {len(real_site_recoveries)}"
+            )
             for r in real_site_recoveries:
-                print(f"        • attempt {r['attempt']}: {r['block_type']} on {platform}")
+                print(
+                    f"        • attempt {r['attempt']}: {r['block_type']} on {platform}"
+                )
 
             if real_site_recoveries:
-                print("      ✓ Real protected site triggered the recovery machinery (key for #256)")
+                print(
+                    "      ✓ Real protected site triggered the recovery machinery (key for #256)"
+                )
             else:
-                print("      (No recovery needed this run — stealth may have passed initial check)")
+                print(
+                    "      (No recovery needed this run — stealth may have passed initial check)"
+                )
 
             # ========== DIRECT ORCHESTRATOR SIMULATION (deterministic full coverage) ==========
-            print("\n[2/2] DIRECT ORCHESTRATOR: controlled simulation of block scenarios")
-            print("      (Guarantees coverage of transient recovery + max-retry exhaustion)")
+            print(
+                "\n[2/2] DIRECT ORCHESTRATOR: controlled simulation of block scenarios"
+            )
+            print(
+                "      (Guarantees coverage of transient recovery + max-retry exhaustion)"
+            )
 
             sim_orch = AntiBlockOrchestrator(
                 browser=None,
                 session_manager=None,
                 proxy_manager=None,
-                page_getter=lambda: browser.page,  # still valid page for any content checks
+                page_getter=lambda: (
+                    browser.page
+                ),  # still valid page for any content checks
             )
 
             async def simulated_flaky_operation(**kwargs):
@@ -147,7 +171,9 @@ async def _run_e2e_anti_block_recovery():
                 if n == 2:
                     # Second attempt: slow response (will be treated as soft rate limit inside detect)
                     # We raise a timing-related error to force another recovery round
-                    raise Exception("timeout or very slow response from protected endpoint")
+                    raise Exception(
+                        "timeout or very slow response from protected endpoint"
+                    )
                 # Third attempt succeeds
                 return "SUCCESS_AFTER_RECOVERY"
 
@@ -158,10 +184,14 @@ async def _run_e2e_anti_block_recovery():
                     url="https://example.com/protected-test",
                     max_retries=3,
                 )
-                print(f"      Direct sim result: {result} after {len(direct_sim_calls)} attempts")
+                print(
+                    f"      Direct sim result: {result} after {len(direct_sim_calls)} attempts"
+                )
             except RuntimeError as rte:
                 # Expected if we wanted persistent failure; here we succeed on 3rd, so shouldn't hit
-                print(f"      Direct sim exhausted (unexpected for this scenario): {rte}")
+                print(
+                    f"      Direct sim exhausted (unexpected for this scenario): {rte}"
+                )
 
             print(f"      Direct simulation calls made: {direct_sim_calls}")
 
@@ -169,10 +199,14 @@ async def _run_e2e_anti_block_recovery():
             print("\n" + "-" * 70)
             print("VERIFICATION")
             print("-" * 70)
-            print("• Real site (nowsecure.nl) safe_goto completed without unhandled crash: yes")
+            print(
+                "• Real site (nowsecure.nl) safe_goto completed without unhandled crash: yes"
+            )
             print(f"• Real site recovery invocations: {len(real_site_recoveries)}")
             print(f"• Direct orchestrator simulation calls: {len(direct_sim_calls)}")
-            print(f"• Orchestrator still healthy after test: {browser.recovery is not None}")
+            print(
+                f"• Orchestrator still healthy after test: {browser.recovery is not None}"
+            )
             print("• Browser context manager cleanup will run automatically: yes")
 
             # The test is considered successful if we reached here:
@@ -180,9 +214,13 @@ async def _run_e2e_anti_block_recovery():
             # - the execute_with_recovery and recover paths were demonstrably exercised
             #   either by the live site or (guaranteed) by the simulation
             if len(direct_sim_calls) >= 2:
-                print("\n✓✓✓ FULL ANTI-BLOCK RECOVERY PATHS EXERCISED (real + simulated) ✓✓✓")
+                print(
+                    "\n✓✓✓ FULL ANTI-BLOCK RECOVERY PATHS EXERCISED (real + simulated) ✓✓✓"
+                )
             else:
-                print("\n✓ E2E integration test completed (recovery exercised via live site path)")
+                print(
+                    "\n✓ E2E integration test completed (recovery exercised via live site path)"
+                )
 
             print("\nThis test satisfies the core requirement of #256.")
 
@@ -190,11 +228,16 @@ async def _run_e2e_anti_block_recovery():
         # We still want the test to surface real bugs, but allow expected exhaustion
         # from live protected sites (they often require JS captcha solving which we don't do).
         if "Max retries exceeded" in str(exc):
-            print(f"\n[INFO] Live site exhausted retries (expected for unsolved challenge sites): {exc}")
-            print("       Recovery paths were still fully exercised — test goal achieved.")
+            print(
+                f"\n[INFO] Live site exhausted retries (expected for unsolved challenge sites): {exc}"
+            )
+            print(
+                "       Recovery paths were still fully exercised — test goal achieved."
+            )
         else:
             print(f"\n[ERROR] Unexpected failure during E2E recovery test: {exc}")
             import traceback
+
             traceback.print_exc()
             raise  # re-raise real bugs
 
@@ -214,7 +257,9 @@ if __name__ == "__main__":
         print("    RUN_E2E_ANTI_BLOCK=1 python tests/test_e2e_anti_block_recovery.py")
         print("")
         print("Via pytest (and to see output):")
-        print("    RUN_E2E_ANTI_BLOCK=1 python -m pytest tests/test_e2e_anti_block_recovery.py -q -s")
+        print(
+            "    RUN_E2E_ANTI_BLOCK=1 python -m pytest tests/test_e2e_anti_block_recovery.py -q -s"
+        )
         print("")
         print("It is intentionally opt-in so that normal CI / `pytest` runs")
         print("remain fast, deterministic, and do not generate load on")

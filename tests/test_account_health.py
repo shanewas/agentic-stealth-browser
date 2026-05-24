@@ -49,7 +49,11 @@ class TestAccountHealthBasic:
         for _ in range(5):
             health.record_event("block_detected")
 
-        assert health.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL)
+        assert health.risk_level in (
+            RiskLevel.MEDIUM,
+            RiskLevel.HIGH,
+            RiskLevel.CRITICAL,
+        )
 
     def test_reset_restores_health(self):
         health = AccountHealth("test_account")
@@ -224,7 +228,11 @@ class TestAccountHealthProperties:
         for _ in range(3):
             health.record_event("rate_limit_hit")
         # Score drops significantly with 3 events
-        assert health.risk_level in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL)
+        assert health.risk_level in (
+            RiskLevel.MEDIUM,
+            RiskLevel.HIGH,
+            RiskLevel.CRITICAL,
+        )
 
         # Add more events to reach CRITICAL
         for _ in range(10):

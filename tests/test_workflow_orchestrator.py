@@ -1,7 +1,6 @@
 """Tests for workflow orchestrator v1.3.0."""
 
 import asyncio
-import json
 import os
 import tempfile
 import time
@@ -10,7 +9,6 @@ import pytest
 
 from production.workflow_orchestrator import (
     QueueJob,
-    RecurringJob,
     WorkflowOrchestrator,
     OrchestratorStatus,
 )
@@ -33,6 +31,7 @@ def persist_orchestrator():
 
 
 # ---- Queue manager tests ----
+
 
 @pytest.mark.asyncio
 class TestEnqueue:
@@ -286,7 +285,9 @@ class TestPersistence:
         assert persist_orchestrator.status().queue_size == 1
 
     async def test_checkpoint_save_load(self, orchestrator):
-        await orchestrator.save_checkpoint("job-1", {"last_url": "https://example.com", "step": 5})
+        await orchestrator.save_checkpoint(
+            "job-1", {"last_url": "https://example.com", "step": 5}
+        )
         checkpoint = orchestrator.load_checkpoint("job-1")
         assert checkpoint is not None
         assert checkpoint["variables"]["last_url"] == "https://example.com"

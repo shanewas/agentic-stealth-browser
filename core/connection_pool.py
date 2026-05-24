@@ -88,7 +88,9 @@ class ConnectionPool:
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
         total_reuses = sum(ctx.get("reuse_count", 0) for ctx in self._contexts.values())
-        total_navigations = sum(ctx.get("navigation_count", 0) for ctx in self._contexts.values())
+        total_navigations = sum(
+            ctx.get("navigation_count", 0) for ctx in self._contexts.values()
+        )
         return {
             "active_contexts": len(self._contexts),
             "max_contexts": self.max_contexts,
@@ -112,4 +114,6 @@ class ConnectionPool:
         """Record a navigation for tracking."""
         domain = self.get_domain(url)
         if domain in self._contexts:
-            self._contexts[domain]["navigation_count"] = self._contexts[domain].get("navigation_count", 0) + 1
+            self._contexts[domain]["navigation_count"] = (
+                self._contexts[domain].get("navigation_count", 0) + 1
+            )

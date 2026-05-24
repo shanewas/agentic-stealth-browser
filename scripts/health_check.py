@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -112,7 +111,8 @@ def check_bridge() -> Dict[str, Any]:
         try:
             subprocess.run(
                 ["systemctl", "--user", "is-active", "stealth-rbb"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             result["service_configured"] = True
             result["status"] = "service_found"
@@ -120,7 +120,9 @@ def check_bridge() -> Dict[str, Any]:
             pass
 
         system_service = Path("/etc/systemd/system/stealth-rbb.service")
-        user_service = Path.home() / ".config" / "systemd" / "user" / "stealth-rbb.service"
+        user_service = (
+            Path.home() / ".config" / "systemd" / "user" / "stealth-rbb.service"
+        )
         if system_service.exists() or user_service.exists():
             result["service_configured"] = True
             result["status"] = "service_found"
@@ -129,7 +131,9 @@ def check_bridge() -> Dict[str, Any]:
             try:
                 cp = subprocess.run(
                     ["systemctl", "--no-pager", "--user", "status", "stealth-rbb"],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if "active (running)" in cp.stdout or "active (running)" in cp.stderr:
                     result["status"] = "running"
@@ -139,10 +143,14 @@ def check_bridge() -> Dict[str, Any]:
                 result["status"] = "check_failed"
 
     elif sys.platform == "win32":
-        bridge_dir = Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "StealthRBB"
+        bridge_dir = (
+            Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "StealthRBB"
+        )
         if bridge_dir.exists():
             result["service_configured"] = True
-            result["status"] = "installed" if result["service_configured"] else "not_configured"
+            result["status"] = (
+                "installed" if result["service_configured"] else "not_configured"
+            )
 
     return result
 
@@ -183,7 +191,9 @@ def check_memory() -> Dict[str, Any]:
 
             total = round(_parse_kb("MemTotal"), 2)
             available = round(_parse_kb("MemAvailable"), 2)
-            used_percent = round(((total - available) / total) * 100, 1) if total > 0 else 0.0
+            used_percent = (
+                round(((total - available) / total) * 100, 1) if total > 0 else 0.0
+            )
             return {
                 "total_gb": total,
                 "available_gb": available,
@@ -224,9 +234,7 @@ def main() -> None:
     if not checks["workflow_library"]["accessible"]:
         issues.append("Workflow library not accessible")
     if checks["workflow_library"]["invalid"] > 0:
-        issues.append(
-            f"{checks['workflow_library']['invalid']} invalid workflow(s)"
-        )
+        issues.append(f"{checks['workflow_library']['invalid']} invalid workflow(s)")
     if checks["disk"].get("warning"):
         issues.append("Disk space low")
     if checks["memory"].get("warning"):

@@ -26,6 +26,7 @@ class RiskLevel(Enum):
 @dataclass
 class RiskEvent:
     """A recorded risk event."""
+
     event_type: str
     severity: float  # 0.0-1.0
     timestamp: float
@@ -36,6 +37,7 @@ class RiskEvent:
 @dataclass
 class HealthState:
     """Current health state of an account."""
+
     score: float = 1.0  # 0.0-1.0
     risk_level: RiskLevel = RiskLevel.LOW
     cooling_off: bool = False
@@ -114,8 +116,13 @@ class AccountHealth:
             return 0.0
         return max(0.0, self._state.cooling_off_until - time.time())
 
-    def record_event(self, event_type: str, severity: Optional[float] = None,
-                     details: Optional[Dict[str, Any]] = None, decay_hours: float = 24.0):
+    def record_event(
+        self,
+        event_type: str,
+        severity: Optional[float] = None,
+        details: Optional[Dict[str, Any]] = None,
+        decay_hours: float = 24.0,
+    ):
         """Record a risk event."""
         if severity is None:
             severity = self.RISK_EVENTS.get(event_type, 0.1)
@@ -156,10 +163,12 @@ class AccountHealth:
         # Duration increases with repeated cooling offs
         duration = min(
             self.MAX_COOLING_DURATION,
-            self.BASE_COOLING_DURATION * (1.5 ** (self._cooling_off_count - 1))
+            self.BASE_COOLING_DURATION * (1.5 ** (self._cooling_off_count - 1)),
         )
         self._state.cooling_off_until = time.time() + duration
-        self._log(f"Cooling off started for {duration:.0f}s (count={self._cooling_off_count})")
+        self._log(
+            f"Cooling off started for {duration:.0f}s (count={self._cooling_off_count})"
+        )
 
     def cooling_off_duration(self) -> float:
         """Get recommended cooling off duration in seconds."""
@@ -227,7 +236,9 @@ class AccountHealth:
         # Recovery during cooling off
         if self._state.cooling_off and not self.is_cooling_off:
             # Just finished cooling off, apply recovery
-            recovery = self.RECOVERY_RATE * (self._state.cooling_off_until - (now - 300)) / 60
+            recovery = (
+                self.RECOVERY_RATE * (self._state.cooling_off_until - (now - 300)) / 60
+            )
             raw_score = min(1.0, raw_score + max(0, recovery))
 
         # Gradual passive recovery (0.001 per minute since last event)
@@ -258,11 +269,17 @@ class AccountHealth:
         if self._logger and hasattr(self._logger, "log_action"):
             self._logger.log_action(
                 "account_health",
-                {"account_id": self.account_id, "message": msg, "score": self._state.score},
-                level="info"
+                {
+                    "account_id": self.account_id,
+                    "message": msg,
+                    "score": self._state.score,
+                },
+                level="info",
             )
         else:
-            print(f"[AccountHealth:{self.account_id}] {msg} (score={self._state.score:.2f})")
+            print(
+                f"[AccountHealth:{self.account_id}] {msg} (score={self._state.score:.2f})"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize health state for checkpointing."""
@@ -283,11 +300,13 @@ class AccountHealth:
                     "decay_hours": e.decay_hours,
                 }
                 for e in self._events[-50:]  # Keep last 50 events
-            ]
+            ],
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], logger: Optional[Any] = None) -> "AccountHealth":
+    def from_dict(
+        cls, data: Dict[str, Any], logger: Optional[Any] = None
+    ) -> "AccountHealth":
         """Deserialize health state from checkpoint."""
         health = cls(account_id=data["account_id"], logger=logger)
         health._state.score = data.get("score", 1.0)
@@ -299,11 +318,13 @@ class AccountHealth:
         health._cooling_off_count = data.get("cooling_off_count", 0)
 
         for e_data in data.get("events", []):
-            health._events.append(RiskEvent(
-                event_type=e_data["event_type"],
-                severity=e_data["severity"],
-                timestamp=e_data["timestamp"],
-                decay_hours=e_data.get("decay_hours", 24.0),
-            ))
+            health._events.append(
+                RiskEvent(
+                    event_type=e_data["event_type"],
+                    severity=e_data["severity"],
+                    timestamp=e_data["timestamp"],
+                    decay_hours=e_data.get("decay_hours", 24.0),
+                )
+            )
 
         return health

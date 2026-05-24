@@ -38,7 +38,9 @@ SERVER_VERSION = "2.0.0"
 class ToolError(Exception):
     """Tool-level execution error returned inside CallToolResult."""
 
-    def __init__(self, error_code: str, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self, error_code: str, message: str, details: Optional[Dict[str, Any]] = None
+    ):
         super().__init__(message)
         self.error_code = error_code
         self.message = message
@@ -142,17 +144,27 @@ class StealthMCPServer:
         self._agent_browser_cls = AgentBrowser
         return self._agent_browser_cls
 
-    def _jsonrpc_result(self, request_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _jsonrpc_result(
+        self, request_id: Any, result: Dict[str, Any]
+    ) -> Dict[str, Any]:
         return {"jsonrpc": JSONRPC_VERSION, "id": request_id, "result": result}
 
-    def _jsonrpc_error(self, request_id: Any, code: int, message: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _jsonrpc_error(
+        self,
+        request_id: Any,
+        code: int,
+        message: str,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         return {
             "jsonrpc": JSONRPC_VERSION,
             "id": request_id,
             "error": {"code": code, "message": message, "data": data or {}},
         }
 
-    def _tool_error_payload(self, error_code: str, message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _tool_error_payload(
+        self, error_code: str, message: str, details: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "status": "error",
             "error_code": error_code,
@@ -165,7 +177,9 @@ class StealthMCPServer:
             payload["status"] = "success"
         return payload
 
-    def _tool_result(self, payload: Dict[str, Any], is_error: bool = False) -> Dict[str, Any]:
+    def _tool_result(
+        self, payload: Dict[str, Any], is_error: bool = False
+    ) -> Dict[str, Any]:
         redacted = AuditLogger._redact_sensitive(payload)
         text = json.dumps(redacted, indent=2, default=str)
         result: Dict[str, Any] = {
@@ -194,10 +208,17 @@ class StealthMCPServer:
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "session_name": {"type": "string", "description": "Session identifier."},
+                        "session_name": {
+                            "type": "string",
+                            "description": "Session identifier.",
+                        },
                         "headless": {"type": "boolean", "default": True},
                         "debug": {"type": "boolean", "default": False},
-                        "debug_cdp": {"type": "boolean", "default": False, "description": "Opt-in CDP remote debugging (localhost-only). Use stealth_get_cdp_endpoint after launch to retrieve WS URL + metadata. Disabled returns explicit status."},
+                        "debug_cdp": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Opt-in CDP remote debugging (localhost-only). Use stealth_get_cdp_endpoint after launch to retrieve WS URL + metadata. Disabled returns explicit status.",
+                        },
                         "preset": {"type": "string"},
                         "region": {"type": "string"},
                         "anonymous": {"type": "boolean", "default": True},
@@ -325,9 +346,20 @@ class StealthMCPServer:
                     "type": "object",
                     "properties": {
                         "session_name": {"type": "string"},
-                        "limit": {"type": "integer", "default": 30, "minimum": 1, "maximum": 200},
-                        "cursor": {"type": "string", "description": "Opaque cursor for next page (typically previous next_cursor, used as before-ts boundary for older events)"},
-                        "since_ts": {"type": "string", "description": "ISO-8601 timestamp; only return events with timestamp >= since_ts (for incremental/polling)"},
+                        "limit": {
+                            "type": "integer",
+                            "default": 30,
+                            "minimum": 1,
+                            "maximum": 200,
+                        },
+                        "cursor": {
+                            "type": "string",
+                            "description": "Opaque cursor for next page (typically previous next_cursor, used as before-ts boundary for older events)",
+                        },
+                        "since_ts": {
+                            "type": "string",
+                            "description": "ISO-8601 timestamp; only return events with timestamp >= since_ts (for incremental/polling)",
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -341,9 +373,20 @@ class StealthMCPServer:
                     "properties": {
                         "session_name": {"type": "string"},
                         "print_report": {"type": "boolean", "default": False},
-                        "limit": {"type": "integer", "default": 15, "minimum": 1, "maximum": 100},
-                        "cursor": {"type": "string", "description": "Opaque cursor for next page of recent_audit (typically previous next_cursor)"},
-                        "since_ts": {"type": "string", "description": "ISO-8601 timestamp; only recent_audit entries >= since_ts"},
+                        "limit": {
+                            "type": "integer",
+                            "default": 15,
+                            "minimum": 1,
+                            "maximum": 100,
+                        },
+                        "cursor": {
+                            "type": "string",
+                            "description": "Opaque cursor for next page of recent_audit (typically previous next_cursor)",
+                        },
+                        "since_ts": {
+                            "type": "string",
+                            "description": "ISO-8601 timestamp; only recent_audit entries >= since_ts",
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -377,7 +420,11 @@ class StealthMCPServer:
             ToolSpec(
                 name="stealth_capabilities",
                 description="Return server/runtime capabilities and available tools.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
                 handler=self._tool_stealth_capabilities,
             ),
             ToolSpec(
@@ -387,9 +434,20 @@ class StealthMCPServer:
                     "type": "object",
                     "properties": {
                         "session_name": {"type": "string"},
-                        "workflow_name": {"type": "string", "description": "The output workflow name."},
-                        "description": {"type": "string", "description": "Optional workflow description."},
-                        "capture_seconds": {"type": "integer", "default": 60, "minimum": 1, "maximum": 600},
+                        "workflow_name": {
+                            "type": "string",
+                            "description": "The output workflow name.",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional workflow description.",
+                        },
+                        "capture_seconds": {
+                            "type": "integer",
+                            "default": 60,
+                            "minimum": 1,
+                            "maximum": 600,
+                        },
                     },
                     "required": ["session_name", "workflow_name"],
                     "additionalProperties": False,
@@ -402,8 +460,14 @@ class StealthMCPServer:
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "filename": {"type": "string", "description": "Relative to workflow library root."},
-                        "variables": {"type": "object", "description": "Runtime variable overrides."},
+                        "filename": {
+                            "type": "string",
+                            "description": "Relative to workflow library root.",
+                        },
+                        "variables": {
+                            "type": "object",
+                            "description": "Runtime variable overrides.",
+                        },
                         "session_name": {"type": "string"},
                     },
                     "required": ["filename"],
@@ -417,8 +481,14 @@ class StealthMCPServer:
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "platform": {"type": "string", "description": "Filter by directory: upwork, linkedin, common."},
-                        "pattern": {"type": "string", "description": "Filename glob filter."},
+                        "platform": {
+                            "type": "string",
+                            "description": "Filter by directory: upwork, linkedin, common.",
+                        },
+                        "pattern": {
+                            "type": "string",
+                            "description": "Filename glob filter.",
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -430,8 +500,14 @@ class StealthMCPServer:
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "filename": {"type": "string", "description": "Relative to workflow library root."},
-                        "confirm": {"type": "boolean", "description": "Must be true to confirm deletion."},
+                        "filename": {
+                            "type": "string",
+                            "description": "Relative to workflow library root.",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Must be true to confirm deletion.",
+                        },
                     },
                     "required": ["filename", "confirm"],
                     "additionalProperties": False,
@@ -452,7 +528,9 @@ class StealthMCPServer:
         return {"schemas": schemas}
 
     @staticmethod
-    def unified_result_envelope(payload: Dict[str, Any], is_error: bool = False) -> Dict[str, Any]:
+    def unified_result_envelope(
+        payload: Dict[str, Any], is_error: bool = False
+    ) -> Dict[str, Any]:
         """Normalize every MCP tool response into a consistent typed envelope.
 
         Every result contains:
@@ -556,13 +634,23 @@ class StealthMCPServer:
     def _dom_summary_from_signals(self, title: str, url: str) -> Dict[str, Any]:
         sig = f"{title} {url}".lower()
         return {
-            "has_captcha_signal": any(k in sig for k in ("captcha", "verify you are human", "challenge")),
-            "has_rate_limit_signal": any(k in sig for k in ("too many requests", "rate limit", "429")),
+            "has_captcha_signal": any(
+                k in sig for k in ("captcha", "verify you are human", "challenge")
+            ),
+            "has_rate_limit_signal": any(
+                k in sig for k in ("too many requests", "rate limit", "429")
+            ),
         }
 
     def _resolve_snapshot_path(self, session_name: str, tab_id: str) -> Path:
-        safe_session = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in session_name) or "default"
-        safe_tab = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tab_id) or "tab"
+        safe_session = (
+            "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in session_name)
+            or "default"
+        )
+        safe_tab = (
+            "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tab_id)
+            or "tab"
+        )
         folder = self._snapshot_root / safe_session
         folder.mkdir(parents=True, exist_ok=True)
         root = self._snapshot_root.resolve()
@@ -588,14 +676,18 @@ class StealthMCPServer:
             except Exception:
                 pass
 
-    def _guard_observability_payload(self, payload: Dict[str, Any], endpoint: str) -> Dict[str, Any]:
+    def _guard_observability_payload(
+        self, payload: Dict[str, Any], endpoint: str
+    ) -> Dict[str, Any]:
         redacted = AuditLogger._redact_sensitive(payload)
         raw = json.dumps(redacted, default=str)
         if len(raw) <= self._observability_max_chars:
             return redacted
         clipped = raw[: self._observability_max_chars]
         return {
-            "status": redacted.get("status", "success") if isinstance(redacted, dict) else "success",
+            "status": redacted.get("status", "success")
+            if isinstance(redacted, dict)
+            else "success",
             "truncated": True,
             "message": "Observability payload truncated by server size guardrail.",
             "details": {
@@ -606,7 +698,9 @@ class StealthMCPServer:
             "preview": clipped,
         }
 
-    async def _resolve_page(self, session_name: str, browser: Any, tab_id: Optional[str]) -> tuple[str, Any]:
+    async def _resolve_page(
+        self, session_name: str, browser: Any, tab_id: Optional[str]
+    ) -> tuple[str, Any]:
         pages = self._get_pages(browser)
         current_page = self._get_current_page(browser)
         if not pages:
@@ -648,7 +742,13 @@ class StealthMCPServer:
             light_mode=light_mode,
             use_pooled_context=use_pooled_context,
         )
-        await browser.launch(headless=headless, debug=debug, debug_cdp=debug_cdp, preset=preset, region=region)
+        await browser.launch(
+            headless=headless,
+            debug=debug,
+            debug_cdp=debug_cdp,
+            preset=preset,
+            region=region,
+        )
 
         self._sessions[session_name] = browser
         self._active_session = session_name
@@ -684,7 +784,11 @@ class StealthMCPServer:
             account=account,
         )
         if not ok:
-            raise ToolError("MCP_NAVIGATION_FAILED", "Navigation failed or blocked.", {"url": url, "platform": platform})
+            raise ToolError(
+                "MCP_NAVIGATION_FAILED",
+                "Navigation failed or blocked.",
+                {"url": url, "platform": platform},
+            )
 
         current_url = None
         try:
@@ -723,7 +827,11 @@ class StealthMCPServer:
         )
 
         if result.get("status") != "success":
-            raise ToolError("MCP_COOKIE_LOAD_FAILED", result.get("message", "Failed to load cookies"), result)
+            raise ToolError(
+                "MCP_COOKIE_LOAD_FAILED",
+                result.get("message", "Failed to load cookies"),
+                result,
+            )
 
         return self._tool_ok_payload({"session_name": session_name, "result": result})
 
@@ -735,7 +843,11 @@ class StealthMCPServer:
         relaunch = bool(args.get("relaunch", False))
         result = await browser.switch_region(str(region), relaunch=relaunch)
         if result.get("status") != "success":
-            raise ToolError("MCP_REGION_SWITCH_FAILED", result.get("message", "Failed to switch region"), result)
+            raise ToolError(
+                "MCP_REGION_SWITCH_FAILED",
+                result.get("message", "Failed to switch region"),
+                result,
+            )
         return self._tool_ok_payload({"session_name": session_name, "result": result})
 
     async def _tool_stealth_scrape(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -747,9 +859,14 @@ class StealthMCPServer:
         platform = str(args.get("platform") or "unknown")
 
         if not getattr(browser, "scraper", None):
-            raise ToolError("MCP_SCRAPER_UNAVAILABLE", "Scraper is not initialized. Relaunch the session.")
+            raise ToolError(
+                "MCP_SCRAPER_UNAVAILABLE",
+                "Scraper is not initialized. Relaunch the session.",
+            )
 
-        result = await browser.scraper.scrape_page(str(url), extract_images=extract_images, platform=platform)
+        result = await browser.scraper.scrape_page(
+            str(url), extract_images=extract_images, platform=platform
+        )
         return self._tool_ok_payload({"session_name": session_name, "scrape": result})
 
     async def _tool_stealth_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -782,7 +899,9 @@ class StealthMCPServer:
         payload = self._tool_ok_payload(
             {
                 "session_name": session_name,
-                "active_tab_id": self._get_tab_id(session_name, current_page) if current_page else None,
+                "active_tab_id": self._get_tab_id(session_name, current_page)
+                if current_page
+                else None,
                 "tab_count": len(tabs),
                 "tabs": tabs,
             }
@@ -792,7 +911,9 @@ class StealthMCPServer:
     async def _tool_stealth_tab_snapshot(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         full_page = bool(args.get("full_page", False))
-        tab_id, page = await self._resolve_page(session_name, browser, args.get("tab_id"))
+        tab_id, page = await self._resolve_page(
+            session_name, browser, args.get("tab_id")
+        )
 
         snapshot_path = self._resolve_snapshot_path(session_name, tab_id)
         screenshot_call = page.screenshot(path=str(snapshot_path), full_page=full_page)
@@ -814,7 +935,9 @@ class StealthMCPServer:
         )
         return self._guard_observability_payload(payload, "stealth_tab_snapshot")
 
-    async def _tool_stealth_session_timeline(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _tool_stealth_session_timeline(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         limit_raw = args.get("limit", self._timeline_default_limit)
         try:
@@ -825,7 +948,11 @@ class StealthMCPServer:
 
         cursor = args.get("cursor")
         since_ts = args.get("since_ts")
-        replay = browser.get_replay_sequence(limit, cursor=cursor, since_ts=since_ts) if hasattr(browser, "get_replay_sequence") else {"status": "unsupported", "sequence": []}
+        replay = (
+            browser.get_replay_sequence(limit, cursor=cursor, since_ts=since_ts)
+            if hasattr(browser, "get_replay_sequence")
+            else {"status": "unsupported", "sequence": []}
+        )
         sequence = replay.get("sequence", []) if isinstance(replay, dict) else []
         if not isinstance(sequence, list):
             sequence = []
@@ -841,7 +968,9 @@ class StealthMCPServer:
         payload = self._tool_ok_payload(
             {
                 "session_name": session_name,
-                "timeline_status": replay.get("status", "unknown") if isinstance(replay, dict) else "unknown",
+                "timeline_status": replay.get("status", "unknown")
+                if isinstance(replay, dict)
+                else "unknown",
                 "count": len(sequence),
                 "events": sequence,
                 "next_cursor": next_cursor,
@@ -865,31 +994,41 @@ class StealthMCPServer:
                 limit = 15
         cursor = args.get("cursor")
         since_ts = args.get("since_ts")
-        debug = await browser.debug_report(print_report=print_report, limit=limit, cursor=cursor, since_ts=since_ts)
+        debug = await browser.debug_report(
+            print_report=print_report, limit=limit, cursor=cursor, since_ts=since_ts
+        )
         if debug.get("status") != "success":
-            raise ToolError("MCP_DEBUG_REPORT_FAILED", debug.get("message", "debug_report failed"), debug)
+            raise ToolError(
+                "MCP_DEBUG_REPORT_FAILED",
+                debug.get("message", "debug_report failed"),
+                debug,
+            )
         # Compute consistent pagination fields based on the recent_audit included in report (heuristic)
         report = debug.get("report", {}) if isinstance(debug, dict) else {}
         recent = report.get("recent_audit", []) if isinstance(report, dict) else []
         count = len(recent) if isinstance(recent, list) else 0
         page_limit = limit if limit is not None else 15
-        has_more = (count == page_limit)
+        has_more = count == page_limit
         next_cursor = None
         if has_more and recent:
             first = recent[0]
             if isinstance(first, dict):
                 next_cursor = first.get("timestamp")
-        payload = self._tool_ok_payload({
-            "session_name": session_name,
-            "debug": debug,
-            "count": count,
-            "next_cursor": next_cursor,
-            "has_more": has_more,
-            "truncated": False,
-        })
+        payload = self._tool_ok_payload(
+            {
+                "session_name": session_name,
+                "debug": debug,
+                "count": count,
+                "next_cursor": next_cursor,
+                "has_more": has_more,
+                "truncated": False,
+            }
+        )
         return self._guard_observability_payload(payload, "stealth_debug_report")
 
-    async def _tool_stealth_get_cdp_endpoint(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _tool_stealth_get_cdp_endpoint(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         cdp = await browser.get_cdp_endpoint()
         # small payload; no truncation guard needed, but redact just in case
@@ -937,7 +1076,9 @@ class StealthMCPServer:
         try:
             capture_seconds = int(capture_seconds_raw)
         except Exception:
-            raise ToolError("MCP_VALIDATION_ERROR", "capture_seconds must be an integer")
+            raise ToolError(
+                "MCP_VALIDATION_ERROR", "capture_seconds must be an integer"
+            )
         capture_seconds = max(1, min(capture_seconds, 600))
 
         if not session_name:
@@ -948,7 +1089,6 @@ class StealthMCPServer:
         resolved_name, browser = await self._resolve_browser(session_name)
 
         current_url = ""
-        current_title = ""
         try:
             p = browser.page_getter()
             if p:
@@ -959,7 +1099,6 @@ class StealthMCPServer:
                         val = title_attr()
                         if asyncio.iscoroutine(val):
                             val = await val
-                        current_title = str(val or "")
                 except Exception:
                     pass
         except Exception:
@@ -1005,7 +1144,9 @@ class StealthMCPServer:
         output_dir = self._workflow_library_root / resolved_name
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{workflow_name}.yaml"
-        workflow_yaml = recorder.to_workflow_yaml(name=workflow_name, description=description)
+        workflow_yaml = recorder.to_workflow_yaml(
+            name=workflow_name, description=description
+        )
         output_path.write_text(workflow_yaml)
 
         return self._tool_ok_payload(
@@ -1036,7 +1177,10 @@ class StealthMCPServer:
         workflow_path = self._workflow_library_root / filename
         resolved_workflow_path = workflow_path.resolve()
         resolved_root = self._workflow_library_root.resolve()
-        if resolved_root not in resolved_workflow_path.parents and resolved_workflow_path != resolved_root:
+        if (
+            resolved_root not in resolved_workflow_path.parents
+            and resolved_workflow_path != resolved_root
+        ):
             raise ToolError(
                 "MCP_SECURITY_PATH_DENIED",
                 "Workflow path resolved outside allowed library root.",
@@ -1061,7 +1205,9 @@ class StealthMCPServer:
             resolved_name, browser = await self._resolve_browser(None)
 
         player = WorkflowPlayer(browser)
-        result = await player.execute(workflow, runtime_vars=variables if variables else None)
+        result = await player.execute(
+            workflow, runtime_vars=variables if variables else None
+        )
 
         return self._tool_ok_payload(
             {
@@ -1122,7 +1268,9 @@ class StealthMCPServer:
 
         return self._tool_ok_payload({"workflows": workflows})
 
-    async def _tool_stealth_workflow_delete(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _tool_stealth_workflow_delete(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
         filename = str(args.get("filename") or "")
         confirm = args.get("confirm", False)
 
@@ -1146,7 +1294,10 @@ class StealthMCPServer:
         workflow_path = self._workflow_library_root / filename
         resolved_workflow_path = workflow_path.resolve()
         resolved_root = self._workflow_library_root.resolve()
-        if resolved_root not in resolved_workflow_path.parents and resolved_workflow_path != resolved_root:
+        if (
+            resolved_root not in resolved_workflow_path.parents
+            and resolved_workflow_path != resolved_root
+        ):
             raise ToolError(
                 "MCP_SECURITY_PATH_DENIED",
                 "Resolved workflow path is outside the allowed library root.",
@@ -1173,7 +1324,11 @@ class StealthMCPServer:
         method = message.get("method")
         params = message.get("params") or {}
 
-        if not isinstance(message, dict) or message.get("jsonrpc") != JSONRPC_VERSION or not method:
+        if (
+            not isinstance(message, dict)
+            or message.get("jsonrpc") != JSONRPC_VERSION
+            or not method
+        ):
             return self._jsonrpc_error(msg_id, -32600, "Invalid Request")
 
         # Notifications: no response body.
@@ -1214,13 +1369,19 @@ class StealthMCPServer:
             return self._jsonrpc_result(msg_id, {"ok": True})
 
         if method == "health":
-            return self._jsonrpc_result(msg_id, {
-                "status": "healthy",
-                "server": SERVER_NAME,
-                "version": SERVER_VERSION,
-                "active_sessions": len(self._sessions),
-                "uptime_seconds": int(time.monotonic() - getattr(self, "_start_time", time.monotonic())),
-            })
+            return self._jsonrpc_result(
+                msg_id,
+                {
+                    "status": "healthy",
+                    "server": SERVER_NAME,
+                    "version": SERVER_VERSION,
+                    "active_sessions": len(self._sessions),
+                    "uptime_seconds": int(
+                        time.monotonic()
+                        - getattr(self, "_start_time", time.monotonic())
+                    ),
+                },
+            )
 
         if method == "tools/list":
             return self._jsonrpc_result(msg_id, self.list_tools())
@@ -1231,9 +1392,13 @@ class StealthMCPServer:
             tool_name = params.get("name")
             arguments = params.get("arguments") or {}
             if not isinstance(tool_name, str) or not tool_name:
-                return self._jsonrpc_error(msg_id, -32602, "Invalid params: tool name required")
+                return self._jsonrpc_error(
+                    msg_id, -32602, "Invalid params: tool name required"
+                )
             if not isinstance(arguments, dict):
-                return self._jsonrpc_error(msg_id, -32602, "Invalid params: arguments must be object")
+                return self._jsonrpc_error(
+                    msg_id, -32602, "Invalid params: arguments must be object"
+                )
 
             tool = self._tools.get(tool_name)
             if not tool:
@@ -1242,17 +1407,27 @@ class StealthMCPServer:
                     f"Unknown tool '{tool_name}'",
                     {"available_tools": list(self._tools.keys())},
                 )
-                return self._jsonrpc_result(msg_id, self._tool_result(payload, is_error=True))
+                return self._jsonrpc_result(
+                    msg_id, self._tool_result(payload, is_error=True)
+                )
 
             try:
                 payload = await tool.handler(arguments)
-                return self._jsonrpc_result(msg_id, self._tool_result(payload, is_error=False))
+                return self._jsonrpc_result(
+                    msg_id, self._tool_result(payload, is_error=False)
+                )
             except ToolError as te:
-                payload = self._tool_error_payload(te.error_code, te.message, te.details)
-                return self._jsonrpc_result(msg_id, self._tool_result(payload, is_error=True))
+                payload = self._tool_error_payload(
+                    te.error_code, te.message, te.details
+                )
+                return self._jsonrpc_result(
+                    msg_id, self._tool_result(payload, is_error=True)
+                )
             except Exception as exc:
                 payload = self._tool_error_payload("MCP_INTERNAL_ERROR", str(exc))
-                return self._jsonrpc_result(msg_id, self._tool_result(payload, is_error=True))
+                return self._jsonrpc_result(
+                    msg_id, self._tool_result(payload, is_error=True)
+                )
 
         if is_notification:
             return None
@@ -1270,7 +1445,9 @@ class StealthMCPServer:
             try:
                 message = json.loads(text)
             except json.JSONDecodeError as exc:
-                err = self._jsonrpc_error(None, -32700, "Parse error", {"error": str(exc)})
+                err = self._jsonrpc_error(
+                    None, -32700, "Parse error", {"error": str(exc)}
+                )
                 sys.stdout.write(json.dumps(err) + "\n")
                 sys.stdout.flush()
                 continue
@@ -1290,7 +1467,9 @@ def _run_list_tools(server: StealthMCPServer) -> int:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Agentic Stealth Browser MCP server (stdio)")
+    parser = argparse.ArgumentParser(
+        description="Agentic Stealth Browser MCP server (stdio)"
+    )
     parser.add_argument(
         "--list-tools",
         action="store_true",

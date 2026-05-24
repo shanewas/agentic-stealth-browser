@@ -9,7 +9,7 @@ Currently a stub awaiting full Gecko CDP integration.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 
 FIREFOX_STEALTH_SCRIPT = """

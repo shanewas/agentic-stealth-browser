@@ -20,16 +20,46 @@ class JA3Fingerprint:
     CHROME_124 = {
         "ssl_version": "772",  # TLS 1.3
         "ciphers": [
-            "4865", "4866", "4867", "4868",  # TLS 1.3 cipher suites
-            "49195", "49199", "49196", "49200",  # TLS 1.2 ECDHE-ECDSA/AES
-            "52392", "52393",  # TLS 1.2 ECDHE-ECDSA/CHACHA20
-            "49171", "49172", "49161", "49162",  # TLS 1.2 ECDHE-RSA
-            "49187", "49188", "49177", "49178",  # TLS 1.2 DHE
-            "156", "157", "47", "53",  # TLS 1.2 AES128/256
+            "4865",
+            "4866",
+            "4867",
+            "4868",  # TLS 1.3 cipher suites
+            "49195",
+            "49199",
+            "49196",
+            "49200",  # TLS 1.2 ECDHE-ECDSA/AES
+            "52392",
+            "52393",  # TLS 1.2 ECDHE-ECDSA/CHACHA20
+            "49171",
+            "49172",
+            "49161",
+            "49162",  # TLS 1.2 ECDHE-RSA
+            "49187",
+            "49188",
+            "49177",
+            "49178",  # TLS 1.2 DHE
+            "156",
+            "157",
+            "47",
+            "53",  # TLS 1.2 AES128/256
         ],
         "extensions": [
-            "0", "11", "10", "35", "16", "22", "23", "13", "43",
-            "45", "51", "17513", "27", "18", "65281", "65037",
+            "0",
+            "11",
+            "10",
+            "35",
+            "16",
+            "22",
+            "23",
+            "13",
+            "43",
+            "45",
+            "51",
+            "17513",
+            "27",
+            "18",
+            "65281",
+            "65037",
         ],
         "curves": ["29", "23", "24"],  # x25519, secp256r1, secp384r1
         "point_formats": ["0"],  # uncompressed
@@ -38,24 +68,55 @@ class JA3Fingerprint:
     FIREFOX_125 = {
         "ssl_version": "772",
         "ciphers": [
-            "4865", "4867", "4866", "4868",
-            "49195", "49196", "49199", "49200",
-            "52393", "52392",
-            "49171", "49172", "49161", "49162",
-            "156", "157", "47", "53",
+            "4865",
+            "4867",
+            "4866",
+            "4868",
+            "49195",
+            "49196",
+            "49199",
+            "49200",
+            "52393",
+            "52392",
+            "49171",
+            "49172",
+            "49161",
+            "49162",
+            "156",
+            "157",
+            "47",
+            "53",
         ],
         "extensions": [
-            "0", "11", "10", "16", "22", "23", "13", "43",
-            "45", "51", "27", "17513", "65037", "18", "65281",
+            "0",
+            "11",
+            "10",
+            "16",
+            "22",
+            "23",
+            "13",
+            "43",
+            "45",
+            "51",
+            "27",
+            "17513",
+            "65037",
+            "18",
+            "65281",
         ],
         "curves": ["29", "23", "24"],
         "point_formats": ["0"],
     }
 
     @classmethod
-    def generate_ja3(cls, ssl_version: str, ciphers: List[str],
-                     extensions: List[str], curves: List[str],
-                     point_formats: List[str]) -> str:
+    def generate_ja3(
+        cls,
+        ssl_version: str,
+        ciphers: List[str],
+        extensions: List[str],
+        curves: List[str],
+        point_formats: List[str],
+    ) -> str:
         """Generate JA3 string from TLS components."""
         return f"{ssl_version},{','.join(ciphers)},{','.join(extensions)},{','.join(curves)},{','.join(point_formats)}"
 
@@ -125,20 +186,37 @@ class JA4Fingerprint:
     """
 
     @classmethod
-    def generate_ja4(cls, protocol: str = "q", tls_version: str = "13",
-                     sni: str = "d", alpn: str = "h2",
-                     ciphers: List[str] = None,
-                     extensions: List[str] = None,
-                     sig_algs: List[str] = None) -> str:
+    def generate_ja4(
+        cls,
+        protocol: str = "q",
+        tls_version: str = "13",
+        sni: str = "d",
+        alpn: str = "h2",
+        ciphers: List[str] = None,
+        extensions: List[str] = None,
+        sig_algs: List[str] = None,
+    ) -> str:
         """Generate JA4 fingerprint string."""
         ciphers = ciphers or ["1301", "1302", "1303"]
         extensions = extensions or ["0000", "0005", "000a"]
         sig_algs = sig_algs or ["0403", "0804", "0401"]
 
         # Take first 2 and last 2 ciphers/extensions
-        cipher_part = "".join(sorted(ciphers[:2] + ciphers[-2:])) if len(ciphers) >= 4 else "".join(sorted(ciphers))
-        ext_part = "".join(sorted(extensions[:2] + extensions[-2:])) if len(extensions) >= 4 else "".join(sorted(extensions))
-        sig_part = "".join(sorted(sig_algs[:2] + sig_algs[-2:])) if len(sig_algs) >= 4 else "".join(sorted(sig_algs))
+        cipher_part = (
+            "".join(sorted(ciphers[:2] + ciphers[-2:]))
+            if len(ciphers) >= 4
+            else "".join(sorted(ciphers))
+        )
+        ext_part = (
+            "".join(sorted(extensions[:2] + extensions[-2:]))
+            if len(extensions) >= 4
+            else "".join(sorted(extensions))
+        )
+        sig_part = (
+            "".join(sorted(sig_algs[:2] + sig_algs[-2:]))
+            if len(sig_algs) >= 4
+            else "".join(sorted(sig_algs))
+        )
 
         return f"{protocol}{tls_version}{sni}{alpn[0]}{len(ciphers):02d}{len(extensions):02d}{cipher_part}_{ext_part}_{sig_part}"
 
@@ -146,8 +224,41 @@ class JA4Fingerprint:
     def get_chrome_ja4(cls) -> Dict[str, str]:
         """Get Chrome-like JA4 fingerprint."""
         ja4 = cls.generate_ja4(
-            ciphers=["1301", "1302", "1303", "c02b", "c02f", "c02c", "c030", "cca9", "cca8", "c013", "c014", "009c", "009d", "002f", "0035"],
-            extensions=["0000", "0005", "000a", "000b", "0010", "0017", "001b", "0023", "002d", "002f", "0033", "4469", "0015", "0012", "ff01", "0000"],
+            ciphers=[
+                "1301",
+                "1302",
+                "1303",
+                "c02b",
+                "c02f",
+                "c02c",
+                "c030",
+                "cca9",
+                "cca8",
+                "c013",
+                "c014",
+                "009c",
+                "009d",
+                "002f",
+                "0035",
+            ],
+            extensions=[
+                "0000",
+                "0005",
+                "000a",
+                "000b",
+                "0010",
+                "0017",
+                "001b",
+                "0023",
+                "002d",
+                "002f",
+                "0033",
+                "4469",
+                "0015",
+                "0012",
+                "ff01",
+                "0000",
+            ],
             sig_algs=["0403", "0804", "0401", "0503", "0805", "0501", "0806", "0601"],
         )
         return {

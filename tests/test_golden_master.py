@@ -27,9 +27,7 @@ class TestGoldenMasterMouse:
         # Golden master: seed 42, steps 20
         rng = random.Random(42)
         hb = HumanBehavior(FakePage(), rng=rng)
-        points = asyncio.run(
-            hb._bezier_curve((100, 100), (400, 300), steps=20)
-        )
+        points = asyncio.run(hb._bezier_curve((100, 100), (400, 300), steps=20))
 
         # Golden master assertions
         assert len(points) == 21
@@ -54,15 +52,11 @@ class TestGoldenMasterMouse:
 
         rng1 = random.Random(42)
         hb1 = HumanBehavior(FakePage(), rng=rng1)
-        points1 = asyncio.run(
-            hb1._bezier_curve((100, 100), (400, 300), steps=10)
-        )
+        points1 = asyncio.run(hb1._bezier_curve((100, 100), (400, 300), steps=10))
 
         rng2 = random.Random(99)
         hb2 = HumanBehavior(FakePage(), rng=rng2)
-        points2 = asyncio.run(
-            hb2._bezier_curve((100, 100), (400, 300), steps=10)
-        )
+        points2 = asyncio.run(hb2._bezier_curve((100, 100), (400, 300), steps=10))
 
         # Both should have same number of points
         assert len(points1) == len(points2)
@@ -77,6 +71,7 @@ class TestGoldenMasterTyping:
     def test_persona_typing_params_golden_master(self):
         """Persona typing parameters should be consistent."""
         from behavior.persona_rotator import PersonaRotator
+
         rotator = PersonaRotator("test", rng=__import__("random").Random(42))
         rotator.set_current_persona("casual_user")
         params = rotator.get_behavior_params()
@@ -94,6 +89,7 @@ class TestGoldenMasterScroll:
     def test_scroll_natural_produces_steps(self):
         """Scroll naturally should produce expected step count."""
         import random
+
         # With full realism, steps should be 5-12
         rng = random.Random(42)
         steps = rng.randint(5, 12)
@@ -106,6 +102,7 @@ class TestGoldenMasterStealth:
     def test_stealth_script_length_stable(self):
         """Stealth script length should be stable across calls."""
         from stealth.advanced_stealth import get_stealth_script
+
         s1 = get_stealth_script()
         s2 = get_stealth_script()
         assert len(s1) == len(s2)
@@ -114,6 +111,7 @@ class TestGoldenMasterStealth:
     def test_stealth_script_with_seed_stable(self):
         """Stealth script with same seed should be identical."""
         from stealth.advanced_stealth import get_stealth_script
+
         s1 = get_stealth_script(fingerprint_seed="golden-master-seed")
         s2 = get_stealth_script(fingerprint_seed="golden-master-seed")
         assert s1 == s2

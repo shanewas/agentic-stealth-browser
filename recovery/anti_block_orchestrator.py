@@ -39,6 +39,7 @@ class BlockType(Enum):
     Expanded with TRANSIENT_ERROR to distinguish from real blocks (#171).
     Used consistently with RecoveryAction and ErrorSeverity for policy decisions.
     """
+
     NONE = "none"
     SOFT_RATE_LIMIT = "soft_rate_limit"
     HARD_RATE_LIMIT = "hard_rate_limit"
@@ -51,6 +52,7 @@ class BlockType(Enum):
 
 class ErrorSeverity(Enum):
     """Severity levels in the error taxonomy (#112)."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -65,7 +67,14 @@ class MaxRetriesExceeded(Exception):
         max_retries: The retry limit that was exceeded.
         last_error: The error string from the final attempt.
     """
-    def __init__(self, message: str, platform: str = "", max_retries: int = 0, last_error: str | None = None):
+
+    def __init__(
+        self,
+        message: str,
+        platform: str = "",
+        max_retries: int = 0,
+        last_error: str | None = None,
+    ):
         super().__init__(message)
         self.platform = platform
         self.max_retries = max_retries
@@ -77,6 +86,7 @@ class RecoveryAction(Enum):
 
     Enables consistent policy, logging, and custom strategy plugins (#151).
     """
+
     RETRY = "retry"
     BACKOFF = "backoff_and_retry"
     ROTATE_SESSION_ONLY = "rotate_session"
@@ -116,7 +126,7 @@ class AntiBlockOrchestrator:
     PLATFORM_STRATEGIES = {
         "linkedin": {
             "max_retries": 5,
-            "base_backoff": 45,          # seconds
+            "base_backoff": 45,  # seconds
             "max_backoff": 300,
             "jitter": 0.3,
             "rotate_session_after": 3,
@@ -153,20 +163,33 @@ class AntiBlockOrchestrator:
             "rotate_proxy_after": 3,
             "preferred_first_action": "backoff_and_retry",
             "transient_backoff_multiplier": 0.8,
-        }
+        },
     }
 
-    def __init__(self, browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None, rng: Optional[Any] = None, safe_mode: bool = False, recovery_mode: str = "aggressive"):
-        self.browser = browser          # usually the BrowserContext (for future use)
+    def __init__(
+        self,
+        browser=None,
+        session_manager=None,
+        proxy_manager=None,
+        page_getter=None,
+        light_detection: bool = True,
+        light_mode: Optional[bool] = None,
+        rng: Optional[Any] = None,
+        safe_mode: bool = False,
+        recovery_mode: str = "aggressive",
+    ):
+        self.browser = browser  # usually the BrowserContext (for future use)
         self.session_manager = session_manager
         self.proxy_manager = proxy_manager
-        self._get_page = page_getter    # callable that returns current Playwright Page (for content checks)
+        self._get_page = page_getter  # callable that returns current Playwright Page (for content checks)
         self.logger = AuditLogger("recovery")
         # Enhanced recovery history for learning from past successes/failures (#157)
         # Keyed by "platform:account:domain" -> stats with per-action success/fail rates + preferred
         self.recovery_history: Dict[str, Dict[str, Any]] = {}
         self._max_history_size = 500  # LRU cap to prevent unbounded memory growth
-        self.custom_strategies: Dict[str, Callable[[RecoveryContext, BlockType], RecoveryAction]] = {}  # #151 plugin registry
+        self.custom_strategies: Dict[
+            str, Callable[[RecoveryContext, BlockType], RecoveryAction]
+        ] = {}  # #151 plugin registry
 
         # Support per-instance RNG for jitter (fixes wiring from AgentBrowser #222)
         self.rng = rng if rng is not None else random
@@ -205,7 +228,11 @@ class AntiBlockOrchestrator:
         """Allow AgentBrowser to wire the active session for #90 auto-cleanup on restriction."""
         self.current_session_name = name
 
-    def register_recovery_strategy(self, platform: str, strategy_func: Callable[[RecoveryContext, BlockType], RecoveryAction]) -> None:
+    def register_recovery_strategy(
+        self,
+        platform: str,
+        strategy_func: Callable[[RecoveryContext, BlockType], RecoveryAction],
+    ) -> None:
         """Register a custom recovery decision function for a platform (#151).
 
         The func receives (RecoveryContext, BlockType) and must return a RecoveryAction (or raise to fallback).
@@ -230,12 +257,15 @@ class AntiBlockOrchestrator:
         self.cost_tracker[key] = self.cost_tracker.get(key, 0.0) + cost
         if self.failure_counts[key] >= self.circuit_breaker_threshold:
             self.circuit_open_until[key] = time.time() + self.circuit_cooldown
-            self.logger.log_action("circuit_breaker_opened", {
-                "key": key,
-                "cooldown_sec": self.circuit_cooldown,
-                "failures": self.failure_counts[key],
-                "cost": self.cost_tracker.get(key)
-            })
+            self.logger.log_action(
+                "circuit_breaker_opened",
+                {
+                    "key": key,
+                    "cooldown_sec": self.circuit_cooldown,
+                    "failures": self.failure_counts[key],
+                    "cost": self.cost_tracker.get(key),
+                },
+            )
             # reset count after opening to allow eventual retry
             self.failure_counts[key] = 0
 
@@ -247,18 +277,26 @@ class AntiBlockOrchestrator:
     def _get_history_key(self, context: RecoveryContext) -> str:
         """Per-account/domain history key for learning (#157)."""
         platform = (context.platform or "unknown").lower()
-        acct = (context.account_hint or context.metadata.get("account")
-                or context.session_name or context.metadata.get("new_session") or "default")
+        acct = (
+            context.account_hint
+            or context.metadata.get("account")
+            or context.session_name
+            or context.metadata.get("new_session")
+            or "default"
+        )
         if isinstance(acct, dict):
             acct = acct.get("name", "default")
         try:
             from urllib.parse import urlparse
+
             domain = (urlparse(context.url or "").netloc or "unknown").lower()
         except Exception:
             domain = "unknown"
         return f"{platform}:{str(acct).lower()}:{domain}"
 
-    def _update_recovery_history(self, context: RecoveryContext, action: RecoveryAction, success: bool) -> None:
+    def _update_recovery_history(
+        self, context: RecoveryContext, action: RecoveryAction, success: bool
+    ) -> None:
         """Lightweight per-key success rate tracking for future decisions (#157 learning from history).
 
         Includes LRU eviction: when history exceeds _max_history_size entries,
@@ -270,7 +308,7 @@ class AntiBlockOrchestrator:
                 "action_success": {},
                 "last_successful_action": None,
                 "total_attempts": 0,
-                "platforms": context.platform
+                "platforms": context.platform,
             }
         h = self.recovery_history[key]
         h["total_attempts"] = h.get("total_attempts", 0) + 1
@@ -289,14 +327,16 @@ class AntiBlockOrchestrator:
             # Sort by total_attempts ascending — prune least-used entries first
             sorted_keys = sorted(
                 self.recovery_history.keys(),
-                key=lambda k: self.recovery_history[k].get("total_attempts", 0)
+                key=lambda k: self.recovery_history[k].get("total_attempts", 0),
             )
             # Remove the oldest 20% (or at least 1)
             to_remove = max(1, len(sorted_keys) // 5)
             for old_key in sorted_keys[:to_remove]:
                 del self.recovery_history[old_key]
 
-    def _decide_recovery_action(self, context: RecoveryContext, block_type: BlockType) -> RecoveryAction:
+    def _decide_recovery_action(
+        self, context: RecoveryContext, block_type: BlockType
+    ) -> RecoveryAction:
         """Core decision engine: platform-aware (#139), history-learned (#157), safe-mode aware (#184),
         taxonomy-driven (#112), transient-aware (#171), and supports custom plugins (#151).
         """
@@ -308,7 +348,11 @@ class AntiBlockOrchestrator:
 
         # Safe mode / fail-fast (#184): never rotate, fail fast to protect proxy pool
         if self.safe_mode or self.recovery_mode in ("safe", "fail_fast"):
-            if context.attempt >= 2 or block_type in (BlockType.ACCOUNT_RESTRICTION, BlockType.CAPTCHA, BlockType.HARD_RATE_LIMIT):
+            if context.attempt >= 2 or block_type in (
+                BlockType.ACCOUNT_RESTRICTION,
+                BlockType.CAPTCHA,
+                BlockType.HARD_RATE_LIMIT,
+            ):
                 return RecoveryAction.FAIL_FAST
             return RecoveryAction.BACKOFF
 
@@ -319,7 +363,9 @@ class AntiBlockOrchestrator:
                 if isinstance(custom_action, RecoveryAction):
                     return custom_action
             except Exception as e:
-                self.logger.log_error("custom_strategy_failed", str(e), {"platform": platform})
+                self.logger.log_error(
+                    "custom_strategy_failed", str(e), {"platform": platform}
+                )
 
         # History learning (#157): prefer previously successful action for this exact platform/account/domain
         hist_key = self._get_history_key(context)
@@ -359,22 +405,36 @@ class AntiBlockOrchestrator:
                     return RecoveryAction.ROTATE_PROXY_ONLY
                 if "backoff" in pref:
                     return RecoveryAction.BACKOFF
-                return RecoveryAction(pref) if pref in [e.value for e in RecoveryAction] else RecoveryAction.BACKOFF
+                return (
+                    RecoveryAction(pref)
+                    if pref in [e.value for e in RecoveryAction]
+                    else RecoveryAction.BACKOFF
+                )
             except Exception:
                 pass
 
         # Fallback taxonomy + attempt based
         if block_type in (BlockType.ACCOUNT_RESTRICTION, BlockType.CAPTCHA):
-            return RecoveryAction.ROTATE_SESSION_ONLY if context.attempt % 2 == 1 else RecoveryAction.ROTATE_BOTH
+            return (
+                RecoveryAction.ROTATE_SESSION_ONLY
+                if context.attempt % 2 == 1
+                else RecoveryAction.ROTATE_BOTH
+            )
         if block_type == BlockType.PROXY_BLOCK:
             return RecoveryAction.ROTATE_PROXY_ONLY
         if block_type in (BlockType.HARD_RATE_LIMIT, BlockType.SOFT_RATE_LIMIT):
             if context.attempt >= strategy.get("rotate_proxy_after", 3):
-                return RecoveryAction.ROTATE_BOTH if context.attempt >= strategy.get("rotate_session_after", 3) else RecoveryAction.ROTATE_SESSION_ONLY
+                return (
+                    RecoveryAction.ROTATE_BOTH
+                    if context.attempt >= strategy.get("rotate_session_after", 3)
+                    else RecoveryAction.ROTATE_SESSION_ONLY
+                )
             return RecoveryAction.BACKOFF
         return RecoveryAction.BACKOFF
 
-    async def detect_block(self, context: RecoveryContext, force_heavy: bool = False) -> BlockType:
+    async def detect_block(
+        self, context: RecoveryContext, force_heavy: bool = False
+    ) -> BlockType:
         """
         Early detection of blocks using multiple signals:
         - HTTP status codes
@@ -393,13 +453,31 @@ class AntiBlockOrchestrator:
         # #171: Distinguish transient network errors (timeouts, DNS, conn resets) from real blocks.
         # Transient: short backoff only, no rotation, no circuit trip, no proxy burn.
         transient_patterns = [
-            "timeout", "timed out", "connection reset", "econnreset", "econnrefused",
-            "dns", "name or service not known", "getaddrinfo", "network is unreachable",
-            "connect call failed", "socket hang up", "connection refused", "connection error",
-            "read timeout", "write timeout", "clientconnectorerror", "errno 110", "errno 111"
+            "timeout",
+            "timed out",
+            "connection reset",
+            "econnreset",
+            "econnrefused",
+            "dns",
+            "name or service not known",
+            "getaddrinfo",
+            "network is unreachable",
+            "connect call failed",
+            "socket hang up",
+            "connection refused",
+            "connection error",
+            "read timeout",
+            "write timeout",
+            "clientconnectorerror",
+            "errno 110",
+            "errno 111",
         ]
         if any(p in error_lower for p in transient_patterns):
-            if status not in (403, 429, 503):  # explicit block statuses override transient guess
+            if status not in (
+                403,
+                429,
+                503,
+            ):  # explicit block statuses override transient guess
                 context.block_type = BlockType.TRANSIENT_ERROR
                 context.error_severity = ErrorSeverity.LOW
                 return BlockType.TRANSIENT_ERROR
@@ -417,7 +495,13 @@ class AntiBlockOrchestrator:
             return BlockType.SOFT_RATE_LIMIT
 
         # === Error message patterns ===
-        captcha_keywords = ["captcha", "challenge", "verify", "security check", "robot check"]
+        captcha_keywords = [
+            "captcha",
+            "challenge",
+            "verify",
+            "security check",
+            "robot check",
+        ]
         if any(kw in error_lower for kw in captcha_keywords):
             return BlockType.CAPTCHA
 
@@ -432,8 +516,11 @@ class AntiBlockOrchestrator:
         # === Platform-specific detection ===
         if "linkedin" in platform:
             linkedin_blocks = [
-                "unusual activity", "security verification", "verify your identity",
-                "temporarily restricted", "account restricted"
+                "unusual activity",
+                "security verification",
+                "verify your identity",
+                "temporarily restricted",
+                "account restricted",
             ]
             if any(kw in error_lower for kw in linkedin_blocks):
                 return BlockType.ACCOUNT_RESTRICTION
@@ -449,7 +536,7 @@ class AntiBlockOrchestrator:
         # Phase 8 perf fix: content() is called far too often in recovery paths.
         # Only run when light_detection=False or explicitly forced (for deep debug / #273 explain).
         # #84/#92: simple guard + lighter signals (title/url) before any full content()
-        do_heavy = force_heavy or (not getattr(self, 'light_detection', True))
+        do_heavy = force_heavy or (not getattr(self, "light_detection", True))
         if self._get_page and do_heavy:
             try:
                 page = self._get_page()
@@ -458,17 +545,40 @@ class AntiBlockOrchestrator:
                     # Use lighter signals first (title is cheap vs full HTML) to avoid unnecessary page.content()
                     try:
                         title = (await page.title() or "").lower()
-                        if any(x in title for x in ["just a moment", "checking your browser", "attention required", "verify you are human", "security check"]):
+                        if any(
+                            x in title
+                            for x in [
+                                "just a moment",
+                                "checking your browser",
+                                "attention required",
+                                "verify you are human",
+                                "security check",
+                            ]
+                        ):
                             return BlockType.CAPTCHA
 
                         # LinkedIn specific from title (common on challenges)
                         if "linkedin" in platform:
-                            if any(x in title for x in ["security verification", "unusual activity detected", "account restricted"]):
+                            if any(
+                                x in title
+                                for x in [
+                                    "security verification",
+                                    "unusual activity detected",
+                                    "account restricted",
+                                ]
+                            ):
                                 return BlockType.ACCOUNT_RESTRICTION
 
                         # Amazon specific from title
                         if "amazon" in platform:
-                            if any(x in title for x in ["enter the characters", "sorry, we just need to make sure", "robot"]):
+                            if any(
+                                x in title
+                                for x in [
+                                    "enter the characters",
+                                    "sorry, we just need to make sure",
+                                    "robot",
+                                ]
+                            ):
                                 return BlockType.CAPTCHA
                     except Exception:
                         pass  # lighter signal failed; fall through to content only if needed
@@ -482,17 +592,36 @@ class AntiBlockOrchestrator:
 
                 if content_lower:
                     # Cloudflare / generic challenge pages
-                    if any(x in content_lower for x in ["checking your browser", "just a moment", "cf-challenge"]):
+                    if any(
+                        x in content_lower
+                        for x in [
+                            "checking your browser",
+                            "just a moment",
+                            "cf-challenge",
+                        ]
+                    ):
                         return BlockType.CAPTCHA
 
                     # LinkedIn specific content
                     if "linkedin" in platform:
-                        if any(x in content_lower for x in ["security verification", "unusual activity detected"]):
+                        if any(
+                            x in content_lower
+                            for x in [
+                                "security verification",
+                                "unusual activity detected",
+                            ]
+                        ):
                             return BlockType.ACCOUNT_RESTRICTION
 
                     # Amazon specific
                     if "amazon" in platform:
-                        if any(x in content_lower for x in ["enter the characters", "sorry, we just need to make sure"]):
+                        if any(
+                            x in content_lower
+                            for x in [
+                                "enter the characters",
+                                "sorry, we just need to make sure",
+                            ]
+                        ):
                             return BlockType.CAPTCHA
 
             except Exception:
@@ -566,16 +695,18 @@ class AntiBlockOrchestrator:
 
         # Circuit breaker guard (prevents hammering on hopeless cases) - skip for transient
         if self._check_circuit_breaker(key):
-            self.logger.log_action("circuit_breaker_blocked_recovery", {
-                "platform": context.platform,
-                "attempt": context.attempt
-            })
+            self.logger.log_action(
+                "circuit_breaker_blocked_recovery",
+                {"platform": context.platform, "attempt": context.attempt},
+            )
             return False
 
         block_type = await self.detect_block(context)
         context.block_type = block_type
         # Set taxonomy severity (#112)
-        context.error_severity = self.block_type_to_severity.get(block_type, ErrorSeverity.MEDIUM)
+        context.error_severity = self.block_type_to_severity.get(
+            block_type, ErrorSeverity.MEDIUM
+        )
 
         strategy = self.get_strategy(context.platform)
 
@@ -588,7 +719,7 @@ class AntiBlockOrchestrator:
                 "attempt": context.attempt,
                 "url": context.url,
                 "http_status": context.http_status,
-            }
+            },
         )
 
         if block_type == BlockType.NONE:
@@ -599,38 +730,68 @@ class AntiBlockOrchestrator:
         action = self._decide_recovery_action(context, block_type)
         context.recovery_action = action
 
-        self.logger.log_action("recovery_action_decided", {
-            "platform": context.platform,
-            "block_type": block_type.value,
-            "action": action.value,
-            "attempt": context.attempt,
-            "safe_mode": self.safe_mode,
-            "recovery_mode": self.recovery_mode,
-        })
+        self.logger.log_action(
+            "recovery_action_decided",
+            {
+                "platform": context.platform,
+                "block_type": block_type.value,
+                "action": action.value,
+                "attempt": context.attempt,
+                "safe_mode": self.safe_mode,
+                "recovery_mode": self.recovery_mode,
+            },
+        )
 
         # Record failure for circuit (but lighter / skip for transient #171)
         if block_type != BlockType.TRANSIENT_ERROR:
-            cost = 1.0 + (0.5 if block_type in (BlockType.HARD_RATE_LIMIT, BlockType.ACCOUNT_RESTRICTION) else 0)
+            cost = 1.0 + (
+                0.5
+                if block_type
+                in (BlockType.HARD_RATE_LIMIT, BlockType.ACCOUNT_RESTRICTION)
+                else 0
+            )
             self._record_failure(key, cost=cost)
         else:
-            self.logger.log_action("transient_error_ignored_for_circuit", {
-                "platform": context.platform, "attempt": context.attempt
-            })
+            self.logger.log_action(
+                "transient_error_ignored_for_circuit",
+                {"platform": context.platform, "attempt": context.attempt},
+            )
 
         # #90 P1: Immediately mark compromised session for cookie cleanup on ACCOUNT_RESTRICTION.
-        if block_type == BlockType.ACCOUNT_RESTRICTION and self.session_manager and self.current_session_name:
+        if (
+            block_type == BlockType.ACCOUNT_RESTRICTION
+            and self.session_manager
+            and self.current_session_name
+        ):
             try:
-                cleanup_res = self.session_manager.cleanup_session(self.current_session_name)
-                self.logger.log_action("account_restriction_session_cleanup", {
-                    "session": self.current_session_name,
-                    "result": cleanup_res.get("status") if isinstance(cleanup_res, dict) else str(cleanup_res)
-                })
+                cleanup_res = self.session_manager.cleanup_session(
+                    self.current_session_name
+                )
+                self.logger.log_action(
+                    "account_restriction_session_cleanup",
+                    {
+                        "session": self.current_session_name,
+                        "result": cleanup_res.get("status")
+                        if isinstance(cleanup_res, dict)
+                        else str(cleanup_res),
+                    },
+                )
             except Exception as e:
-                self.logger.log_error("account_restriction_cleanup_failed", str(e), {"session": self.current_session_name})
+                self.logger.log_error(
+                    "account_restriction_cleanup_failed",
+                    str(e),
+                    {"session": self.current_session_name},
+                )
 
         # === Rotation logic driven by decided action (respects safe_mode, platform, history) ===
-        should_rotate_session = action in (RecoveryAction.ROTATE_SESSION_ONLY, RecoveryAction.ROTATE_BOTH)
-        should_rotate_proxy = action in (RecoveryAction.ROTATE_PROXY_ONLY, RecoveryAction.ROTATE_BOTH)
+        should_rotate_session = action in (
+            RecoveryAction.ROTATE_SESSION_ONLY,
+            RecoveryAction.ROTATE_BOTH,
+        )
+        should_rotate_proxy = action in (
+            RecoveryAction.ROTATE_PROXY_ONLY,
+            RecoveryAction.ROTATE_BOTH,
+        )
 
         if self.safe_mode or self.recovery_mode in ("safe", "fail_fast"):
             should_rotate_session = False
@@ -642,15 +803,18 @@ class AntiBlockOrchestrator:
 
         if should_rotate_session and self.session_manager:
             try:
-                self.logger.log_action("recovery_rotate_session", {
-                    "platform": context.platform,
-                    "attempt": context.attempt,
-                    "action": action.value
-                })
+                self.logger.log_action(
+                    "recovery_rotate_session",
+                    {
+                        "platform": context.platform,
+                        "attempt": context.attempt,
+                        "action": action.value,
+                    },
+                )
                 # Create a fresh session
                 new_session = self.session_manager.create_session(
                     session_name=f"recovery-{context.platform}-{context.attempt}",
-                    anonymous=True
+                    anonymous=True,
                 )
                 # Store as dict for hook compatibility + name for metadata
                 if isinstance(new_session, dict):
@@ -664,23 +828,28 @@ class AntiBlockOrchestrator:
 
         if should_rotate_proxy and self.proxy_manager:
             try:
-                self.logger.log_action("recovery_rotate_proxy", {
-                    "platform": context.platform,
-                    "attempt": context.attempt,
-                    "action": action.value
-                })
+                self.logger.log_action(
+                    "recovery_rotate_proxy",
+                    {
+                        "platform": context.platform,
+                        "attempt": context.attempt,
+                        "action": action.value,
+                    },
+                )
                 # Generate new sticky session (robust, #99/#10)
-                if getattr(self.proxy_manager, 'current_config', None):
+                if getattr(self.proxy_manager, "current_config", None):
                     cfg = self.proxy_manager.current_config
-                    base_user = self._safe_extract_base_user(getattr(cfg, 'username', None))
-                    pwd = getattr(cfg, 'password', "")
-                    ctry = getattr(cfg, 'country', "jp")
+                    base_user = self._safe_extract_base_user(
+                        getattr(cfg, "username", None)
+                    )
+                    pwd = getattr(cfg, "password", "")
+                    ctry = getattr(cfg, "country", "jp")
                     new_config = self.proxy_manager.create_decodo_config(
                         user=base_user,
                         password=pwd,
                         country=ctry,
                         session_name=f"recovery-{context.attempt}",
-                        duration_minutes=30  # shorter duration for recovery
+                        duration_minutes=30,  # shorter duration for recovery
                     )
                     # Ensure manager state is updated for future use
                     self.proxy_manager.current_config = new_config
@@ -692,17 +861,26 @@ class AntiBlockOrchestrator:
 
         # Invoke wired rotation relaunch hook (from AgentBrowser) so that proxy/session rotation actually takes effect on live browser/page
         # This completes the recovery rotation loop for #38/#16 etc.
-        if (should_rotate_session or should_rotate_proxy) and hasattr(self, "_rotation_relaunch_hook") and callable(getattr(self, "_rotation_relaunch_hook", None)):
+        if (
+            (should_rotate_session or should_rotate_proxy)
+            and hasattr(self, "_rotation_relaunch_hook")
+            and callable(getattr(self, "_rotation_relaunch_hook", None))
+        ):
             try:
-                sess_meta = context.metadata.get("new_session") if isinstance(context.metadata.get("new_session"), dict) else None
+                sess_meta = (
+                    context.metadata.get("new_session")
+                    if isinstance(context.metadata.get("new_session"), dict)
+                    else None
+                )
                 prx_name = context.metadata.get("new_proxy")
                 hook = self._rotation_relaunch_hook
                 res = hook(sess_meta, prx_name)
                 if asyncio.iscoroutine(res):
                     await res
-                self.logger.log_action("rotation_relaunch_hook_called", {
-                    "had_session": bool(sess_meta), "had_proxy": bool(prx_name)
-                })
+                self.logger.log_action(
+                    "rotation_relaunch_hook_called",
+                    {"had_session": bool(sess_meta), "had_proxy": bool(prx_name)},
+                )
             except Exception as e:
                 self.logger.log_error("rotation_relaunch_hook_failed", str(e))
 
@@ -710,13 +888,20 @@ class AntiBlockOrchestrator:
         delay = self.calculate_backoff(context)
         self.logger.log_action(
             "recovery_backoff",
-            {"platform": context.platform, "delay_seconds": round(delay, 1), "attempt": context.attempt, "action": action.value}
+            {
+                "platform": context.platform,
+                "delay_seconds": round(delay, 1),
+                "attempt": context.attempt,
+                "action": action.value,
+            },
         )
 
         await asyncio.sleep(delay)
 
         # Tentative history update (refined on next success path in execute/detect)
-        self._update_recovery_history(context, action, success=(action not in (RecoveryAction.FAIL_FAST,)))
+        self._update_recovery_history(
+            context, action, success=(action not in (RecoveryAction.FAIL_FAST,))
+        )
 
         return context.attempt < strategy.get("max_retries", 4)
 
@@ -726,7 +911,7 @@ class AntiBlockOrchestrator:
         platform: str,
         url: str,
         max_retries: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Wrapper that runs a function with full recovery logic.
@@ -742,11 +927,17 @@ class AntiBlockOrchestrator:
 
             key = platform.lower()
             if self._check_circuit_breaker(key):
-                self.logger.log_action("circuit_breaker_blocked_execute", {"platform": platform})
+                self.logger.log_action(
+                    "circuit_breaker_blocked_execute", {"platform": platform}
+                )
                 break
 
             try:
-                result = await func(**kwargs) if asyncio.iscoroutinefunction(func) else func(**kwargs)
+                result = (
+                    await func(**kwargs)
+                    if asyncio.iscoroutinefunction(func)
+                    else func(**kwargs)
+                )
                 context.response_time = time.time() - start_time
 
                 # Check if we got a successful response
@@ -756,7 +947,9 @@ class AntiBlockOrchestrator:
                 block_type = await self.detect_block(context)
                 if block_type == BlockType.NONE:
                     self._reset_circuit(key)
-                    self._update_recovery_history(context, RecoveryAction.NOOP, success=True)
+                    self._update_recovery_history(
+                        context, RecoveryAction.NOOP, success=True
+                    )
                     return result
 
                 # If we detect a block even on "success", treat it as failure
@@ -781,11 +974,27 @@ class AntiBlockOrchestrator:
 
 
 # Convenience function
-def create_orchestrator(browser=None, session_manager=None, proxy_manager=None, page_getter=None, light_detection: bool = True, light_mode: Optional[bool] = None, rng: Optional[Any] = None, safe_mode: bool = False, recovery_mode: str = "aggressive"):
+def create_orchestrator(
+    browser=None,
+    session_manager=None,
+    proxy_manager=None,
+    page_getter=None,
+    light_detection: bool = True,
+    light_mode: Optional[bool] = None,
+    rng: Optional[Any] = None,
+    safe_mode: bool = False,
+    recovery_mode: str = "aggressive",
+):
     # Tie light_mode if present (compat for #84/#92 paths)
     if light_mode is not None:
         light_detection = bool(light_mode)
     return AntiBlockOrchestrator(
-        browser, session_manager, proxy_manager, page_getter=page_getter,
-        light_detection=light_detection, rng=rng, safe_mode=safe_mode, recovery_mode=recovery_mode
+        browser,
+        session_manager,
+        proxy_manager,
+        page_getter=page_getter,
+        light_detection=light_detection,
+        rng=rng,
+        safe_mode=safe_mode,
+        recovery_mode=recovery_mode,
     )

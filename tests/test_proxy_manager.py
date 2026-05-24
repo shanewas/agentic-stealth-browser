@@ -22,7 +22,7 @@ class TestProxyManagerConfig:
             user="testuser",
             password="testpass",
             country="us",
-            session_name="test-session"
+            session_name="test-session",
         )
         assert config.provider == "decodo"
         assert config.host == "gate.decodo.com"
@@ -32,9 +32,7 @@ class TestProxyManagerConfig:
     def test_config_validation_passes(self):
         manager = ProxyManager()
         config = manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="us"
+            user="testuser", password="testpass", country="us"
         )
         errors = config.validate()
         assert len(errors) == 0
@@ -46,7 +44,7 @@ class TestProxyManagerConfig:
             port=99999,
             username="user",
             password="pass",
-            country="us"
+            country="us",
         )
         errors = config.validate()
         assert any("port" in e for e in errors)
@@ -58,7 +56,7 @@ class TestProxyManagerConfig:
             port=10001,
             username="user",
             password="pass",
-            country="usa"  # Should be 2 letters
+            country="usa",  # Should be 2 letters
         )
         errors = config.validate()
         assert any("country" in e for e in errors)
@@ -66,9 +64,7 @@ class TestProxyManagerConfig:
     def test_to_safe_dict_redacts_password(self):
         manager = ProxyManager()
         config = manager.create_decodo_config(
-            user="testuser",
-            password="secret123",
-            country="us"
+            user="testuser", password="secret123", country="us"
         )
         safe = config.to_safe_dict()
         assert safe["password"] == "***REDACTED***"
@@ -82,11 +78,7 @@ class TestProxyManagerPlaywrightArgs:
 
     def test_get_playwright_proxy_args_socks5_default(self):
         manager = ProxyManager()
-        manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="us"
-        )
+        manager.create_decodo_config(user="testuser", password="testpass", country="us")
         args = manager.get_playwright_proxy_args()
         assert args["server"].startswith("socks5://")
         # codeql[py/incomplete-url-substring-sanitization]: test fixture string, not untrusted URL sanitization
@@ -97,11 +89,7 @@ class TestProxyManagerPlaywrightArgs:
 
     def test_get_playwright_proxy_args_http_preferred(self):
         manager = ProxyManager()
-        manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="us"
-        )
+        manager.create_decodo_config(user="testuser", password="testpass", country="us")
         args = manager.get_playwright_proxy_args(prefer_http=True)
         assert args["server"].startswith("http://")
         # codeql[py/incomplete-url-substring-sanitization]: test fixture string, not untrusted URL sanitization
@@ -115,11 +103,7 @@ class TestProxyManagerPlaywrightArgs:
     def test_proxy_args_reaches_launch(self):
         """Test that proxy args are correctly passed to launch_persistent_context."""
         manager = ProxyManager()
-        manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="us"
-        )
+        manager.create_decodo_config(user="testuser", password="testpass", country="us")
         proxy_args = manager.get_playwright_proxy_args()
 
         # Verify the structure matches what Playwright expects
@@ -140,7 +124,7 @@ class TestProxyManagerRotation:
             user="testuser",
             password="testpass",
             country="us",
-            session_name="original-session"
+            session_name="original-session",
         )
         original_session = manager.current_config.session_name
 
@@ -151,21 +135,14 @@ class TestProxyManagerRotation:
 
     def test_rotate_proxy_preserves_country(self):
         manager = ProxyManager()
-        manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="jp"
-        )
+        manager.create_decodo_config(user="testuser", password="testpass", country="jp")
         new_config = manager.rotate_proxy()
         assert new_config.country == "jp"
 
     def test_rotate_proxy_preserves_tier(self):
         manager = ProxyManager()
         manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="us",
-            tier="mobile"
+            user="testuser", password="testpass", country="us", tier="mobile"
         )
         new_config = manager.rotate_proxy()
         assert new_config.tier == "mobile"
@@ -231,7 +208,7 @@ class TestProxyManagerUserInfo:
             user="testuser",
             password="testpass",
             country="us",
-            session_name="test-session"
+            session_name="test-session",
         )
         info = manager.get_current_proxy_info()
         assert info["configured"] is True
@@ -243,11 +220,7 @@ class TestProxyManagerUserInfo:
         manager = ProxyManager()
         assert manager.get_curl_proxy_string() == ""
 
-        manager.create_decodo_config(
-            user="testuser",
-            password="testpass",
-            country="us"
-        )
+        manager.create_decodo_config(user="testuser", password="testpass", country="us")
         curl_str = manager.get_curl_proxy_string()
         assert "socks5://" in curl_str
         # codeql[py/incomplete-url-substring-sanitization]: test fixture string, not untrusted URL sanitization
@@ -255,6 +228,9 @@ class TestProxyManagerUserInfo:
 
     def test_safe_extract_base_user(self):
         manager = ProxyManager()
-        assert manager._safe_extract_base_user("user-realuser-country-us-session-abc") == "realuser"
+        assert (
+            manager._safe_extract_base_user("user-realuser-country-us-session-abc")
+            == "realuser"
+        )
         assert manager._safe_extract_base_user("") == "default"
         assert manager._safe_extract_base_user(None) == "default"

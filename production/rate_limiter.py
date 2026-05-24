@@ -1,5 +1,3 @@
-from collections import defaultdict
-import logging
 """
 Rate Limiting per Domain/Account
 Prevents getting blocked by enforcing per-domain and per-account limits.
@@ -32,15 +30,18 @@ instances as long as session names are unique.
 See AgentBrowser class docs + README "Multi-Instance & Scalability (#87)" section.
 """
 
+from collections import defaultdict
+import logging
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
-from dataclasses import dataclass
 
 
 @dataclass
 class RateLimitConfig:
     """Configuration for rate limiting."""
+
     requests_per_minute: int = 8
     requests_per_hour: int = 40
     cooldown_seconds: int = 60
@@ -58,7 +59,9 @@ class DomainRateLimiter:
         self.request_times: Dict[str, list] = defaultdict(list)
         self.last_request: Dict[str, datetime] = {}
 
-    def set_limit(self, domain: str, config: RateLimitConfig, namespace: Optional[str] = None):
+    def set_limit(
+        self, domain: str, config: RateLimitConfig, namespace: Optional[str] = None
+    ):
         """Set custom rate limit for a domain (namespaced if provided)."""
         key = self._key(domain, namespace)
         self.configs[key] = config
@@ -66,33 +69,37 @@ class DomainRateLimiter:
     def _key(self, domain: str, namespace: Optional[str] = None) -> str:
         return f"{namespace}:{domain}" if namespace else domain
 
-    def _get_config(self, domain: str, namespace: Optional[str] = None) -> RateLimitConfig:
+    def _get_config(
+        self, domain: str, namespace: Optional[str] = None
+    ) -> RateLimitConfig:
         """Get config for domain or return default (namespaced lookup first)."""
         key = self._key(domain, namespace)
         return self.configs.get(key, self.configs.get(domain, RateLimitConfig()))
 
-    async def wait_if_needed(self, domain: str, namespace: Optional[str] = None) -> float:
+    async def wait_if_needed(
+        self, domain: str, namespace: Optional[str] = None
+    ) -> float:
         """Wait if rate limit would be exceeded. Returns wait time in seconds.
         Pass namespace for isolated multi-agent usage (#87 P1).
         P2 deprecation/compat fix (#104, #67, #58): timezone-aware utc datetimes.
         """
 
-        now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware (no naive/deprecated patterns)
+        now = datetime.now(
+            timezone.utc
+        )  # P2 #104/#67: timezone-aware (no naive/deprecated patterns)
         config = self._get_config(domain, namespace)
         key = self._key(domain, namespace)
 
         # Clean old requests
         minute_ago = now - timedelta(minutes=1)
-        hour_ago = now - timedelta(hours=1)
 
-        self.request_times[key] = [
-            t for t in self.request_times[key]
-            if t > minute_ago
-        ]
+        self.request_times[key] = [t for t in self.request_times[key] if t > minute_ago]
 
         # Check per-minute limit
         if len(self.request_times[key]) >= config.requests_per_minute:
-            wait_time = (self.request_times[key][0] + timedelta(minutes=1) - now).total_seconds()
+            wait_time = (
+                self.request_times[key][0] + timedelta(minutes=1) - now
+            ).total_seconds()
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
                 now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware
@@ -100,8 +107,7 @@ class DomainRateLimiter:
                 # Fixes #116 while preserving exact namespace isolation and per-account logic
                 minute_ago = now - timedelta(minutes=1)
                 self.request_times[key] = [
-                    t for t in self.request_times[key]
-                    if t > minute_ago
+                    t for t in self.request_times[key] if t > minute_ago
                 ]
                 self.request_times[key].append(now)
                 self.last_request[key] = now
@@ -118,8 +124,7 @@ class DomainRateLimiter:
                 # Fixes #116 while preserving exact namespace isolation and per-account logic
                 minute_ago = now - timedelta(minutes=1)
                 self.request_times[key] = [
-                    t for t in self.request_times[key]
-                    if t > minute_ago
+                    t for t in self.request_times[key] if t > minute_ago
                 ]
                 self.request_times[key].append(now)
                 self.last_request[key] = now
@@ -141,14 +146,18 @@ class AccountRateLimiter:
     def __init__(self):
         self.account_limiters: Dict[str, DomainRateLimiter] = {}
 
-    def get_limiter(self, account: str, namespace: Optional[str] = None) -> DomainRateLimiter:
+    def get_limiter(
+        self, account: str, namespace: Optional[str] = None
+    ) -> DomainRateLimiter:
         """Get or create rate limiter for account (namespaced)."""
         ns_key = f"{namespace}:{account}" if namespace else account
         if ns_key not in self.account_limiters:
             self.account_limiters[ns_key] = DomainRateLimiter()
         return self.account_limiters[ns_key]
 
-    async def wait_if_needed(self, account: str, domain: str, namespace: Optional[str] = None) -> float:
+    async def wait_if_needed(
+        self, account: str, domain: str, namespace: Optional[str] = None
+    ) -> float:
         """Wait if needed for this account + domain (isolated by namespace if given)."""
         limiter = self.get_limiter(account, namespace)
         return await limiter.wait_if_needed(domain, namespace=namespace)
@@ -209,7 +218,11 @@ class ToolRateLimiter:
 
             # --- total session cap ---
             self._total_calls = [t for t in self._total_calls if t > hour_ago]
-            total_utilization = len(self._total_calls) / self.total_calls_cap if self.total_calls_cap else 0
+            total_utilization = (
+                len(self._total_calls) / self.total_calls_cap
+                if self.total_calls_cap
+                else 0
+            )
 
             if total_utilization >= 0.8:
                 self._logger.warning(
@@ -230,7 +243,11 @@ class ToolRateLimiter:
             self._tool_calls[tool_name] = [
                 t for t in self._tool_calls[tool_name] if t > minute_ago
             ]
-            tool_utilization = len(self._tool_calls[tool_name]) / self.tool_calls_per_minute if self.tool_calls_per_minute else 0
+            tool_utilization = (
+                len(self._tool_calls[tool_name]) / self.tool_calls_per_minute
+                if self.tool_calls_per_minute
+                else 0
+            )
 
             if tool_utilization >= 0.8:
                 self._logger.warning(

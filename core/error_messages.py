@@ -110,18 +110,19 @@ PLAYWRIGHT_ERROR_PATTERNS = [
 ]
 
 
-def make_user_friendly(error: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def make_user_friendly(
+    error: str, context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """Convert a raw error message into a user-friendly format with suggestions.
-    
+
     Args:
         error: The raw error message.
         context: Optional context dict (e.g., url, selector, platform).
-    
+
     Returns:
         Dict with 'friendly_message', 'suggestions', and 'raw_error'.
     """
-    error_lower = error.lower()
-    
+
     for pattern_info in PLAYWRIGHT_ERROR_PATTERNS:
         match = re.search(pattern_info["pattern"], error, re.IGNORECASE)
         if match:
@@ -132,14 +133,14 @@ def make_user_friendly(error: str, context: Optional[Dict[str, Any]] = None) -> 
                     friendly = friendly.format(*match.groups())
                 except (IndexError, KeyError):
                     pass
-            
+
             return {
                 "friendly_message": friendly,
                 "suggestions": pattern_info["suggestions"],
                 "raw_error": error,
                 "context": context or {},
             }
-    
+
     # Fallback for unrecognized errors
     return {
         "friendly_message": f"An error occurred: {error[:100]}{'...' if len(error) > 100 else ''}",
@@ -164,28 +165,28 @@ def format_error_for_display(error_info: Dict[str, Any]) -> str:
     ]
     for i, suggestion in enumerate(error_info["suggestions"], 1):
         lines.append(f"  {i}. {suggestion}")
-    
+
     if error_info.get("context"):
         lines.append("")
         lines.append("Context:")
         for key, value in error_info["context"].items():
             lines.append(f"  {key}: {value}")
-    
+
     return "\n".join(lines)
 
 
 class UserFriendlyError(Exception):
     """Exception that carries both raw and user-friendly error information."""
-    
+
     def __init__(self, raw_error: str, context: Optional[Dict[str, Any]] = None):
         self.raw_error = raw_error
         self.context = context or {}
         self.error_info = make_user_friendly(raw_error, context)
         super().__init__(self.error_info["friendly_message"])
-    
+
     def __str__(self) -> str:
         return format_error_for_display(self.error_info)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Return the full error info as a dict."""
         return self.error_info

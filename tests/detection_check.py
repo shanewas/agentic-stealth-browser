@@ -19,6 +19,7 @@ DETECTION_VECTORS = [
     "TLS fingerprint",
 ]
 
+
 def print_checklist():
     print("=== Detection Evasion Checklist ===")
     for v in DETECTION_VECTORS:

@@ -51,27 +51,40 @@ class TLSFingerprintManager:
                 "AES128-GCM-SHA256",
                 "AES256-GCM-SHA384",
                 "AES128-SHA",
-                "AES256-SHA"
+                "AES256-SHA",
             ],
             "extensions": [
-                "server_name", "extended_master_secret", "renegotiation_info",
-                "supported_groups", "ec_point_formats", "session_ticket",
-                "application_layer_protocol_negotiation", "status_request",
-                "signature_algorithms", "signed_certificate_timestamp",
-                "key_share", "psk_key_exchange_modes", "supported_versions",
-                "compress_certificate", "application_settings"
+                "server_name",
+                "extended_master_secret",
+                "renegotiation_info",
+                "supported_groups",
+                "ec_point_formats",
+                "session_ticket",
+                "application_layer_protocol_negotiation",
+                "status_request",
+                "signature_algorithms",
+                "signed_certificate_timestamp",
+                "key_share",
+                "psk_key_exchange_modes",
+                "supported_versions",
+                "compress_certificate",
+                "application_settings",
             ],
             "elliptic_curves": ["X25519", "secp256r1", "secp384r1"],
             "signature_algorithms": [
-                "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256",
-                "rsa_pkcs1_sha256", "ecdsa_secp384r1_sha384",
-                "rsa_pss_rsae_sha384", "rsa_pkcs1_sha384",
-                "rsa_pss_rsae_sha512", "rsa_pkcs1_sha512"
+                "ecdsa_secp256r1_sha256",
+                "rsa_pss_rsae_sha256",
+                "rsa_pkcs1_sha256",
+                "ecdsa_secp384r1_sha384",
+                "rsa_pss_rsae_sha384",
+                "rsa_pkcs1_sha384",
+                "rsa_pss_rsae_sha512",
+                "rsa_pkcs1_sha512",
             ],
             "recommended_args": [
                 "--enable-quic",
                 "--tls13-variant=final",
-            ]
+            ],
         },
         Region.EU: {
             "name": "chrome_124_windows_eu",
@@ -85,22 +98,31 @@ class TLSFingerprintManager:
                 "ECDHE-ECDSA-AES256-GCM-SHA384",
                 "ECDHE-RSA-AES256-GCM-SHA384",
                 "ECDHE-ECDSA-CHACHA20-POLY1305",
-                "ECDHE-RSA-CHACHA20-POLY1305"
+                "ECDHE-RSA-CHACHA20-POLY1305",
             ],
             "extensions": [
-                "server_name", "extended_master_secret", "renegotiation_info",
-                "supported_groups", "ec_point_formats", "session_ticket",
-                "application_layer_protocol_negotiation", "status_request",
-                "signature_algorithms", "key_share", "supported_versions"
+                "server_name",
+                "extended_master_secret",
+                "renegotiation_info",
+                "supported_groups",
+                "ec_point_formats",
+                "session_ticket",
+                "application_layer_protocol_negotiation",
+                "status_request",
+                "signature_algorithms",
+                "key_share",
+                "supported_versions",
             ],
             "elliptic_curves": ["X25519", "secp256r1", "secp384r1"],
             "signature_algorithms": [
-                "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256",
-                "rsa_pkcs1_sha256", "ecdsa_secp384r1_sha384"
+                "ecdsa_secp256r1_sha256",
+                "rsa_pss_rsae_sha256",
+                "rsa_pkcs1_sha256",
+                "ecdsa_secp384r1_sha384",
             ],
             "recommended_args": [
                 "--enable-quic",
-            ]
+            ],
         },
         Region.JAPAN: {
             "name": "chrome_124_windows_japan",
@@ -115,24 +137,33 @@ class TLSFingerprintManager:
                 "ECDHE-RSA-AES256-GCM-SHA384",
                 "ECDHE-ECDSA-CHACHA20-POLY1305",
                 "ECDHE-RSA-CHACHA20-POLY1305",
-                "ECDHE-RSA-AES128-SHA256"
+                "ECDHE-RSA-AES128-SHA256",
             ],
             "extensions": [
-                "server_name", "extended_master_secret", "renegotiation_info",
-                "supported_groups", "ec_point_formats", "session_ticket",
-                "application_layer_protocol_negotiation", "status_request",
-                "signature_algorithms", "key_share", "supported_versions",
-                "compress_certificate"
+                "server_name",
+                "extended_master_secret",
+                "renegotiation_info",
+                "supported_groups",
+                "ec_point_formats",
+                "session_ticket",
+                "application_layer_protocol_negotiation",
+                "status_request",
+                "signature_algorithms",
+                "key_share",
+                "supported_versions",
+                "compress_certificate",
             ],
             "elliptic_curves": ["X25519", "secp256r1", "secp384r1"],
             "signature_algorithms": [
-                "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256",
-                "rsa_pkcs1_sha256", "ecdsa_secp384r1_sha384"
+                "ecdsa_secp256r1_sha256",
+                "rsa_pss_rsae_sha256",
+                "rsa_pkcs1_sha256",
+                "ecdsa_secp384r1_sha384",
             ],
             "recommended_args": [
                 "--enable-quic",
                 "--tls13-variant=final",
-            ]
+            ],
         },
         Region.KOREA: {
             "name": "chrome_124_windows_korea",
@@ -144,22 +175,30 @@ class TLSFingerprintManager:
                 "ECDHE-ECDSA-AES128-GCM-SHA256",
                 "ECDHE-RSA-AES128-GCM-SHA256",
                 "ECDHE-ECDSA-AES256-GCM-SHA384",
-                "ECDHE-RSA-AES256-GCM-SHA384"
+                "ECDHE-RSA-AES256-GCM-SHA384",
             ],
             "extensions": [
-                "server_name", "extended_master_secret", "renegotiation_info",
-                "supported_groups", "ec_point_formats", "session_ticket",
-                "application_layer_protocol_negotiation", "status_request",
-                "signature_algorithms", "key_share", "supported_versions"
+                "server_name",
+                "extended_master_secret",
+                "renegotiation_info",
+                "supported_groups",
+                "ec_point_formats",
+                "session_ticket",
+                "application_layer_protocol_negotiation",
+                "status_request",
+                "signature_algorithms",
+                "key_share",
+                "supported_versions",
             ],
             "elliptic_curves": ["X25519", "secp256r1"],
             "signature_algorithms": [
-                "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256",
-                "rsa_pkcs1_sha256"
+                "ecdsa_secp256r1_sha256",
+                "rsa_pss_rsae_sha256",
+                "rsa_pkcs1_sha256",
             ],
             "recommended_args": [
                 "--enable-quic",
-            ]
+            ],
         },
         Region.GLOBAL: {
             "name": "chrome_124_windows_generic",
@@ -173,27 +212,38 @@ class TLSFingerprintManager:
                 "ECDHE-ECDSA-AES256-GCM-SHA384",
                 "ECDHE-RSA-AES256-GCM-SHA384",
                 "ECDHE-ECDSA-CHACHA20-POLY1305",
-                "ECDHE-RSA-CHACHA20-POLY1305"
+                "ECDHE-RSA-CHACHA20-POLY1305",
             ],
             "extensions": [
-                "server_name", "extended_master_secret", "renegotiation_info",
-                "supported_groups", "ec_point_formats", "session_ticket",
-                "application_layer_protocol_negotiation", "status_request",
-                "signature_algorithms", "key_share", "supported_versions"
+                "server_name",
+                "extended_master_secret",
+                "renegotiation_info",
+                "supported_groups",
+                "ec_point_formats",
+                "session_ticket",
+                "application_layer_protocol_negotiation",
+                "status_request",
+                "signature_algorithms",
+                "key_share",
+                "supported_versions",
             ],
             "elliptic_curves": ["X25519", "secp256r1", "secp384r1"],
             "signature_algorithms": [
-                "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256",
-                "rsa_pkcs1_sha256", "ecdsa_secp384r1_sha384"
+                "ecdsa_secp256r1_sha256",
+                "rsa_pss_rsae_sha256",
+                "rsa_pkcs1_sha256",
+                "ecdsa_secp384r1_sha384",
             ],
             "recommended_args": [
                 "--enable-quic",
                 "--tls13-variant=final",
-            ]
-        }
+            ],
+        },
     }
 
-    def __init__(self, region: Region = Region.GLOBAL, session_name: Optional[str] = None):
+    def __init__(
+        self, region: Region = Region.GLOBAL, session_name: Optional[str] = None
+    ):
         self.region = region
         self.session_name = session_name or "default"
         self.logger = AuditLogger(session_name or "tls")
@@ -207,10 +257,12 @@ class TLSFingerprintManager:
         """Returns recommended Chromium launch arguments for this TLS profile."""
         args = self.current_profile.get("recommended_args", [])
         # Add some entropy reduction
-        args.extend([
-            "--disable-blink-features=AutomationControlled",
-            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        ])
+        args.extend(
+            [
+                "--disable-blink-features=AutomationControlled",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            ]
+        )
         return args
 
     def log_fingerprint_choice(self):
@@ -223,8 +275,8 @@ class TLSFingerprintManager:
                 "profile_name": profile["name"],
                 "description": profile["description"],
                 "cipher_count": len(profile["ciphers"]),
-                "extension_count": len(profile["extensions"])
-            }
+                "extension_count": len(profile["extensions"]),
+            },
         )
 
     @staticmethod
@@ -245,19 +297,23 @@ class TLSFingerprintManager:
         """Explicit documentation of TLS capabilities vs limits (for #114).
         Call this in debug/audit flows for evidence.
         """
-        return ("High-quality region-aligned cipher/extension/curve profiles + launch arg recommendations. "
-                "Does NOT provide true low-level ClientHello wire spoofing in stock Playwright. "
-                "See module docstring and issue #114 for details on utls/proxy options.")
+        return (
+            "High-quality region-aligned cipher/extension/curve profiles + launch arg recommendations. "
+            "Does NOT provide true low-level ClientHello wire spoofing in stock Playwright. "
+            "See module docstring and issue #114 for details on utls/proxy options."
+        )
 
 
 # Convenience function
-def get_tls_manager(region: str = "global", session_name: Optional[str] = None) -> TLSFingerprintManager:
+def get_tls_manager(
+    region: str = "global", session_name: Optional[str] = None
+) -> TLSFingerprintManager:
     region_map = {
         "us": Region.US,
         "eu": Region.EU,
         "japan": Region.JAPAN,
         "korea": Region.KOREA,
-        "global": Region.GLOBAL
+        "global": Region.GLOBAL,
     }
     r = region_map.get(region.lower(), Region.GLOBAL)
     return TLSFingerprintManager(r, session_name)

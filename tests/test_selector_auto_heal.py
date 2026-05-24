@@ -1,19 +1,27 @@
 """Tests for selector auto-heal and confidence scoring in v1.2.0."""
 
-import pytest
-
 from workflows.selector_generator import SelectorGenerator
 
 
 class TestConfidenceScoring:
     def test_id_selector_high_confidence(self):
-        info = {"tagName": "button", "id": "submit-btn", "className": "btn", "textContent": "Submit"}
+        info = {
+            "tagName": "button",
+            "id": "submit-btn",
+            "className": "btn",
+            "textContent": "Submit",
+        }
         candidates = SelectorGenerator.generate_candidates(info)
         confidence = SelectorGenerator.compute_confidence(candidates)
         assert confidence == 0.95
 
     def test_class_only_medium_confidence(self):
-        info = {"tagName": "div", "id": "", "className": "container", "textContent": "Hello"}
+        info = {
+            "tagName": "div",
+            "id": "",
+            "className": "container",
+            "textContent": "Hello",
+        }
         candidates = SelectorGenerator.generate_candidates(info)
         confidence = SelectorGenerator.compute_confidence(candidates)
         assert confidence == 0.50
@@ -29,7 +37,12 @@ class TestConfidenceScoring:
         assert confidence == 0.0
 
     def test_get_best_selector_with_confidence(self):
-        info = {"tagName": "button", "id": "save-btn", "className": "primary large", "textContent": "Save"}
+        info = {
+            "tagName": "button",
+            "id": "save-btn",
+            "className": "primary large",
+            "textContent": "Save",
+        }
         selector, confidence = SelectorGenerator.get_best_selector_with_confidence(info)
         assert selector == "#save-btn"
         assert confidence == 0.95
@@ -52,7 +65,9 @@ class TestAutoHealSelector:
 
     def test_heal_text_selector(self):
         healed = SelectorGenerator.auto_heal_selector('button:has-text("Submit")')
-        assert any('has-text' in h for h in healed) or any('text*=' in h for h in healed)
+        assert any("has-text" in h for h in healed) or any(
+            "text*=" in h for h in healed
+        )
 
     def test_heal_nth_child(self):
         healed = SelectorGenerator.auto_heal_selector("div:nth-child(3)")

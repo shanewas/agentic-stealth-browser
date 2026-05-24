@@ -28,7 +28,7 @@ def get_realistic_headers() -> Dict[str, str]:
 
 def get_extra_http_headers() -> Dict[str, str]:
     """Additional headers for Playwright context.
-    
+
     Improved for #231: More complete and consistent client hints.
     These should match the User-Agent and TLS fingerprint used in the same session.
     """

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 @dataclass
 class PersonaTrait:
     """A single behavioral trait that can evolve over time."""
+
     name: str
     current_value: float
     target_value: float
@@ -28,8 +29,14 @@ class PersonaTrait:
         if days_elapsed <= 0:
             return
 
-        change = (self.target_value - self.current_value) * self.evolution_rate * days_elapsed
-        self.current_value = max(self.min_value, min(self.max_value, self.current_value + change))
+        change = (
+            (self.target_value - self.current_value)
+            * self.evolution_rate
+            * days_elapsed
+        )
+        self.current_value = max(
+            self.min_value, min(self.max_value, self.current_value + change)
+        )
         self.last_updated = time.time()
 
     def is_stable(self, tolerance: float = 0.01) -> bool:
@@ -40,6 +47,7 @@ class PersonaTrait:
 @dataclass
 class PersonaProfile:
     """A complete behavioral persona profile."""
+
     name: str
     # Behavioral traits
     typing_speed: float = 0.5  # 0=slow, 1=fast
@@ -168,8 +176,13 @@ class PersonaRotator:
     """
 
     BEHAVIORAL_TRAITS = [
-        "typing_speed", "scroll_depth", "mouse_precision",
-        "pause_frequency", "distraction_rate", "session_length", "site_variety"
+        "typing_speed",
+        "scroll_depth",
+        "mouse_precision",
+        "pause_frequency",
+        "distraction_rate",
+        "session_length",
+        "site_variety",
     ]
 
     def __init__(
@@ -241,11 +254,13 @@ class PersonaRotator:
         if self._is_transition_complete():
             self._complete_transition()
 
-        self._evolution_log.append({
-            "timestamp": time.time(),
-            "days_elapsed": days_elapsed,
-            "traits": {name: t.current_value for name, t in self._traits.items()},
-        })
+        self._evolution_log.append(
+            {
+                "timestamp": time.time(),
+                "days_elapsed": days_elapsed,
+                "traits": {name: t.current_value for name, t in self._traits.items()},
+            }
+        )
 
     def get_behavior_params(self) -> Dict[str, Any]:
         """Get current behavioral parameters for use in human behavior simulation."""
@@ -310,8 +325,12 @@ class PersonaRotator:
         """Get full rotator status."""
         return {
             "account_id": self.account_id,
-            "current_persona": self._current_persona.name if self._current_persona else None,
-            "target_persona": self._target_persona.name if self._target_persona else None,
+            "current_persona": self._current_persona.name
+            if self._current_persona
+            else None,
+            "target_persona": self._target_persona.name
+            if self._target_persona
+            else None,
             "transition_progress": self.get_transition_progress(),
             "is_transitioning": self.is_transitioning(),
             "days_active": self.days_active,
@@ -339,10 +358,7 @@ class PersonaRotator:
         if not self._target_persona:
             return True
 
-        return all(
-            trait.is_stable()
-            for trait in self._traits.values()
-        )
+        return all(trait.is_stable() for trait in self._traits.values())
 
     def _complete_transition(self):
         """Complete the transition and set target as current."""
@@ -373,7 +389,7 @@ class PersonaRotator:
             self._logger.log_action(
                 "persona_rotator",
                 {"account_id": self.account_id, "message": msg},
-                level="info"
+                level="info",
             )
         else:
             print(f"[PersonaRotator:{self.account_id}] {msg}")

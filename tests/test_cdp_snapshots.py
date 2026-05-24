@@ -26,9 +26,7 @@ class TestCDPSnapshotMouse:
 
         rng = random.Random(42)
         hb = HumanBehavior(FakePage(), rng=rng)
-        points = asyncio.run(
-            hb._bezier_curve((100, 100), (400, 300), steps=20)
-        )
+        points = asyncio.run(hb._bezier_curve((100, 100), (400, 300), steps=20))
         # Snapshot: should always produce steps+1 points
         assert len(points) == 21
         # Points should generally progress from start to end
@@ -47,9 +45,7 @@ class TestCDPSnapshotMouse:
 
         rng = random.Random(42)
         hb = HumanBehavior(FakePage(), rng=rng)
-        points = asyncio.run(
-            hb._bezier_curve((200, 200), (600, 400), steps=15)
-        )
+        points = asyncio.run(hb._bezier_curve((200, 200), (600, 400), steps=15))
         for x, y in points:
             assert 150 <= x <= 650, f"x={x} out of bounds"
             assert 150 <= y <= 450, f"y={y} out of bounds"
@@ -61,6 +57,7 @@ class TestCDPSnapshotKeyboard:
     def test_typing_delay_ranges(self):
         """Typing delays should be within expected ranges."""
         from behavior.persona_rotator import PersonaRotator
+
         rotator = PersonaRotator("test")
         rotator.set_current_persona("casual_user")
         params = rotator.get_behavior_params()
@@ -76,6 +73,7 @@ class TestCDPSnapshotScroll:
     def test_scroll_steps_within_range(self):
         """Scroll steps should be within expected range."""
         import random
+
         # With full realism, steps should be 5-12
         rng = random.Random(42)
         steps = rng.randint(5, 12)
@@ -88,6 +86,7 @@ class TestCDPSnapshotStealth:
     def test_stealth_script_contains_expected_sections(self):
         """Stealth script should contain all expected sections."""
         from stealth.advanced_stealth import get_stealth_script
+
         script = get_stealth_script()
         # These are the key sections that must be present
         expected_sections = [
@@ -110,5 +109,6 @@ class TestCDPSnapshotStealth:
     def test_stealth_script_no_destructive_mangling(self):
         """Stealth script should not use destructive canvas mangling."""
         from stealth.advanced_stealth import get_stealth_script
+
         script = get_stealth_script()
         assert "replace(/[0-9]" not in script, "Destructive mangling should be gone"

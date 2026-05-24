@@ -71,7 +71,9 @@ class TestAccountWarmerPhases:
             WarmingPhase(1, 1, 10, 5, 500, 10, 2, 5.0, 15.0),
             WarmingPhase(2, 1, 20, 8, 1000, 15, 3, 3.0, 10.0),
         ]
-        warmer = AccountWarmer("test_account", data_dir="/tmp/test_warming", schedule=schedule)
+        warmer = AccountWarmer(
+            "test_account", data_dir="/tmp/test_warming", schedule=schedule
+        )
         warmer.start()
 
         assert warmer.phase_index == 0

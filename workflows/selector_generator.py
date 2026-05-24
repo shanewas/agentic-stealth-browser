@@ -9,7 +9,13 @@ _GENERATED_ID_PATTERNS = [
 ]
 
 _COMMON_GENERATED_PREFIXES = [
-    "ember", "react-", "vue-", "ng-", "__", "_", "data-v-",
+    "ember",
+    "react-",
+    "vue-",
+    "ng-",
+    "__",
+    "_",
+    "data-v-",
 ]
 
 DYNAMIC_CLASS_PATTERNS = [
@@ -41,7 +47,6 @@ def _escape_css_string(value: str) -> str:
 
 
 class SelectorGenerator:
-
     @staticmethod
     def generate_candidates(element_info: dict) -> List[Dict[str, Any]]:
         candidates: List[Dict[str, Any]] = []
@@ -62,67 +67,87 @@ class SelectorGenerator:
             attributes = {k.lower(): v for k, v in attributes.items()}
 
         if el_id and not _is_generated_id(el_id):
-            candidates.append({
-                "selector": f"#{el_id}",
-                "strategy": "id",
-                "stability": 0.95,
-            })
+            candidates.append(
+                {
+                    "selector": f"#{el_id}",
+                    "strategy": "id",
+                    "stability": 0.95,
+                }
+            )
 
         for attr_key in ("data-testid", "data-test", "data-qa", "aria-label"):
             val = attributes.get(attr_key)
             if val:
-                candidates.append({
-                    "selector": f'[{attr_key}="{_escape_css_string(str(val))}"]',
-                    "strategy": "attribute",
-                    "stability": 0.90,
-                })
+                candidates.append(
+                    {
+                        "selector": f'[{attr_key}="{_escape_css_string(str(val))}"]',
+                        "strategy": "attribute",
+                        "stability": 0.90,
+                    }
+                )
 
         for attr_key, attr_val in attributes.items():
-            if attr_key.startswith("data-") and attr_key not in ("data-testid", "data-test", "data-qa"):
-                candidates.append({
-                    "selector": f'[{attr_key}="{_escape_css_string(str(attr_val))}"]',
-                    "strategy": "attribute",
-                    "stability": 0.80,
-                })
+            if attr_key.startswith("data-") and attr_key not in (
+                "data-testid",
+                "data-test",
+                "data-qa",
+            ):
+                candidates.append(
+                    {
+                        "selector": f'[{attr_key}="{_escape_css_string(str(attr_val))}"]',
+                        "strategy": "attribute",
+                        "stability": 0.80,
+                    }
+                )
 
         if class_name and tag:
             classes = class_name.strip().split()
             for cls in classes:
                 if not cls:
                     continue
-                candidates.append({
-                    "selector": f"{tag}.{cls}",
-                    "strategy": "class",
-                    "stability": 0.60,
-                })
+                candidates.append(
+                    {
+                        "selector": f"{tag}.{cls}",
+                        "strategy": "class",
+                        "stability": 0.60,
+                    }
+                )
 
         if text_content and tag in ("button", "a", "input", "span"):
             safe_text = _escape_css_string(text_content[:80])
             if len(text_content) > 80:
-                candidates.append({
-                    "selector": f'{tag}[text*="{safe_text[:40]}"]',
-                    "strategy": "text",
-                    "stability": 0.50,
-                })
+                candidates.append(
+                    {
+                        "selector": f'{tag}[text*="{safe_text[:40]}"]',
+                        "strategy": "text",
+                        "stability": 0.50,
+                    }
+                )
             else:
-                candidates.append({
-                    "selector": f'{tag}:has-text("{safe_text}")',
-                    "strategy": "text",
-                    "stability": 0.50,
-                })
+                candidates.append(
+                    {
+                        "selector": f'{tag}:has-text("{safe_text}")',
+                        "strategy": "text",
+                        "stability": 0.50,
+                    }
+                )
 
         if tag:
-            candidates.append({
-                "selector": tag,
-                "strategy": "tag",
-                "stability": 0.40,
-            })
+            candidates.append(
+                {
+                    "selector": tag,
+                    "strategy": "tag",
+                    "stability": 0.40,
+                }
+            )
 
-        candidates.append({
-            "selector": f"{tag}:nth-child(1)" if tag else "*:nth-child(1)",
-            "strategy": "nth",
-            "stability": 0.30,
-        })
+        candidates.append(
+            {
+                "selector": f"{tag}:nth-child(1)" if tag else "*:nth-child(1)",
+                "strategy": "nth",
+                "stability": 0.30,
+            }
+        )
 
         candidates.sort(key=lambda c: c["stability"], reverse=True)
         return candidates
@@ -173,9 +198,11 @@ class SelectorGenerator:
             if base:
                 healed.append(base)
             if id_part:
-                healed.append(f"[id*=\"{_escape_css_string(id_part[-8:])}\"]")
+                healed.append(f'[id*="{_escape_css_string(id_part[-8:])}"]')
                 for attr_test in ("data-testid", "data-test", "data-qa", "aria-label"):
-                    healed.append(f"[{attr_test}*=\"{_escape_css_string(id_part[-4:])}\"]")
+                    healed.append(
+                        f'[{attr_test}*="{_escape_css_string(id_part[-4:])}"]'
+                    )
 
         if "." in original:
             parts = original.split(".")
@@ -183,10 +210,10 @@ class SelectorGenerator:
             for cls in parts[1:]:
                 if not cls:
                     continue
-                cls_base = re.split(r'[:\[#]', cls)[0]
+                cls_base = re.split(r"[:\[#]", cls)[0]
                 if cls_base:
                     healed.append(f"{tag}.{cls_base}")
-                    healed.append(f"[class*=\"{_escape_css_string(cls_base)}\"]")
+                    healed.append(f'[class*="{_escape_css_string(cls_base)}"]')
             if not healed:
                 healed.append(tag)
 
@@ -197,7 +224,7 @@ class SelectorGenerator:
             healed.append(f'[text*="{_escape_css_string(text_content[:20])}"]')
 
         if ":nth-child" in original or ":nth-of-type" in original:
-            bare = re.sub(r':nth-(?:child|of-type)\(\d+\)', '', original)
+            bare = re.sub(r":nth-(?:child|of-type)\(\d+\)", "", original)
             if bare and bare not in healed:
                 healed.append(bare)
 

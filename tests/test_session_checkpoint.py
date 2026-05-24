@@ -26,7 +26,9 @@ class MockPage:
     def __init__(self):
         self._url = "https://example.com"
         self._title = "Example"
-        self._cookies = [{"name": "session", "value": "abc123", "domain": "example.com"}]
+        self._cookies = [
+            {"name": "session", "value": "abc123", "domain": "example.com"}
+        ]
         self._local_storage = {"key1": "value1", "key2": "value2"}
         self._session_storage = {"temp": "data"}
         self._calls = []
@@ -45,7 +47,9 @@ class MockPage:
     def __init__(self):
         self._url = "https://example.com"
         self._title = "Example"
-        self._cookies = [{"name": "session", "value": "abc123", "domain": "example.com"}]
+        self._cookies = [
+            {"name": "session", "value": "abc123", "domain": "example.com"}
+        ]
         self._local_storage = {"key1": "value1", "key2": "value2"}
         self._session_storage = {"temp": "data"}
         self._calls = []
@@ -237,9 +241,8 @@ class TestSessionManagerBrowser:
         page = MockPage()
 
         import asyncio
-        cp = asyncio.run(
-            manager.capture_from_browser(page, account_id="test")
-        )
+
+        cp = asyncio.run(manager.capture_from_browser(page, account_id="test"))
 
         assert cp.metadata.account_id == "test"
         assert len(cp.cookies) == 1
@@ -260,9 +263,8 @@ class TestSessionManagerBrowser:
         )
 
         import asyncio
-        asyncio.run(
-            manager.restore_to_browser(page, cp)
-        )
+
+        asyncio.run(manager.restore_to_browser(page, cp))
 
         # Check that goto was called
         assert any(call[0] == "goto" for call in page._calls)
@@ -274,9 +276,8 @@ class TestSessionManagerBrowser:
 
         cookies = [{"name": "test", "value": "cookie", "domain": "example.com"}]
         import asyncio
-        asyncio.run(
-            manager.restore_cookies(page, cookies)
-        )
+
+        asyncio.run(manager.restore_cookies(page, cookies))
 
         assert len(page.context._added_cookies) == 1
 

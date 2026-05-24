@@ -73,7 +73,9 @@ class ApprovalGate:
             "github.com",
             "google.com",
         ]
-        self._allow_callback: Optional[Callable[[ApprovalRequest], ApprovalDecision]] = None
+        self._allow_callback: Optional[
+            Callable[[ApprovalRequest], ApprovalDecision]
+        ] = None
         self._pending: Dict[str, ApprovalRequest] = {}
         self._decisions: List[ApprovalResult] = []
 
@@ -88,6 +90,7 @@ class ApprovalGate:
 
     def _domain_from_url(self, url: str) -> str:
         from urllib.parse import urlparse
+
         try:
             p = urlparse(url)
             return (p.hostname or p.netloc or "").lower()

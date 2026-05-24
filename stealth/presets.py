@@ -21,6 +21,7 @@ from stealth.tls_fingerprint import Region
 @dataclass
 class PlatformPreset:
     """Recommended settings bundle for a target platform."""
+
     name: str
     description: str
     tls_region: Region = Region.GLOBAL
@@ -63,7 +64,7 @@ LINKEDIN_2026 = PlatformPreset(
         "5. If 'unusual activity' appears, immediately trigger recovery with proxy/session rotation + 5+ min backoff.\n"
         "6. Viewport now persona-varied (e.g. 1920x1080 US / 1440x900 EU) + screen/DPR/orient spoof for #124 #198. Matches real desktop variety."
     ),
-    extra_patches=["linkedin_safe_scroll", "conservative_mouse_jitter"]
+    extra_patches=["linkedin_safe_scroll", "conservative_mouse_jitter"],
 )
 
 AMAZON_2026 = PlatformPreset(
@@ -80,7 +81,7 @@ AMAZON_2026 = PlatformPreset(
         "Amazon is sensitive to timing anomalies and non-US locales on .com.\n"
         "Heavy warm_up helps; rotate residential proxies aggressively on 403/503.\n"
         "Consider Japan/EU presets for amazon.co.jp / amazon.de."
-    )
+    ),
 )
 
 UPWORK_2026 = PlatformPreset(
@@ -97,7 +98,7 @@ UPWORK_2026 = PlatformPreset(
         "Upwork values consistency. Use the exact same persona (cookies + fingerprint) for weeks.\n"
         "Heavy warm_up + natural proposal reading simulation before sending messages.\n"
         "Load fresh cookies from your real Upwork browser profile."
-    )
+    ),
 )
 
 CLOUDFLARE_GENERIC = PlatformPreset(
@@ -110,7 +111,7 @@ CLOUDFLARE_GENERIC = PlatformPreset(
     recovery_base_backoff=20,
     locale="en-US",
     timezone_id="UTC",
-    notes="Cloudflare challenges are best beaten by clean TLS + no webdriver signals + realistic first navigation timing. Avoid headless indicators."
+    notes="Cloudflare challenges are best beaten by clean TLS + no webdriver signals + realistic first navigation timing. Avoid headless indicators.",
 )
 
 GENERAL_HIGH_STEALTH = PlatformPreset(
@@ -123,7 +124,7 @@ GENERAL_HIGH_STEALTH = PlatformPreset(
     recovery_base_backoff=30,
     locale="en-US",
     timezone_id="America/New_York",
-    notes="Use as baseline then specialize. Combine with region switching for geo-targeted sites (JP/KR/EU presets)."
+    notes="Use as baseline then specialize. Combine with region switching for geo-targeted sites (JP/KR/EU presets).",
 )
 
 # #277: minimal viable stealth light preset (speed-first)
@@ -185,7 +186,9 @@ def get_linkedin_2026_preset() -> PlatformPreset:
 
 
 # Helper to merge preset into launch config (used by AgentBrowser)
-def build_launch_config_from_preset(preset: PlatformPreset, base_headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def build_launch_config_from_preset(
+    preset: PlatformPreset, base_headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """Returns a dict of launch overrides derived from the preset (tls_region, headers, etc.)."""
     headers = dict(base_headers or {})
     headers.update(preset.recommended_headers_overrides)
@@ -222,8 +225,11 @@ from typing import Dict, Any, Optional
 @dataclass(frozen=True)
 class DeviceProfile:
     """Core device + browser environment profile (centralizes viewport, UA, locale, tz etc)."""
+
     name: str = "win_chrome_124_desktop"
-    viewport: Dict[str, int] = field(default_factory=lambda: {"width": 1366, "height": 768})
+    viewport: Dict[str, int] = field(
+        default_factory=lambda: {"width": 1366, "height": 768}
+    )
     user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     locale: str = "en-US"
     timezone_id: str = "America/New_York"
@@ -242,6 +248,7 @@ class DeviceProfile:
 @dataclass
 class Persona:
     """User persona foundation. Wraps DeviceProfile for AgentBrowser launch etc."""
+
     name: str
     device: DeviceProfile = field(default_factory=DeviceProfile.default)
     description: str = ""
@@ -265,14 +272,25 @@ class Persona:
         }
 
 
-DEFAULT_PERSONA = Persona(name="professional_us_desktop", description="Baseline 2026 professional US desktop for P1 #109 foundation.")
+DEFAULT_PERSONA = Persona(
+    name="professional_us_desktop",
+    description="Baseline 2026 professional US desktop for P1 #109 foundation.",
+)
 PERSONAS = {"default": DEFAULT_PERSONA, "us_professional": DEFAULT_PERSONA}
+
 
 def get_persona(name: str = "default") -> Persona:
     return PERSONAS.get(name.lower().strip().replace("-", "_"), DEFAULT_PERSONA)
+
 
 def list_personas():
     return list(PERSONAS.keys())
 
 
-__all__ = ["Persona", "DeviceProfile", "DEFAULT_PERSONA", "get_persona", "list_personas"]
+__all__ = [
+    "Persona",
+    "DeviceProfile",
+    "DEFAULT_PERSONA",
+    "get_persona",
+    "list_personas",
+]

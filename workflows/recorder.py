@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from workflows.schema import SCHEMA_VERSION, Workflow, WorkflowStep, workflow_to_yaml_str
+from workflows.schema import Workflow, WorkflowStep, workflow_to_yaml_str
 from workflows.selector_generator import SelectorGenerator
 
 _NOISE_EVENTS = {
@@ -42,8 +42,11 @@ _NOISE_METHODS = {
 }
 
 _VARIABLE_PATTERNS = [
-    (re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"), "email", "{{email}}"),
-
+    (
+        re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
+        "email",
+        "{{email}}",
+    ),
     (re.compile(r"^\d{3}-?\d{3}-?\d{4}$"), "phone", "{{phone}}"),
     (re.compile(r"^https?://[^\s]+$"), "url", "{{url}}"),
     (re.compile(r"^[+\-]?\d+\.?\d*$"), "number", "{{number}}"),
@@ -61,7 +64,11 @@ def _detect_variable(text: str, element_info: Optional[Dict] = None) -> Optional
     if element_info:
         attrs = element_info.get("attributes", {})
         if isinstance(attrs, list):
-            attrs = {k.lower(): v for item in attrs for k, v in (item.items() if isinstance(item, dict) else [])}
+            attrs = {
+                k.lower(): v
+                for item in attrs
+                for k, v in (item.items() if isinstance(item, dict) else [])
+            }
         elif isinstance(attrs, dict):
             attrs = {k.lower(): v for k, v in attrs.items()}
         else:
@@ -99,7 +106,6 @@ def _is_noise_event(method: str) -> bool:
     if method in _NOISE_EVENTS:
         return True
 
-    base = method.split(":")[0] if ":" in method else method
     subtype = method
 
     for noise_method in _NOISE_METHODS:
@@ -156,9 +162,7 @@ def _is_focus_blur_event(method: str) -> bool:
 
 
 def _is_select_event(method: str) -> bool:
-    return method in (
-        "Page.inputEvent",
-    )
+    return method in ("Page.inputEvent",)
 
 
 @dataclass
@@ -180,7 +184,6 @@ class RecordedStep:
 
 
 class WorkflowRecorder:
-
     def __init__(self):
         self._events: List[RecordedEvent] = []
         self._current_group: List[RecordedEvent] = []
@@ -245,12 +248,18 @@ class WorkflowRecorder:
             }
             target_key = SelectorGenerator.get_best_selector(element_info)
 
-            if self._current_group_type == "click" and target_key == self._last_click_target and now - self._last_click_time < 0.2:
-                self._current_group.append(RecordedEvent(
-                    type="click",
-                    timestamp=now,
-                    element_info=element_info,
-                ))
+            if (
+                self._current_group_type == "click"
+                and target_key == self._last_click_target
+                and now - self._last_click_time < 0.2
+            ):
+                self._current_group.append(
+                    RecordedEvent(
+                        type="click",
+                        timestamp=now,
+                        element_info=element_info,
+                    )
+                )
                 self._last_click_time = now
                 return
 
@@ -270,13 +279,18 @@ class WorkflowRecorder:
         if _is_keyboard_event(method):
             text = self._extract_text(params, method)
 
-            if self._current_group_type == "input" and now - self._last_input_time < self._group_timeout:
-                self._current_group.append(RecordedEvent(
-                    type="input",
-                    timestamp=now,
-                    value=text,
-                    element_info=self._current_element_info,
-                ))
+            if (
+                self._current_group_type == "input"
+                and now - self._last_input_time < self._group_timeout
+            ):
+                self._current_group.append(
+                    RecordedEvent(
+                        type="input",
+                        timestamp=now,
+                        value=text,
+                        element_info=self._current_element_info,
+                    )
+                )
                 self._last_input_time = now
                 return
 
@@ -293,12 +307,20 @@ class WorkflowRecorder:
             return
 
         if _is_scroll_event(method, params):
-            if self._current_group_type == "scroll" and now - self._last_scroll_time < 0.5:
-                self._current_group.append(RecordedEvent(
-                    type="scroll",
-                    timestamp=now,
-                    scroll_position={"deltaX": params.get("deltaX", 0), "deltaY": params.get("deltaY", 0)},
-                ))
+            if (
+                self._current_group_type == "scroll"
+                and now - self._last_scroll_time < 0.5
+            ):
+                self._current_group.append(
+                    RecordedEvent(
+                        type="scroll",
+                        timestamp=now,
+                        scroll_position={
+                            "deltaX": params.get("deltaX", 0),
+                            "deltaY": params.get("deltaY", 0),
+                        },
+                    )
+                )
                 self._last_scroll_time = now
                 return
 
@@ -308,7 +330,10 @@ class WorkflowRecorder:
             evt = RecordedEvent(
                 type="scroll",
                 timestamp=now,
-                scroll_position={"deltaX": params.get("deltaX", 0), "deltaY": params.get("deltaY", 0)},
+                scroll_position={
+                    "deltaX": params.get("deltaX", 0),
+                    "deltaY": params.get("deltaY", 0),
+                },
             )
             self._current_group = [evt]
             return
@@ -335,11 +360,20 @@ class WorkflowRecorder:
         self._last_click_time = 0.0
 
     def _check_timeout(self, now: float):
-        if self._current_group_type == "input" and now - self._last_input_time >= self._group_timeout:
+        if (
+            self._current_group_type == "input"
+            and now - self._last_input_time >= self._group_timeout
+        ):
             self._commit_group()
-        elif self._current_group_type == "scroll" and now - self._last_scroll_time >= self._group_timeout:
+        elif (
+            self._current_group_type == "scroll"
+            and now - self._last_scroll_time >= self._group_timeout
+        ):
             self._commit_group()
-        elif self._current_group_type == "click" and now - self._last_click_time >= self._group_timeout:
+        elif (
+            self._current_group_type == "click"
+            and now - self._last_click_time >= self._group_timeout
+        ):
             self._commit_group()
 
     def to_steps(self) -> List[RecordedStep]:
@@ -352,12 +386,14 @@ class WorkflowRecorder:
 
             if event.type == "navigation":
                 url = event.url or ""
-                steps.append(RecordedStep(
-                    step_type="navigate",
-                    params={"url": url},
-                    raw_events=[event],
-                    confidence=1.0,
-                ))
+                steps.append(
+                    RecordedStep(
+                        step_type="navigate",
+                        params={"url": url},
+                        raw_events=[event],
+                        confidence=1.0,
+                    )
+                )
                 i += 1
                 continue
 
@@ -368,9 +404,14 @@ class WorkflowRecorder:
                     if self._events[j].type != "click":
                         break
                     if self._events[j].element_info and event.element_info:
-                        sel1 = SelectorGenerator.get_best_selector(self._events[j].element_info)
+                        sel1 = SelectorGenerator.get_best_selector(
+                            self._events[j].element_info
+                        )
                         sel0 = SelectorGenerator.get_best_selector(event.element_info)
-                        if sel1 == sel0 and self._events[j].timestamp - event.timestamp < 0.2:
+                        if (
+                            sel1 == sel0
+                            and self._events[j].timestamp - event.timestamp < 0.2
+                        ):
                             group.append(self._events[j])
                             j += 1
                         else:
@@ -380,8 +421,10 @@ class WorkflowRecorder:
                 fallbacks: List[str] = []
                 confidence = 0.5
                 if event.element_info:
-                    selector, confidence = SelectorGenerator.get_best_selector_with_confidence(
-                        event.element_info
+                    selector, confidence = (
+                        SelectorGenerator.get_best_selector_with_confidence(
+                            event.element_info
+                        )
                     )
                     fallbacks = SelectorGenerator.get_fallback_set(event.element_info)
                     if len(fallbacks) > 1:
@@ -390,12 +433,14 @@ class WorkflowRecorder:
                 params: Dict[str, Any] = {"selector": selector}
                 if fallbacks:
                     params["selector_fallbacks"] = fallbacks
-                steps.append(RecordedStep(
-                    step_type="click",
-                    params=params,
-                    raw_events=group,
-                    confidence=confidence,
-                ))
+                steps.append(
+                    RecordedStep(
+                        step_type="click",
+                        params=params,
+                        raw_events=group,
+                        confidence=confidence,
+                    )
+                )
                 i = j
                 continue
 
@@ -405,7 +450,10 @@ class WorkflowRecorder:
                 while j < len(self._events):
                     if self._events[j].type != "input":
                         break
-                    if self._events[j].timestamp - event.timestamp < self._group_timeout:
+                    if (
+                        self._events[j].timestamp - event.timestamp
+                        < self._group_timeout
+                    ):
                         group.append(self._events[j])
                         j += 1
                     else:
@@ -436,38 +484,48 @@ class WorkflowRecorder:
                 selector = ""
                 confidence = 0.5
                 if event.element_info:
-                    selector, confidence = SelectorGenerator.get_best_selector_with_confidence(
-                        event.element_info
+                    selector, confidence = (
+                        SelectorGenerator.get_best_selector_with_confidence(
+                            event.element_info
+                        )
                     )
 
                 if has_enter:
-                    steps.append(RecordedStep(
-                        step_type="type",
-                        params={
-                            "selector": selector,
-                            "value": variable if variable else full_text,
-                            "submit": True,
-                        },
-                        raw_events=group,
-                        confidence=confidence,
-                    ))
+                    steps.append(
+                        RecordedStep(
+                            step_type="type",
+                            params={
+                                "selector": selector,
+                                "value": variable if variable else full_text,
+                                "submit": True,
+                            },
+                            raw_events=group,
+                            confidence=confidence,
+                        )
+                    )
                 else:
-                    steps.append(RecordedStep(
-                        step_type="fill",
-                        params={
-                            "selector": selector,
-                            "value": variable if variable else full_text,
-                        },
-                        raw_events=group,
-                        confidence=confidence,
-                    ))
+                    steps.append(
+                        RecordedStep(
+                            step_type="fill",
+                            params={
+                                "selector": selector,
+                                "value": variable if variable else full_text,
+                            },
+                            raw_events=group,
+                            confidence=confidence,
+                        )
+                    )
                 i = j
                 continue
 
             if event.type == "scroll":
                 group = [event]
                 j = i + 1
-                while j < len(self._events) and self._events[j].type == "scroll" and self._events[j].timestamp - event.timestamp < 0.5:
+                while (
+                    j < len(self._events)
+                    and self._events[j].type == "scroll"
+                    and self._events[j].timestamp - event.timestamp < 0.5
+                ):
                     group.append(self._events[j])
                     j += 1
 
@@ -478,12 +536,14 @@ class WorkflowRecorder:
 
                 direction = "down" if total_dy >= 0 else "up"
                 amount = abs(int(total_dy)) or 300
-                steps.append(RecordedStep(
-                    step_type="scroll",
-                    params={"direction": direction, "amount": amount},
-                    raw_events=group,
-                    confidence=0.8,
-                ))
+                steps.append(
+                    RecordedStep(
+                        step_type="scroll",
+                        params={"direction": direction, "amount": amount},
+                        raw_events=group,
+                        confidence=0.8,
+                    )
+                )
                 i = j
                 continue
 
@@ -491,16 +551,19 @@ class WorkflowRecorder:
 
         return steps
 
-    def to_workflow(self, name: str = "recorded-workflow", description: Optional[str] = None) -> Workflow:
+    def to_workflow(
+        self, name: str = "recorded-workflow", description: Optional[str] = None
+    ) -> Workflow:
         recorded_steps = self.to_steps()
         workflow_steps = [
-            WorkflowStep(type=rs.step_type, params=rs.params)
-            for rs in recorded_steps
+            WorkflowStep(type=rs.step_type, params=rs.params) for rs in recorded_steps
         ]
 
         avg_confidence = 0.0
         if recorded_steps:
-            avg_confidence = sum(rs.confidence for rs in recorded_steps) / len(recorded_steps)
+            avg_confidence = sum(rs.confidence for rs in recorded_steps) / len(
+                recorded_steps
+            )
         low_confidence_steps = [
             {"index": i, "type": rs.step_type, "confidence": rs.confidence}
             for i, rs in enumerate(recorded_steps)
@@ -525,25 +588,34 @@ class WorkflowRecorder:
         return Workflow(
             name=name,
             steps=workflow_steps,
-            description=description or f"Recorded workflow with {len(workflow_steps)} steps",
+            description=description
+            or f"Recorded workflow with {len(workflow_steps)} steps",
             metadata=metadata,
         )
 
-    def append_changelog(self, workflow: Workflow, action: str, description: str) -> Workflow:
+    def append_changelog(
+        self, workflow: Workflow, action: str, description: str
+    ) -> Workflow:
         if workflow.metadata is None:
             workflow.metadata = {}
         changelog = workflow.metadata.get("changelog", [])
         if not isinstance(changelog, list):
             changelog = []
-        changelog.append({
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "action": action,
-            "description": description,
-        })
+        changelog.append(
+            {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "action": action,
+                "description": description,
+            }
+        )
         workflow.metadata["changelog"] = changelog
-        workflow.metadata["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        workflow.metadata["saved_at"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+        )
         return workflow
 
-    def to_workflow_yaml(self, name: str = "recorded-workflow", description: Optional[str] = None) -> str:
+    def to_workflow_yaml(
+        self, name: str = "recorded-workflow", description: Optional[str] = None
+    ) -> str:
         workflow = self.to_workflow(name=name, description=description)
         return workflow_to_yaml_str(workflow)

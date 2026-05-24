@@ -19,33 +19,52 @@ from dataclasses import dataclass, field
 
 # === #77: Path-scoped filesystem access control ===
 
+
 @dataclass
 class FileAccessPolicy:
     """Defines which paths the MCP server is allowed to access."""
-    allowed_dirs: List[str] = field(default_factory=lambda: [
-        str(Path.home() / ".agentic-browser"),
-        str(Path.home() / ".stealth-browser"),
-    ])
-    allowed_file_patterns: List[str] = field(default_factory=lambda: [
-        "*.json", "*.txt", "*.log", "*.jsonl",
-    ])
-    blocked_patterns: List[str] = field(default_factory=lambda: [
-        # Never allow access to sensitive system paths
-        "/etc/passwd", "/etc/shadow", "/etc/hosts",
-        "/root/.ssh/*", "/root/.gnupg/*",
-        "*/.env", "*/.env.*",
-        "*/id_rsa", "*/id_ed25519", "*/authorized_keys",
-        "*/.git/config",
-        # Never allow access to credential stores
-        "*/.aws/credentials", "*/.config/gcloud/*",
-        # Prevent path traversal
-        "../*", "*/../*",
-    ])
+
+    allowed_dirs: List[str] = field(
+        default_factory=lambda: [
+            str(Path.home() / ".agentic-browser"),
+            str(Path.home() / ".stealth-browser"),
+        ]
+    )
+    allowed_file_patterns: List[str] = field(
+        default_factory=lambda: [
+            "*.json",
+            "*.txt",
+            "*.log",
+            "*.jsonl",
+        ]
+    )
+    blocked_patterns: List[str] = field(
+        default_factory=lambda: [
+            # Never allow access to sensitive system paths
+            "/etc/passwd",
+            "/etc/shadow",
+            "/etc/hosts",
+            "/root/.ssh/*",
+            "/root/.gnupg/*",
+            "*/.env",
+            "*/.env.*",
+            "*/id_rsa",
+            "*/id_ed25519",
+            "*/authorized_keys",
+            "*/.git/config",
+            # Never allow access to credential stores
+            "*/.aws/credentials",
+            "*/.config/gcloud/*",
+            # Prevent path traversal
+            "../*",
+            "*/../*",
+        ]
+    )
     max_path_depth: int = 20  # prevent excessively deep path traversal
 
     def is_path_allowed(self, path: str) -> tuple[bool, str]:
         """Check if a path is allowed under this policy.
-        
+
         Returns (allowed: bool, reason: str).
         """
         if not path:
@@ -74,7 +93,10 @@ class FileAccessPolicy:
                 path_suffix = Path(resolved).suffix
                 if self.allowed_file_patterns:
                     pattern = f"*{path_suffix}" if path_suffix else "*"
-                    if not any(fnmatch.fnmatch(pattern, ap) for ap in self.allowed_file_patterns):
+                    if not any(
+                        fnmatch.fnmatch(pattern, ap)
+                        for ap in self.allowed_file_patterns
+                    ):
                         return False, f"file type not allowed: {path_suffix}"
                 return True, "path within allowed directory"
 
@@ -94,24 +116,30 @@ class FileAccessPolicy:
 
 # === #68: LLM call authorization controls ===
 
+
 @dataclass
 class LLMAuthorizationPolicy:
     """Controls which LLM calls are allowed through MCP sampling."""
+
     require_explicit_consent: bool = True
     max_tokens_per_call: int = 4096
     max_calls_per_minute: int = 10
     allowed_models: Optional[Set[str]] = None  # None = all allowed
-    blocked_prompts: List[str] = field(default_factory=lambda: [
-        # Block prompts that could be used for malicious purposes
-        "ignore previous instructions",
-        "system prompt",
-        "jailbreak",
-        "override security",
-        "bypass restrictions",
-    ])
+    blocked_prompts: List[str] = field(
+        default_factory=lambda: [
+            # Block prompts that could be used for malicious purposes
+            "ignore previous instructions",
+            "system prompt",
+            "jailbreak",
+            "override security",
+            "bypass restrictions",
+        ]
+    )
     _call_timestamps: list = field(default_factory=list)
 
-    def is_call_allowed(self, prompt: str, model: Optional[str] = None) -> tuple[bool, str]:
+    def is_call_allowed(
+        self, prompt: str, model: Optional[str] = None
+    ) -> tuple[bool, str]:
         """Check if an LLM call is allowed under this policy."""
         import time
 
@@ -151,27 +179,57 @@ class LLMAuthorizationPolicy:
 # Patterns to detect and redact sensitive data in stderr output
 SENSITIVE_PATTERNS = [
     # API keys
-    (re.compile(r'((?:api[_-]?key|apikey)\s*[:=]\s*["\']?)[A-Za-z0-9_\-]{16,}["\']?', re.IGNORECASE), r'\1[REDACTED_API_KEY]'),
+    (
+        re.compile(
+            r'((?:api[_-]?key|apikey)\s*[:=]\s*["\']?)[A-Za-z0-9_\-]{16,}["\']?',
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED_API_KEY]",
+    ),
     # Bearer tokens
-    (re.compile(r'((?:bearer|authorization)\s*[:=]\s*["\']?)[A-Za-z0-9_\-\.]{20,}["\']?', re.IGNORECASE), r'\1[REDACTED_TOKEN]'),
+    (
+        re.compile(
+            r'((?:bearer|authorization)\s*[:=]\s*["\']?)[A-Za-z0-9_\-\.]{20,}["\']?',
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED_TOKEN]",
+    ),
     # Passwords
-    (re.compile(r'((?:password|passwd|pwd)\s*[:=]\s*["\']?)[^\s"\']{4,}["\']?', re.IGNORECASE), r'\1[REDACTED_PASSWORD]'),
+    (
+        re.compile(
+            r'((?:password|passwd|pwd)\s*[:=]\s*["\']?)[^\s"\']{4,}["\']?',
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED_PASSWORD]",
+    ),
     # Private keys
-    (re.compile(r'-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----'), '[REDACTED_PRIVATE_KEY]'),
+    (
+        re.compile(r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----"),
+        "[REDACTED_PRIVATE_KEY]",
+    ),
     # AWS keys
-    (re.compile(r'(AKIA[0-9A-Z]{16})'), '[REDACTED_AWS_KEY]'),
+    (re.compile(r"(AKIA[0-9A-Z]{16})"), "[REDACTED_AWS_KEY]"),
     # Generic secrets
-    (re.compile(r'((?:secret|token)\s*[:=]\s*["\']?)[A-Za-z0-9_\-]{16,}["\']?', re.IGNORECASE), r'\1[REDACTED_SECRET]'),
+    (
+        re.compile(
+            r'((?:secret|token)\s*[:=]\s*["\']?)[A-Za-z0-9_\-]{16,}["\']?',
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED_SECRET]",
+    ),
     # URLs with credentials
-    (re.compile(r'(://[^:@/]+:)([^@]+)(@)'), r'\1[REDACTED_CREDENTIALS]\3'),
+    (re.compile(r"(://[^:@/]+:)([^@]+)(@)"), r"\1[REDACTED_CREDENTIALS]\3"),
     # Email addresses
-    (re.compile(r'\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b'), r'[EMAIL_REDACTED]'),
+    (
+        re.compile(r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"),
+        r"[EMAIL_REDACTED]",
+    ),
 ]
 
 
 def redact_sensitive_data(text: str) -> str:
     """Redact sensitive data from text (stderr, logs, etc.).
-    
+
     Applies multiple regex patterns to detect and redact:
     - API keys
     - Bearer tokens
@@ -197,19 +255,22 @@ def redact_sensitive_data(text: str) -> str:
 # Patterns to detect potentially malicious content in tool descriptions
 MALICIOUS_PATTERNS = [
     # Code execution attempts
-    re.compile(r'(?:exec|eval|compile)\s*\(', re.IGNORECASE),
+    re.compile(r"(?:exec|eval|compile)\s*\(", re.IGNORECASE),
     # System command injection
-    re.compile(r'(?:os\.system|subprocess|Popen|shell=True)', re.IGNORECASE),
+    re.compile(r"(?:os\.system|subprocess|Popen|shell=True)", re.IGNORECASE),
     # File system manipulation
-    re.compile(r'(?:shutil\.rmtree|os\.remove|os\.unlink)', re.IGNORECASE),
+    re.compile(r"(?:shutil\.rmtree|os\.remove|os\.unlink)", re.IGNORECASE),
     # Network exfiltration
-    re.compile(r'(?:requests\.post|urllib\.request|curl|wget)\s+.*(?:paste|bin|exfil)', re.IGNORECASE),
+    re.compile(
+        r"(?:requests\.post|urllib\.request|curl|wget)\s+.*(?:paste|bin|exfil)",
+        re.IGNORECASE,
+    ),
     # Environment variable access
-    re.compile(r'(?:os\.environ|os\.getenv)\s*\(', re.IGNORECASE),
+    re.compile(r"(?:os\.environ|os\.getenv)\s*\(", re.IGNORECASE),
     # Import injection
-    re.compile(r'__import__\s*\(', re.IGNORECASE),
+    re.compile(r"__import__\s*\(", re.IGNORECASE),
     # Base64 encoded payloads (common obfuscation)
-    re.compile(r'base64\.(?:b64decode|decodebytes)\s*\(', re.IGNORECASE),
+    re.compile(r"base64\.(?:b64decode|decodebytes)\s*\(", re.IGNORECASE),
 ]
 
 # Maximum allowed length for tool descriptions
@@ -218,7 +279,7 @@ MAX_TOOL_DESCRIPTION_LENGTH = 2000
 
 def sanitize_tool_description(description: str) -> tuple[str, list[str]]:
     """Sanitize a tool description to remove potentially malicious content.
-    
+
     Returns (sanitized_description, list_of_warnings).
     """
     warnings = []
@@ -228,25 +289,34 @@ def sanitize_tool_description(description: str) -> tuple[str, list[str]]:
 
     # Check length
     if len(description) > MAX_TOOL_DESCRIPTION_LENGTH:
-        warnings.append(f"Tool description truncated from {len(description)} to {MAX_TOOL_DESCRIPTION_LENGTH} chars")
+        warnings.append(
+            f"Tool description truncated from {len(description)} to {MAX_TOOL_DESCRIPTION_LENGTH} chars"
+        )
         description = description[:MAX_TOOL_DESCRIPTION_LENGTH]
 
     # Check for malicious patterns
     for pattern in MALICIOUS_PATTERNS:
         match = pattern.search(description)
         if match:
-            warnings.append(f"Suspicious pattern detected in tool description: {match.group()[:50]}...")
+            warnings.append(
+                f"Suspicious pattern detected in tool description: {match.group()[:50]}..."
+            )
             # Replace the suspicious pattern with a safe placeholder
-            description = pattern.sub('[SANITIZED]', description)
+            description = pattern.sub("[SANITIZED]", description)
 
     # Remove any remaining executable code blocks
-    description = re.sub(r'```python\s+.*?```', '[CODE_BLOCK_REMOVED]', description, flags=re.DOTALL)
-    description = re.sub(r'```\s+.*?```', '[CODE_BLOCK_REMOVED]', description, flags=re.DOTALL)
+    description = re.sub(
+        r"```python\s+.*?```", "[CODE_BLOCK_REMOVED]", description, flags=re.DOTALL
+    )
+    description = re.sub(
+        r"```\s+.*?```", "[CODE_BLOCK_REMOVED]", description, flags=re.DOTALL
+    )
 
     return description.strip(), warnings
 
 
 # === Centralized security context for MCP server ===
+
 
 class MCPSecurityContext:
     """Centralized security context that enforces all P0 security policies."""
@@ -265,37 +335,57 @@ class MCPSecurityContext:
     def check_file_access(self, path: str) -> tuple[bool, str]:
         """Check if file access is allowed."""
         allowed, reason = self.file_policy.is_path_allowed(path)
-        self._log_security_event("file_access", {"path": path, "allowed": allowed, "reason": reason})
+        self._log_security_event(
+            "file_access", {"path": path, "allowed": allowed, "reason": reason}
+        )
         return allowed, reason
 
-    def check_llm_call(self, prompt: str, model: Optional[str] = None) -> tuple[bool, str]:
+    def check_llm_call(
+        self, prompt: str, model: Optional[str] = None
+    ) -> tuple[bool, str]:
         """Check if LLM call is allowed."""
         allowed, reason = self.llm_policy.is_call_allowed(prompt, model)
-        self._log_security_event("llm_call", {"prompt_preview": prompt[:100], "model": model, "allowed": allowed, "reason": reason})
+        self._log_security_event(
+            "llm_call",
+            {
+                "prompt_preview": prompt[:100],
+                "model": model,
+                "allowed": allowed,
+                "reason": reason,
+            },
+        )
         return allowed, reason
 
     def sanitize_stderr(self, text: str) -> str:
         """Redact sensitive data from stderr output."""
         result = redact_sensitive_data(text)
         if result != text:
-            self._log_security_event("stderr_redaction", {"original_length": len(text), "redacted_length": len(result)})
+            self._log_security_event(
+                "stderr_redaction",
+                {"original_length": len(text), "redacted_length": len(result)},
+            )
         return result
 
     def sanitize_tool_description(self, description: str) -> tuple[str, list[str]]:
         """Sanitize tool description."""
         result, warnings = sanitize_tool_description(description)
         if warnings:
-            self._log_security_event("tool_description_sanitization", {"warnings": warnings})
+            self._log_security_event(
+                "tool_description_sanitization", {"warnings": warnings}
+            )
         return result, warnings
 
     def _log_security_event(self, event_type: str, details: Dict[str, Any]) -> None:
         """Log a security event for audit purposes."""
         import time
-        self.security_log.append({
-            "timestamp": time.time(),
-            "event_type": event_type,
-            **details,
-        })
+
+        self.security_log.append(
+            {
+                "timestamp": time.time(),
+                "event_type": event_type,
+                **details,
+            }
+        )
         # Keep only last 1000 events
         if len(self.security_log) > 1000:
             self.security_log = self.security_log[-1000:]

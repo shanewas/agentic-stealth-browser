@@ -47,12 +47,17 @@ from typing import Optional, Dict, List, Any
 
 class SessionManager:
     """Manages browser sessions with isolation (#87: see module header for strong multi-instance warnings)"""
-    
+
     def __init__(self, base_dir: str = "~/.agentic-browser/sessions"):
         self.base_dir = Path(base_dir).expanduser()
         self.base_dir.mkdir(parents=True, exist_ok=True)
-    
-    def create_session(self, name: Optional[str] = None, anonymous: bool = False, ephemeral: bool = False) -> Dict:
+
+    def create_session(
+        self,
+        name: Optional[str] = None,
+        anonymous: bool = False,
+        ephemeral: bool = False,
+    ) -> Dict:
         """Create a new isolated session.
 
         When a name is supplied it is used verbatim (caller is responsible
@@ -70,18 +75,18 @@ class SessionManager:
         """
         if name is None:
             name = f"session-{uuid.uuid4().hex[:12]}"
-        
+
         if anonymous:
             name = f"anon-{uuid.uuid4().hex[:10]}"
-        
+
         if ephemeral:
             prefix = "ephemeral-"
             if not name.startswith(prefix):
                 name = prefix + name
-        
+
         session_path = self.base_dir / name
         session_path.mkdir(exist_ok=True)
-        
+
         meta = {
             "name": name,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -91,12 +96,12 @@ class SessionManager:
             "cookies_file": str(session_path / "cookies.json"),
             "state_file": str(session_path / "state.json"),
         }
-        
+
         with open(session_path / "meta.json", "w") as f:
             json.dump(meta, f, indent=2)
-        
+
         return meta
-    
+
     def get_session(self, name: str) -> Optional[Dict]:
         """Load existing session metadata"""
         session_path = self.base_dir / name
@@ -105,7 +110,7 @@ class SessionManager:
             return None
         with open(meta_file, "r") as f:
             return json.load(f)
-    
+
     def list_sessions(self) -> List[Dict]:
         """List all sessions"""
         sessions = []
@@ -146,10 +151,16 @@ class SessionManager:
         if remove_dir:
             try:
                 import shutil
+
                 shutil.rmtree(session_path, ignore_errors=True)
                 return {"status": "removed", "name": name, "marked": marked}
             except Exception as e:
-                return {"status": "partial", "name": name, "marked": marked, "error": str(e)}
+                return {
+                    "status": "partial",
+                    "name": name,
+                    "marked": marked,
+                    "error": str(e),
+                }
 
         return {"status": "marked_compromised", "name": name}
 
@@ -175,7 +186,9 @@ class SessionManager:
                     created = meta.get("created_at")
                     if created:
                         try:
-                            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                            created_dt = datetime.fromisoformat(
+                                created.replace("Z", "+00:00")
+                            )
                             age_h = (now - created_dt).total_seconds() / 3600
                             if age_h < max_age_hours:
                                 continue
@@ -183,6 +196,7 @@ class SessionManager:
                             pass
                 session_path = meta_file.parent
                 import shutil
+
                 shutil.rmtree(session_path, ignore_errors=True)
                 removed += 1
             except Exception as e:
@@ -195,7 +209,12 @@ class SessionManager:
             "max_age_hours": max_age_hours,
         }
 
-    def clone_session(self, source_name: str, new_name: Optional[str] = None, copy_user_data: bool = False) -> Dict[str, Any]:
+    def clone_session(
+        self,
+        source_name: str,
+        new_name: Optional[str] = None,
+        copy_user_data: bool = False,
+    ) -> Dict[str, Any]:
         """Clone or fork an existing session for A/B testing or shadow runs (#261).
 
         Creates a new independent session entry.
@@ -206,9 +225,13 @@ class SessionManager:
         Original session is untouched. New session gets its own meta with "cloned_from".
         """
         import shutil
+
         src_meta = self.get_session(source_name)
         if not src_meta:
-            return {"status": "error", "message": f"Source session not found: {source_name}"}
+            return {
+                "status": "error",
+                "message": f"Source session not found: {source_name}",
+            }
 
         if new_name is None:
             new_name = f"clone-{uuid.uuid4().hex[:8]}-of-{source_name}"
@@ -217,7 +240,9 @@ class SessionManager:
         if (self.base_dir / new_name).exists():
             new_name = f"{new_name}-{uuid.uuid4().hex[:4]}"
 
-        new_meta = self.create_session(new_name, anonymous=src_meta.get("anonymous", False))
+        new_meta = self.create_session(
+            new_name, anonymous=src_meta.get("anonymous", False)
+        )
         new_path = self.base_dir / new_name
         src_path = self.base_dir / source_name
 
@@ -253,7 +278,12 @@ class SessionManager:
         except Exception:
             pass
 
-        return {"status": "success", "new_session": new_meta, "source": source_name, "full_copy": copy_user_data}
+        return {
+            "status": "success",
+            "new_session": new_meta,
+            "source": source_name,
+            "full_copy": copy_user_data,
+        }
 
 
 # Basic isolation helper for #87 (additive, zero breaking changes)

@@ -14,7 +14,13 @@ from typing import Optional, Tuple, Any
 class HumanBehavior:
     """Orchestrates realistic human-like actions"""
 
-    def __init__(self, page, rng: Optional["random.Random"] = None, device_profile: Optional[Any] = None, logger: Optional[Any] = None):
+    def __init__(
+        self,
+        page,
+        rng: Optional["random.Random"] = None,
+        device_profile: Optional[Any] = None,
+        logger: Optional[Any] = None,
+    ):
         self.page = page
         self.rng = rng or random.Random()
         self._logger = logger  # Optional AuditLogger for structured logging
@@ -30,22 +36,35 @@ class HumanBehavior:
         self.fatigue_level = 0.0
 
         # Initialize realism level from environment
-        env_r = (os.getenv("AGENTIC_STEALTH_REALISM") or os.getenv("STEALTH_REALISM") or "").lower().strip()
+        env_r = (
+            (os.getenv("AGENTIC_STEALTH_REALISM") or os.getenv("STEALTH_REALISM") or "")
+            .lower()
+            .strip()
+        )
         ci_indicators = bool(
-            os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("GITLAB_CI") or
-            os.getenv("JENKINS_URL") or os.getenv("AGENTIC_STEALTH_LIGHT_CI") or
-            os.getenv("HEADLESS") == "1"
+            os.getenv("CI")
+            or os.getenv("GITHUB_ACTIONS")
+            or os.getenv("GITLAB_CI")
+            or os.getenv("JENKINS_URL")
+            or os.getenv("AGENTIC_STEALTH_LIGHT_CI")
+            or os.getenv("HEADLESS") == "1"
         )
         if not env_r:
             env_r = "light" if ci_indicators else "full"
-        self.realism_level = {"off": 0, "light": 1, "medium": 2, "full": 3}.get(env_r, 3)
-        if self.realism_level > 1 and (os.getenv("STEALTH_HEADLESS", "").lower() in ("1", "true") or ci_indicators):
+        self.realism_level = {"off": 0, "light": 1, "medium": 2, "full": 3}.get(
+            env_r, 3
+        )
+        if self.realism_level > 1 and (
+            os.getenv("STEALTH_HEADLESS", "").lower() in ("1", "true") or ci_indicators
+        ):
             self.realism_level = 1
 
     def _log(self, msg: str, level: str = "warning"):
         """Log a message via AuditLogger if available, otherwise fall back to print."""
         if self._logger and hasattr(self._logger, "log_action"):
-            self._logger.log_action(f"human_behavior.{level}", {"message": msg}, level=level)
+            self._logger.log_action(
+                f"human_behavior.{level}", {"message": msg}, level=level
+            )
         else:
             print(f"[HumanBehavior] {msg}")
 
@@ -106,7 +125,9 @@ class HumanBehavior:
 
     @property
     def _fatigue_factor(self):
-        def _g(): return self._get_fatigue_factor()
+        def _g():
+            return self._get_fatigue_factor()
+
         return _g
 
     async def think_before_action(self, importance: str = "normal"):
@@ -115,7 +136,7 @@ class HumanBehavior:
         self._update_fatigue()
         fat = self.fatigue_level
         b = (1100, 3000) if importance == "critical" else (400, 1300)
-        await self.think(int(b[0]*(1+fat*0.5)), int(b[1]*(1+fat*0.9)))
+        await self.think(int(b[0] * (1 + fat * 0.5)), int(b[1] * (1 + fat * 0.9)))
 
     async def simulate_distraction(self, max_seconds: float = 0.7):
         """#251 / #178 distraction before commit: realistic user distraction patterns.
@@ -127,14 +148,20 @@ class HumanBehavior:
             await asyncio.sleep(0.05)
             return
 
-        distraction_type = self.rng.choice([
-            "idle_stare", "cursor_drift", "micro_scroll",
-            "tab_hesitation", "clock_check", "re_read"
-        ])
+        distraction_type = self.rng.choice(
+            [
+                "idle_stare",
+                "cursor_drift",
+                "micro_scroll",
+                "tab_hesitation",
+                "clock_check",
+                "re_read",
+            ]
+        )
 
         duration = self.rng.uniform(0.15, max_seconds * 0.6)
         # Fatigue increases distraction duration
-        duration *= (1 + self.fatigue_level * 0.4)
+        duration *= 1 + self.fatigue_level * 0.4
 
         if distraction_type == "idle_stare":
             # User just pauses, looking at screen
@@ -167,7 +194,7 @@ class HumanBehavior:
                 await self.move_mouse_naturally(
                     cx + self.rng.randint(-100, 100),
                     self.rng.randint(5, 30),
-                    speed="slow"
+                    speed="slow",
                 )
                 await asyncio.sleep(duration * 0.3)
                 # Move back
@@ -185,7 +212,9 @@ class HumanBehavior:
                 pass
             await asyncio.sleep(duration * 0.5)
 
-    async def type_like_human(self, selector: str, text: str, mistake_rate: float = 0.025):
+    async def type_like_human(
+        self, selector: str, text: str, mistake_rate: float = 0.025
+    ):
         """Type with realistic speed, variable rhythm, and occasional corrections.
         Uses human_click for natural mouse approach to input (continuity + realism).
         """
@@ -212,7 +241,11 @@ class HumanBehavior:
                 await self.page.type(selector, wrong, delay=self.rng.uniform(25, 80))
                 await asyncio.sleep(self.rng.uniform(0.18, 0.42))
                 # 1-3 backspaces with human-like rhythm (fatigue aware but simple here)
-                n_back = 1 if self.rng.random() < 0.7 else (2 if self.rng.random() < 0.8 else 3)
+                n_back = (
+                    1
+                    if self.rng.random() < 0.7
+                    else (2 if self.rng.random() < 0.8 else 3)
+                )
                 for b in range(n_back):
                     await self.page.keyboard.press("Backspace")
                     await asyncio.sleep(self.rng.uniform(0.08, 0.22) if b > 0 else 0.12)
@@ -230,7 +263,9 @@ class HumanBehavior:
             if i > 0 and i % 12 == 0 and self.rng.random() < 0.3:
                 await asyncio.sleep(self.rng.uniform(0.35, 0.75))
 
-    async def _bezier_curve(self, start: Tuple[float, float], end: Tuple[float, float], steps: int = 25):
+    async def _bezier_curve(
+        self, start: Tuple[float, float], end: Tuple[float, float], steps: int = 25
+    ):
         """Generate points along a more natural cubic-ish Bézier with controlled wobble + ease.
         P2 realism (#160 #144 #108): non-linear t (ease-in-out) distributes points to simulate
         natural acceleration/deceleration (human motor + typical OS pointer accel curves).
@@ -248,14 +283,22 @@ class HumanBehavior:
         def _ease(t: float) -> float:
             # Cubic ease-in-out for accel/decel point spacing (more points mid-gesture? no:
             # ease makes slower near ends => denser points at start/end for natural stop)
-            return t*t*(3-2*t)
+            return t * t * (3 - 2 * t)
 
         for i in range(steps + 1):
             t = i / steps
             te = _ease(t)  # eased t for natural accel feel
             # Quadratic base + small cubic blend for natural S-curve feel
-            qx = (1 - te) ** 2 * start[0] + 2 * (1 - te) * te * control_x + te ** 2 * end[0]
-            qy = (1 - te) ** 2 * start[1] + 2 * (1 - te) * te * control_y + te ** 2 * end[1]
+            qx = (
+                (1 - te) ** 2 * start[0]
+                + 2 * (1 - te) * te * control_x
+                + te**2 * end[0]
+            )
+            qy = (
+                (1 - te) ** 2 * start[1]
+                + 2 * (1 - te) * te * control_y
+                + te**2 * end[1]
+            )
             # blend in second control slightly near end
             blend = te * 0.25
             x = (1 - blend) * qx + blend * ((1 - te) * control2_x + te * end[0])
@@ -282,7 +325,9 @@ class HumanBehavior:
         # Prefer tracked Python pos (reliable); fallback to JS or default
         current_x, current_y = self.last_mouse_pos
         try:
-            pos = await self.page.evaluate("() => ({x: window.mouseX || 0, y: window.mouseY || 0})")
+            pos = await self.page.evaluate(
+                "() => ({x: window.mouseX || 0, y: window.mouseY || 0})"
+            )
             jx = pos.get("x", 0)
             jy = pos.get("y", 0)
             if jx > 50 and jy > 50:  # only trust plausible JS values
@@ -295,7 +340,7 @@ class HumanBehavior:
         max_steps = 42 if speed == "normal" else 20
         # Perf: fewer steps when realism reduced
         if self.realism_level <= 1:
-            steps = self.rng.randint(max(3, base_steps//2), max(5, max_steps//2))
+            steps = self.rng.randint(max(3, base_steps // 2), max(5, max_steps // 2))
         else:
             steps = self.rng.randint(base_steps, max_steps)
         points = await self._bezier_curve((current_x, current_y), (x, y), steps)
@@ -342,11 +387,13 @@ class HumanBehavior:
                     return path.length;
                 }
                 """,
-                path_data
+                path_data,
             )
         except Exception as e:
             # Rare fallback (e.g. navigation edge or test fakes): original CDP loop (still correct)
-            self._log(f"JS mouse path non-fatal (fallback to CDP loop for gesture): {e}")
+            self._log(
+                f"JS mouse path non-fatal (fallback to CDP loop for gesture): {e}"
+            )
             for px, py in points:
                 await self.page.mouse.move(px, py)
                 progress = (points.index((px, py)) + 1) / len(points)
@@ -359,11 +406,15 @@ class HumanBehavior:
             await asyncio.sleep(self.rng.uniform(0.025, 0.07))
             final_x = x + self.rng.randint(-4, 4)
             final_y = y + self.rng.randint(-3, 3)
-            await self.page.mouse.move(final_x, final_y)  # syncs Playwright internal cursor for .down/.up/clicks
+            await self.page.mouse.move(
+                final_x, final_y
+            )  # syncs Playwright internal cursor for .down/.up/clicks
             await self._record_mouse_position(final_x, final_y)
         else:
             final_x, final_y = points[-1]
-            await self.page.mouse.move(final_x, final_y)  # 1 CDP call: keeps PW mouse model consistent (key to low chattiness)
+            await self.page.mouse.move(
+                final_x, final_y
+            )  # 1 CDP call: keeps PW mouse model consistent (key to low chattiness)
             await self._record_mouse_position(final_x, final_y)
 
     async def human_click(self, selector: str = None, x: int = None, y: int = None):
@@ -371,27 +422,31 @@ class HumanBehavior:
         Uses tracked pos for bare clicks; records after action (#24 #101).
         """
         # #251 automatic think for critical selectors
-        if selector and any(k in (selector or "").lower() for k in ["submit", "login", "send", "save", "post", "confirm", "button"]):
+        if selector and any(
+            k in (selector or "").lower()
+            for k in ["submit", "login", "send", "save", "post", "confirm", "button"]
+        ):
             try:
                 await self.think_before_action("critical")
             except Exception:
                 pass
-        did_move = False
         if selector:
             try:
                 box = await self.page.query_selector(selector)
                 if box:
                     box_info = await box.bounding_box()
                     if box_info:
-                        target_x = box_info["x"] + box_info["width"] * self.rng.uniform(0.2, 0.8)
-                        target_y = box_info["y"] + box_info["height"] * self.rng.uniform(0.2, 0.8)
+                        target_x = box_info["x"] + box_info["width"] * self.rng.uniform(
+                            0.2, 0.8
+                        )
+                        target_y = box_info["y"] + box_info[
+                            "height"
+                        ] * self.rng.uniform(0.2, 0.8)
                         await self.move_mouse_naturally(int(target_x), int(target_y))
-                        did_move = True
             except Exception as e:
                 self._log(f"non-fatal error (was silent): {e}")
         elif x is not None and y is not None:
             await self.move_mouse_naturally(x, y)
-            did_move = True
 
         await asyncio.sleep(self.rng.uniform(0.04, 0.12))
 
@@ -410,33 +465,38 @@ class HumanBehavior:
             # position unchanged; ensure recorded (in case first bare click)
             await self._record_mouse_position(cx, cy)
 
-    async def human_right_click(self, selector: str = None, x: int = None, y: int = None):
+    async def human_right_click(
+        self, selector: str = None, x: int = None, y: int = None
+    ):
         """#229 minimal realistic right-click / context menu simulation (opt-in, high-value for human mimic).
         Natural mouse approach (reuses move continuity) then right button click + brief hold/pause as if reviewing menu.
         Does not auto-choose menu item (caller can follow up if needed).
         """
         # #251 think if critical context? rare for right, but consistent
-        if selector and any(k in (selector or "").lower() for k in ["submit", "login", "send"]):
+        if selector and any(
+            k in (selector or "").lower() for k in ["submit", "login", "send"]
+        ):
             try:
                 await self.think_before_action("normal")
             except Exception:
                 pass
-        did_move = False
         if selector:
             try:
                 box = await self.page.query_selector(selector)
                 if box:
                     box_info = await box.bounding_box()
                     if box_info:
-                        target_x = box_info["x"] + box_info["width"] * self.rng.uniform(0.25, 0.75)
-                        target_y = box_info["y"] + box_info["height"] * self.rng.uniform(0.25, 0.75)
+                        target_x = box_info["x"] + box_info["width"] * self.rng.uniform(
+                            0.25, 0.75
+                        )
+                        target_y = box_info["y"] + box_info[
+                            "height"
+                        ] * self.rng.uniform(0.25, 0.75)
                         await self.move_mouse_naturally(int(target_x), int(target_y))
-                        did_move = True
             except Exception:
                 pass
         elif x is not None and y is not None:
             await self.move_mouse_naturally(x, y)
-            did_move = True
 
         await asyncio.sleep(self.rng.uniform(0.06, 0.15))
         cx, cy = self.last_mouse_pos
@@ -447,7 +507,9 @@ class HumanBehavior:
         await asyncio.sleep(self.rng.uniform(0.25, 0.85))
         if self.realism_level >= 2 and self.rng.random() < 0.3:
             # occasional small corrective move away after right-click (human "whoops" or inspect)
-            await self.move_mouse_naturally(cx + self.rng.randint(-20, 40), cy + self.rng.randint(-15, 25))
+            await self.move_mouse_naturally(
+                cx + self.rng.randint(-20, 40), cy + self.rng.randint(-15, 25)
+            )
 
     async def simulate_changed_mind(self, probability: float = 0.09) -> bool:
         """#235: simulate realistic "I changed my mind" abort / re-plan (opt-in, call before high-stakes commit).
@@ -457,7 +519,9 @@ class HumanBehavior:
         """
         self._update_fatigue()
         fat = getattr(self, "fatigue_level", 0.0)
-        eff_prob = min(0.35, probability + fat * 0.25)  # fatigued users change mind more
+        eff_prob = min(
+            0.35, probability + fat * 0.25
+        )  # fatigued users change mind more
         if self.realism_level < 1 or self.rng.random() >= eff_prob:
             return False
         # Choose abort flavor
@@ -494,7 +558,7 @@ class HumanBehavior:
 
         def _ease(t: float) -> float:
             # ease-in-out cubic for scroll velocity profile (#144): slower start/end, faster mid-scroll
-            return t*t*(3-2*t)
+            return t * t * (3 - 2 * t)
 
         for i in range(steps):
             progress = (i + 0.5) / max(1, steps)
@@ -505,21 +569,33 @@ class HumanBehavior:
             amount = int((base_step + variation) * (0.85 + 0.3 * e))
             if direction == "up":
                 amount = -amount
-            delay_after = self.rng.uniform(0.6, 1.4) if self.rng.random() < 0.22 else self.rng.uniform(0.12, 0.38)
+            delay_after = (
+                self.rng.uniform(0.6, 1.4)
+                if self.rng.random() < 0.22
+                else self.rng.uniform(0.12, 0.38)
+            )
             if self.realism_level <= 1:
                 delay_after = max(0.05, delay_after * 0.4)  # consolidate for perf
             # bias mid delays shorter for accel profile
             if 0.3 < progress < 0.7:
                 delay_after *= 0.75
-            scroll_actions.append({"dy": amount, "delay": delay_after, "is_back": False})
+            scroll_actions.append(
+                {"dy": amount, "delay": delay_after, "is_back": False}
+            )
 
             # Pre-plan occasional backtick into sequence (no separate CDP after)
-            if not did_back and self.rng.random() < 0.08 and i > 1 and i < steps-2:
+            if not did_back and self.rng.random() < 0.08 and i > 1 and i < steps - 2:
                 back = int(amount * 0.3) if amount > 0 else int(amount * 0.25)
                 back_d = self.rng.uniform(0.15, 0.35)
                 if self.realism_level <= 1:
                     back_d = 0.05
-                scroll_actions.append({"dy": -back if amount > 0 else abs(back), "delay": back_d, "is_back": True})
+                scroll_actions.append(
+                    {
+                        "dy": -back if amount > 0 else abs(back),
+                        "delay": back_d,
+                        "is_back": True,
+                    }
+                )
                 did_back = True
 
         # Batched JS scroll (P2 CDP reduction): single evaluate runs all wheel dispatches + scrollBy + precise delays inside browser
@@ -548,7 +624,7 @@ class HumanBehavior:
                     return actions.length;
                 }
                 """,
-                scroll_actions
+                scroll_actions,
             )
             return
         except Exception as e:
@@ -561,7 +637,9 @@ class HumanBehavior:
             if a["delay"] > 0:
                 await asyncio.sleep(a["delay"])
 
-    async def simulate_reading(self, duration_seconds: float = 8.0, content_factor: float = 1.0):
+    async def simulate_reading(
+        self, duration_seconds: float = 8.0, content_factor: float = 1.0
+    ):
         """Simulate a person reading a page.
         P2 #131: duration scaled by content_factor (e.g. longer text / more scrolls => longer realistic read time).
         Proxy: caller can pass based on page length or prior scroll total.
@@ -606,7 +684,9 @@ class HumanBehavior:
     async def apply_viewport_jitter(self):
         """Occasional small viewport size changes"""
         try:
-            current = await self.page.evaluate("() => ({width: window.innerWidth, height: window.innerHeight})")
+            current = await self.page.evaluate(
+                "() => ({width: window.innerWidth, height: window.innerHeight})"
+            )
             w = current.get("width", 1366)
             h = current.get("height", 768)
 
@@ -632,7 +712,7 @@ class HumanBehavior:
             search_selectors = [
                 "input[type='search']",
                 "input[name='q']",
-                "input[placeholder*='search']"
+                "input[placeholder*='search']",
             ]
 
             for selector in search_selectors:
@@ -669,7 +749,9 @@ class HumanBehavior:
         ]
         if self.realism_level < 1:
             # P2: skip micro entirely in CI/low-resource (prefer pure sleeps/think)
-            patterns = [p for p in patterns if "micro" not in getattr(p, "__name__", "")] or patterns[1:]
+            patterns = [
+                p for p in patterns if "micro" not in getattr(p, "__name__", "")
+            ] or patterns[1:]
 
         while time.monotonic() < end_time:
             pattern = self.rng.choice(patterns)
@@ -698,7 +780,9 @@ class HumanBehavior:
                 # Prefer Python tracked for continuity; fallback JS or default
                 cx, cy = self.last_mouse_pos
                 try:
-                    jpos = await self.page.evaluate("() => ({x: window.mouseX || 0, y: window.mouseY || 0})")
+                    jpos = await self.page.evaluate(
+                        "() => ({x: window.mouseX || 0, y: window.mouseY || 0})"
+                    )
                     jx, jy = jpos.get("x", 0), jpos.get("y", 0)
                     if jx > 50 and jy > 50:
                         cx, cy = jx, jy
@@ -713,7 +797,11 @@ class HumanBehavior:
             except Exception as e:
                 self._log(f"non-fatal error (was silent): {e}")
 
-            sleep_base = 0.45 if self.realism_level >= 3 else (0.18 if self.realism_level >= 2 else 0.05)
+            sleep_base = (
+                0.45
+                if self.realism_level >= 3
+                else (0.18 if self.realism_level >= 2 else 0.05)
+            )
             await asyncio.sleep(self.rng.uniform(sleep_base, sleep_base + 0.15))
             # P2 #89 #123: larger sleeps + light skip reduces event-loop wakeups / CDP during idle waits
 
@@ -722,11 +810,13 @@ class HumanBehavior:
         start = time.monotonic()
 
         while time.monotonic() - start < max_wait_seconds:
-            behavior = self.rng.choice([
-                lambda: self.micro_movement_while_waiting(600),
-                lambda: asyncio.sleep(self.rng.uniform(0.6, 1.4)),
-                lambda: self.scroll_naturally(self.rng.randint(60, 140))
-            ])
+            behavior = self.rng.choice(
+                [
+                    lambda: self.micro_movement_while_waiting(600),
+                    lambda: asyncio.sleep(self.rng.uniform(0.6, 1.4)),
+                    lambda: self.scroll_naturally(self.rng.randint(60, 140)),
+                ]
+            )
 
             coro = behavior()
             await coro
@@ -736,7 +826,9 @@ class HumanBehavior:
 
     # --- Phase 8 Human Behavior Realism Additions (Closes #275, #267, #260, #284, #291) ---
 
-    async def accidental_click_with_correction(self, selector: str = None, x: int = None, y: int = None):
+    async def accidental_click_with_correction(
+        self, selector: str = None, x: int = None, y: int = None
+    ):
         """Simulate realistic accidental click followed by immediate correction (#275)"""
         await self.human_click(selector, x, y)
         await asyncio.sleep(self.rng.uniform(0.05, 0.15))
@@ -756,12 +848,16 @@ class HumanBehavior:
             except Exception:
                 pass
 
-    async def type_with_select_all_replace(self, selector: str, new_text: str, mistake_rate: float = 0.02):
+    async def type_with_select_all_replace(
+        self, selector: str, new_text: str, mistake_rate: float = 0.02
+    ):
         """Simulate realistic 'select all + replace' editing pattern (#267)"""
         await self.human_click(selector)
         await asyncio.sleep(self.rng.uniform(0.1, 0.25))
         if self.rng.random() < 0.7:
-            await self.page.keyboard.press("Control+A" if self.rng.random() > 0.5 else "Meta+A")
+            await self.page.keyboard.press(
+                "Control+A" if self.rng.random() > 0.5 else "Meta+A"
+            )
             await asyncio.sleep(self.rng.uniform(0.05, 0.12))
             if self.rng.random() < 0.3:
                 await self.page.keyboard.press("Backspace")
@@ -797,7 +893,9 @@ class HumanBehavior:
                 # Prefer tracked last pos (continuity) over stale JS default
                 base_x, base_y = self.last_mouse_pos
                 try:
-                    jpos = await self.page.evaluate("() => ({x: window.mouseX||0, y: window.mouseY||0})")
+                    jpos = await self.page.evaluate(
+                        "() => ({x: window.mouseX||0, y: window.mouseY||0})"
+                    )
                     jx = jpos.get("x", 0)
                     jy = jpos.get("y", 0)
                     if jx > 50 and jy > 50:

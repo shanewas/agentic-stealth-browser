@@ -8,6 +8,7 @@ Covers:
 - Platform-aware strategy lookup
 - Recovery history learning
 """
+
 import sys
 from pathlib import Path
 
@@ -47,7 +48,9 @@ class TestBlockTypeDetection:
         for status in [403, 429, 503]:
             ctx = _make_ctx(last_error=err, http_status=status)
             result = asyncio.run(orch.detect_block(ctx))
-            assert result != BlockType.TRANSIENT_ERROR, f"Should be overridden for {status}"
+            assert result != BlockType.TRANSIENT_ERROR, (
+                f"Should be overridden for {status}"
+            )
 
     def test_http_429_is_hard_rate_limit(self):
         orch = AntiBlockOrchestrator()
@@ -71,9 +74,15 @@ class TestBlockTypeDetection:
 
     def test_captcha_keywords_in_error(self):
         orch = AntiBlockOrchestrator()
-        for kw in ["captcha challenge", "security check required", "robot check failed"]:
+        for kw in [
+            "captcha challenge",
+            "security check required",
+            "robot check failed",
+        ]:
             ctx = _make_ctx(last_error=kw)
-            assert asyncio.run(orch.detect_block(ctx)) == BlockType.CAPTCHA, f"Failed for '{kw}'"
+            assert asyncio.run(orch.detect_block(ctx)) == BlockType.CAPTCHA, (
+                f"Failed for '{kw}'"
+            )
 
     def test_rate_limit_keywords_in_error(self):
         orch = AntiBlockOrchestrator()
@@ -256,8 +265,10 @@ class TestRecoveryActionDecision:
 
     def test_custom_strategy_exception_falls_back(self):
         orch = AntiBlockOrchestrator()
+
         def failing(ctx, bt):
             raise RuntimeError("boom")
+
         orch.register_recovery_strategy("mytest", failing)
         ctx = _make_ctx(platform="mytest")
         action = orch._decide_recovery_action(ctx, BlockType.PROXY_BLOCK)
@@ -300,7 +311,9 @@ class TestRecoveryHistoryLearning:
 
     def test_learned_strategy_is_preferred(self):
         orch = AntiBlockOrchestrator()
-        ctx = _make_ctx(platform="amazon", url="https://amazon.com/test", account_hint="shop")
+        ctx = _make_ctx(
+            platform="amazon", url="https://amazon.com/test", account_hint="shop"
+        )
         # Simulate: ROTATE_BOTH succeeded, BACKOFF failed
         orch._update_recovery_history(ctx, RecoveryAction.ROTATE_BOTH, success=True)
         orch._update_recovery_history(ctx, RecoveryAction.ROTATE_BOTH, success=True)
@@ -327,8 +340,18 @@ class TestMaxRetriesExceeded:
 class TestErrorSeverityMapping:
     def test_block_type_to_severity(self):
         orch = AntiBlockOrchestrator()
-        assert orch.block_type_to_severity[BlockType.TRANSIENT_ERROR] == ErrorSeverity.LOW
-        assert orch.block_type_to_severity[BlockType.SOFT_RATE_LIMIT] == ErrorSeverity.MEDIUM
-        assert orch.block_type_to_severity[BlockType.HARD_RATE_LIMIT] == ErrorSeverity.HIGH
+        assert (
+            orch.block_type_to_severity[BlockType.TRANSIENT_ERROR] == ErrorSeverity.LOW
+        )
+        assert (
+            orch.block_type_to_severity[BlockType.SOFT_RATE_LIMIT]
+            == ErrorSeverity.MEDIUM
+        )
+        assert (
+            orch.block_type_to_severity[BlockType.HARD_RATE_LIMIT] == ErrorSeverity.HIGH
+        )
         assert orch.block_type_to_severity[BlockType.CAPTCHA] == ErrorSeverity.HIGH
-        assert orch.block_type_to_severity[BlockType.ACCOUNT_RESTRICTION] == ErrorSeverity.CRITICAL
+        assert (
+            orch.block_type_to_severity[BlockType.ACCOUNT_RESTRICTION]
+            == ErrorSeverity.CRITICAL
+        )

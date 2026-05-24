@@ -2,7 +2,6 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -31,7 +30,7 @@ class QueueJob:
             self.created_at = time.time()
 
     def backoff_seconds(self) -> float:
-        return self.backoff_base * (2 ** self.retries)
+        return self.backoff_base * (2**self.retries)
 
 
 @dataclass
@@ -67,7 +66,6 @@ class OrchestratorStatus:
 
 
 class WorkflowOrchestrator:
-
     def __init__(
         self,
         max_concurrent_total: int = 5,
@@ -82,7 +80,10 @@ class WorkflowOrchestrator:
         self._domain_slots: Dict[str, int] = {}
         self._domain_active: Dict[str, int] = {}
         self._max_concurrent_total = max_concurrent_total
-        self._domain_concurrency = domain_concurrency or {"linkedin.com": 1, "default": 3}
+        self._domain_concurrency = domain_concurrency or {
+            "linkedin.com": 1,
+            "default": 3,
+        }
         self._persistence_path = persistence_path
         self._lock = asyncio.Lock()
         self._running = False
@@ -160,7 +161,9 @@ class WorkflowOrchestrator:
     # ---- concurrency management ----
 
     def _acquire_slot(self, domain: str) -> bool:
-        limit = self._domain_concurrency.get(domain, self._domain_concurrency.get("default", 3))
+        limit = self._domain_concurrency.get(
+            domain, self._domain_concurrency.get("default", 3)
+        )
         current = self._domain_active.get(domain, 0)
         if current >= limit:
             return False
@@ -176,7 +179,9 @@ class WorkflowOrchestrator:
         total_active = len(self._active)
         if total_active >= self._max_concurrent_total:
             return False
-        limit = self._domain_concurrency.get(domain, self._domain_concurrency.get("default", 3))
+        limit = self._domain_concurrency.get(
+            domain, self._domain_concurrency.get("default", 3)
+        )
         domain_active = self._domain_active.get(domain, 0)
         return domain_active < limit
 
@@ -254,12 +259,18 @@ class WorkflowOrchestrator:
             "saved_at": time.time(),
             "queue": [
                 {
-                    "job_id": j.job_id, "workflow_path": j.workflow_path,
-                    "domain": j.domain, "account": j.account,
-                    "variables": j.variables, "status": j.status,
-                    "created_at": j.created_at, "retries": j.retries,
-                    "max_retries": j.max_retries, "priority": j.priority,
-                    "backoff_base": j.backoff_base, "last_error": j.last_error,
+                    "job_id": j.job_id,
+                    "workflow_path": j.workflow_path,
+                    "domain": j.domain,
+                    "account": j.account,
+                    "variables": j.variables,
+                    "status": j.status,
+                    "created_at": j.created_at,
+                    "retries": j.retries,
+                    "max_retries": j.max_retries,
+                    "priority": j.priority,
+                    "backoff_base": j.backoff_base,
+                    "last_error": j.last_error,
                 }
                 for j in self._queue
             ],
@@ -267,11 +278,15 @@ class WorkflowOrchestrator:
             "failed_ids": [j.job_id for j in self._failed[-100:]],
             "recurring": {
                 jid: {
-                    "job_id": rj.job_id, "workflow_path": rj.workflow_path,
-                    "domain": rj.domain, "account": rj.account,
+                    "job_id": rj.job_id,
+                    "workflow_path": rj.workflow_path,
+                    "domain": rj.domain,
+                    "account": rj.account,
                     "interval_seconds": rj.interval_seconds,
-                    "variables": rj.variables, "max_concurrent": rj.max_concurrent,
-                    "next_run_at": rj.next_run_at, "enabled": rj.enabled,
+                    "variables": rj.variables,
+                    "max_concurrent": rj.max_concurrent,
+                    "next_run_at": rj.next_run_at,
+                    "enabled": rj.enabled,
                     "last_run_at": rj.last_run_at,
                 }
                 for jid, rj in self._recurring.items()
@@ -429,9 +444,12 @@ class WorkflowOrchestrator:
         )
 
     def get_job(self, job_id: str) -> Optional[QueueJob]:
-        for collection in [self._active, dict((j.job_id, j) for j in self._queue),
-                           dict((j.job_id, j) for j in self._completed),
-                           dict((j.job_id, j) for j in self._failed)]:
+        for collection in [
+            self._active,
+            dict((j.job_id, j) for j in self._queue),
+            dict((j.job_id, j) for j in self._completed),
+            dict((j.job_id, j) for j in self._failed),
+        ]:
             if isinstance(collection, dict) and job_id in collection:
                 return collection[job_id]
         return None
@@ -443,11 +461,11 @@ class WorkflowOrchestrator:
         cutoff = time.time() - (before_hours * 3600)
         async with self._lock:
             self._completed = [
-                j for j in self._completed
+                j
+                for j in self._completed
                 if j.completed_at and j.completed_at >= cutoff
             ]
             self._failed = [
-                j for j in self._failed
-                if j.completed_at and j.completed_at >= cutoff
+                j for j in self._failed if j.completed_at and j.completed_at >= cutoff
             ]
         await self._persist()

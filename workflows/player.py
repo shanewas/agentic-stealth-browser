@@ -45,7 +45,11 @@ class WorkflowPlayer:
     def __init__(self, browser, variable_resolver: Optional[VariableResolver] = None):
         self.browser = browser
         self.resolver = variable_resolver or VariableResolver()
-        self.checkpoint: Dict[str, Any] = {"completed_steps": [], "last_url": "", "variables": {}}
+        self.checkpoint: Dict[str, Any] = {
+            "completed_steps": [],
+            "last_url": "",
+            "variables": {},
+        }
         self.recovery: Optional[Any] = None
         self.backend: str = "bridge"
         self._workflow_stack: List[str] = []
@@ -58,7 +62,9 @@ class WorkflowPlayer:
         try:
             with open(path, "r") as f:
                 data = json.load(f)
-            self.checkpoint = data.get("checkpoint", {"completed_steps": [], "last_url": "", "variables": {}})
+            self.checkpoint = data.get(
+                "checkpoint", {"completed_steps": [], "last_url": "", "variables": {}}
+            )
             self.backend = data.get("backend", "bridge")
             return True
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
@@ -135,15 +141,19 @@ class WorkflowPlayer:
                             try:
                                 healed_params = dict(params)
                                 healed_params["selector"] = healed_selector
-                                await self._dispatch_step(step_type, healed_params, run_vars)
+                                await self._dispatch_step(
+                                    step_type, healed_params, run_vars
+                                )
                                 steps_executed += 1
                                 self.checkpoint["completed_steps"].append(i)
-                                auto_healed_selectors.append({
-                                    "step_index": i,
-                                    "step_type": step_type,
-                                    "original_selector": params.get("selector", ""),
-                                    "healed_selector": healed_selector,
-                                })
+                                auto_healed_selectors.append(
+                                    {
+                                        "step_index": i,
+                                        "step_type": step_type,
+                                        "original_selector": params.get("selector", ""),
+                                        "healed_selector": healed_selector,
+                                    }
+                                )
                                 break
                             except Exception:
                                 continue
@@ -152,12 +162,19 @@ class WorkflowPlayer:
                     if self.recovery is not None:
                         recovery_cfg_raw = params.get("recovery")
                         if recovery_cfg_raw and isinstance(recovery_cfg_raw, dict):
-                            from workflows.recovery import RecoveryAction as RecoveryActionCfg
+                            from workflows.recovery import (
+                                RecoveryAction as RecoveryActionCfg,
+                            )
+
                             recovery_cfg = RecoveryActionCfg(
-                                action_type=recovery_cfg_raw.get("action_type", "retry"),
+                                action_type=recovery_cfg_raw.get(
+                                    "action_type", "retry"
+                                ),
                                 max_retries=recovery_cfg_raw.get("max_retries", 3),
                                 backoff_seconds=recovery_cfg_raw.get("backoff", 2.0),
-                                take_screenshot=recovery_cfg_raw.get("take_screenshot", True),
+                                take_screenshot=recovery_cfg_raw.get(
+                                    "take_screenshot", True
+                                ),
                             )
                         else:
                             recovery_cfg = None
@@ -171,15 +188,17 @@ class WorkflowPlayer:
                         )
 
                         recovery_used = True
-                        recovery_actions.append({
-                            "step_index": i,
-                            "step_type": step_type,
-                            "recovered": recovery_result.recovered,
-                            "action_taken": recovery_result.action_taken,
-                            "retries_used": recovery_result.retries_used,
-                            "backend_used": recovery_result.backend_used,
-                            "error": str(e),
-                        })
+                        recovery_actions.append(
+                            {
+                                "step_index": i,
+                                "step_type": step_type,
+                                "recovered": recovery_result.recovered,
+                                "action_taken": recovery_result.action_taken,
+                                "retries_used": recovery_result.retries_used,
+                                "backend_used": recovery_result.backend_used,
+                                "error": str(e),
+                            }
+                        )
 
                         if recovery_result.recovered:
                             steps_executed += 1
@@ -260,15 +279,17 @@ class WorkflowPlayer:
             elif step_type == "click":
                 selector = params.get("selector", "")
                 warnings.append(f"Step {i} ({step_type}): would click {selector}")
-                selectors_used.append({
-                    "step_index": i,
-                    "step_type": step_type,
-                    "selector": selector,
-                    "fallbacks": params.get("selector_fallbacks", []),
-                })
+                selectors_used.append(
+                    {
+                        "step_index": i,
+                        "step_type": step_type,
+                        "selector": selector,
+                        "fallbacks": params.get("selector_fallbacks", []),
+                    }
+                )
                 try:
                     exists = await self._evaluate(
-                        f'!!document.querySelector({json.dumps(selector)})'
+                        f"!!document.querySelector({json.dumps(selector)})"
                     )
                     if not exists:
                         warnings.append(
@@ -282,15 +303,19 @@ class WorkflowPlayer:
             elif step_type == "fill" or step_type == "type":
                 selector = params.get("selector", "")
                 value = params.get("value", "")
-                warnings.append(f"Step {i} ({step_type}): would fill {selector} with '{value}'")
-                selectors_used.append({
-                    "step_index": i,
-                    "step_type": step_type,
-                    "selector": selector,
-                })
+                warnings.append(
+                    f"Step {i} ({step_type}): would fill {selector} with '{value}'"
+                )
+                selectors_used.append(
+                    {
+                        "step_index": i,
+                        "step_type": step_type,
+                        "selector": selector,
+                    }
+                )
                 try:
                     exists = await self._evaluate(
-                        f'!!document.querySelector({json.dumps(selector)})'
+                        f"!!document.querySelector({json.dumps(selector)})"
                     )
                     if not exists:
                         warnings.append(
@@ -308,11 +333,13 @@ class WorkflowPlayer:
                     f"Step {i} ({step_type}): would verify {selector} "
                     f"{'contains ' + text if text else 'exists'}"
                 )
-                selectors_used.append({
-                    "step_index": i,
-                    "step_type": step_type,
-                    "selector": selector,
-                })
+                selectors_used.append(
+                    {
+                        "step_index": i,
+                        "step_type": step_type,
+                        "selector": selector,
+                    }
+                )
 
             elif step_type == "screenshot":
                 warnings.append(f"Step {i} ({step_type}): would take screenshot")
@@ -325,7 +352,9 @@ class WorkflowPlayer:
 
             elif step_type == "run_workflow":
                 path = params.get("path", "")
-                warnings.append(f"Step {i} ({step_type}): would run nested workflow from {path}")
+                warnings.append(
+                    f"Step {i} ({step_type}): would run nested workflow from {path}"
+                )
 
             elif step_type == "conditional":
                 condition = params.get("condition", "")
@@ -338,7 +367,12 @@ class WorkflowPlayer:
 
             elif step_type == "wait":
                 ms_val = params.get("ms", 1000)
-                wait_reason = params.get("selector") or params.get("text") or params.get("url") or f"{ms_val}ms"
+                wait_reason = (
+                    params.get("selector")
+                    or params.get("text")
+                    or params.get("url")
+                    or f"{ms_val}ms"
+                )
                 warnings.append(f"Step {i} ({step_type}): would wait for {wait_reason}")
 
             elif step_type == "wait_for_element":
@@ -348,19 +382,27 @@ class WorkflowPlayer:
             elif step_type == "scroll":
                 direction = params.get("direction", "down")
                 amount = params.get("amount", 300)
-                warnings.append(f"Step {i} ({step_type}): would scroll {direction} {amount}px")
+                warnings.append(
+                    f"Step {i} ({step_type}): would scroll {direction} {amount}px"
+                )
 
             elif step_type == "select":
                 selector = params.get("selector", "")
                 value = params.get("value", "")
-                warnings.append(f"Step {i} ({step_type}): would select {value} on {selector}")
+                warnings.append(
+                    f"Step {i} ({step_type}): would select {value} on {selector}"
+                )
 
             elif step_type == "execute_js":
                 code = params.get("code", "")
-                warnings.append(f"Step {i} ({step_type}): would execute JS ({len(code)} chars)")
+                warnings.append(
+                    f"Step {i} ({step_type}): would execute JS ({len(code)} chars)"
+                )
 
             else:
-                warnings.append(f"Step {i} ({step_type}): unknown step type in rehearsal")
+                warnings.append(
+                    f"Step {i} ({step_type}): unknown step type in rehearsal"
+                )
 
         elapsed = time.monotonic() - start_time
         return RehearsalResult(
@@ -374,7 +416,9 @@ class WorkflowPlayer:
             summary=f"Rehearsal complete: {len(resolved_workflow.steps)} steps, {len(warnings)} warnings",
         )
 
-    async def _dispatch_step(self, step_type: str, params: Dict[str, Any], run_vars: Dict[str, Any]):
+    async def _dispatch_step(
+        self, step_type: str, params: Dict[str, Any], run_vars: Dict[str, Any]
+    ):
         timeout_ms = params.get("timeout", 30000)
         timeout_s = timeout_ms / 1000.0
 
@@ -422,7 +466,7 @@ class WorkflowPlayer:
                     timeout=timeout_s,
                 )
             else:
-                await self._evaluate(f'window.location.href = {json.dumps(url)}')
+                await self._evaluate(f"window.location.href = {json.dumps(url)}")
         except asyncio.TimeoutError:
             raise TimeoutError(f"Navigation to {url} timed out after {timeout_s}s")
 
@@ -441,7 +485,9 @@ class WorkflowPlayer:
                     )
                 else:
                     await asyncio.wait_for(
-                        self._evaluate(f'document.querySelector({json.dumps(sel)}).click()'),
+                        self._evaluate(
+                            f"document.querySelector({json.dumps(sel)}).click()"
+                        ),
                         timeout=timeout_s,
                     )
                 wait_after = params.get("wait_after", 0)
@@ -465,12 +511,12 @@ class WorkflowPlayer:
             )
         else:
             await self._evaluate(
-                f'document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}'
+                f"document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}"
             )
 
         if params.get("submit"):
             await self._evaluate(
-                f'document.querySelector({json.dumps(selector)}).form.submit()'
+                f"document.querySelector({json.dumps(selector)}).form.submit()"
             )
 
     async def _step_type(self, params: Dict[str, Any], timeout_s: float):
@@ -486,13 +532,13 @@ class WorkflowPlayer:
         else:
             for char in value:
                 await self._evaluate(
-                    f'document.querySelector({json.dumps(selector)}).value += {json.dumps(char)}'
+                    f"document.querySelector({json.dumps(selector)}).value += {json.dumps(char)}"
                 )
                 await asyncio.sleep(delay_ms / 1000.0)
 
         if params.get("submit"):
             await self._evaluate(
-                f'document.querySelector({json.dumps(selector)}).form.submit()'
+                f"document.querySelector({json.dumps(selector)}).form.submit()"
             )
 
     async def _step_select(self, params: Dict[str, Any], timeout_s: float):
@@ -500,7 +546,7 @@ class WorkflowPlayer:
         value = params["value"]
         await asyncio.wait_for(
             self._evaluate(
-                f'document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}'
+                f"document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}"
             ),
             timeout=timeout_s,
         )
@@ -512,14 +558,14 @@ class WorkflowPlayer:
 
         async def check():
             exists = await self._evaluate(
-                f'!!document.querySelector({json.dumps(selector)})'
+                f"!!document.querySelector({json.dumps(selector)})"
             )
             if not exists:
                 raise RuntimeError(f"Verify failed: selector '{selector}' not found")
 
             if expected_text is not None:
                 actual = await self._evaluate(
-                    f'document.querySelector({json.dumps(selector)}).textContent'
+                    f"document.querySelector({json.dumps(selector)}).textContent"
                 )
                 if expected_text not in str(actual):
                     raise RuntimeError(
@@ -528,10 +574,12 @@ class WorkflowPlayer:
 
             if visible:
                 displayed = await self._evaluate(
-                    f'document.querySelector({json.dumps(selector)}).offsetParent !== null'
+                    f"document.querySelector({json.dumps(selector)}).offsetParent !== null"
                 )
                 if not displayed:
-                    raise RuntimeError(f"Verify failed: selector '{selector}' is not visible")
+                    raise RuntimeError(
+                        f"Verify failed: selector '{selector}' is not visible"
+                    )
 
         await asyncio.wait_for(check(), timeout=timeout_s)
 
@@ -544,7 +592,9 @@ class WorkflowPlayer:
         if selector:
             deadline = time.monotonic() + ms / 1000.0
             while time.monotonic() < deadline:
-                exists = await self._evaluate(f'!!document.querySelector({json.dumps(selector)})')
+                exists = await self._evaluate(
+                    f"!!document.querySelector({json.dumps(selector)})"
+                )
                 if exists:
                     return
                 await asyncio.sleep(0.1)
@@ -572,11 +622,15 @@ class WorkflowPlayer:
         selector = params["selector"]
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            exists = await self._evaluate(f'!!document.querySelector({json.dumps(selector)})')
+            exists = await self._evaluate(
+                f"!!document.querySelector({json.dumps(selector)})"
+            )
             if exists:
                 return
             await asyncio.sleep(0.1)
-        raise TimeoutError(f"Wait for element '{selector}' timed out after {timeout_s}s")
+        raise TimeoutError(
+            f"Wait for element '{selector}' timed out after {timeout_s}s"
+        )
 
     async def _step_scroll(self, params: Dict[str, Any]):
         selector = params.get("selector")
@@ -585,7 +639,7 @@ class WorkflowPlayer:
 
         if selector:
             await self._evaluate(
-                f'document.querySelector({json.dumps(selector)}).scrollIntoView()'
+                f"document.querySelector({json.dumps(selector)}).scrollIntoView()"
             )
         else:
             delta_y = amount if direction == "down" else -amount
@@ -597,7 +651,9 @@ class WorkflowPlayer:
             path = await self.browser.screenshot_on_error("step")
         elif hasattr(self.browser, "page") and hasattr(self.browser.page, "screenshot"):
             full_page = params.get("full_page", False)
-            result = await self.browser.page.screenshot(path=path or None, full_page=full_page)
+            result = await self.browser.page.screenshot(
+                path=path or None, full_page=full_page
+            )
             if isinstance(result, dict) and "path" in result:
                 path = result["path"]
             elif isinstance(result, str):
@@ -622,7 +678,9 @@ class WorkflowPlayer:
             step_params = normalize_step_params(step_type, resolved_params)
             await self._dispatch_step(step_type, step_params, run_vars)
 
-    async def _step_run_workflow(self, params: Dict[str, Any], run_vars: Dict[str, Any]):
+    async def _step_run_workflow(
+        self, params: Dict[str, Any], run_vars: Dict[str, Any]
+    ):
         path = params["path"]
         variables = params.get("variables", {})
         output_as = params.get("output_as")
@@ -651,7 +709,9 @@ class WorkflowPlayer:
         finally:
             self._workflow_stack.pop()
 
-    def _resolve_step_data_params(self, step_data: Dict[str, Any], run_vars: Dict[str, Any]) -> Dict[str, Any]:
+    def _resolve_step_data_params(
+        self, step_data: Dict[str, Any], run_vars: Dict[str, Any]
+    ) -> Dict[str, Any]:
         resolved = {}
         for key, value in step_data.items():
             if key == "type":
@@ -686,12 +746,16 @@ class WorkflowPlayer:
             return self.browser.url
         return ""
 
-    async def _take_step_screenshot(self, step_type: str, step_index: int) -> Optional[str]:
+    async def _take_step_screenshot(
+        self, step_type: str, step_index: int
+    ) -> Optional[str]:
         name = f"error_step_{step_index}_{step_type}"
         try:
             if hasattr(self.browser, "screenshot_on_error"):
                 return await self.browser.screenshot_on_error(name)
-            if hasattr(self.browser, "page") and hasattr(self.browser.page, "screenshot"):
+            if hasattr(self.browser, "page") and hasattr(
+                self.browser.page, "screenshot"
+            ):
                 buf = await self.browser.page.screenshot()
                 if buf:
                     return f"screenshots/{name}_{int(time.time())}.png"

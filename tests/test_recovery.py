@@ -1,7 +1,6 @@
 """Tests for recovery module: FallbackController, checkpoint resume, and player integration."""
 
 import json
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -19,7 +18,9 @@ class MockBrowser:
         self.page.screenshot = AsyncMock(return_value={"path": "/tmp/screen.png"})
         self.page.url = "https://example.com"
         self.page.title = "Example"
-        self.page.content = AsyncMock(return_value="<html><body>Normal page</body></html>")
+        self.page.content = AsyncMock(
+            return_value="<html><body>Normal page</body></html>"
+        )
 
         self.goto = AsyncMock(return_value=True)
         self.safe_goto = AsyncMock(return_value=True)
@@ -63,10 +64,10 @@ class TestFallbackController:
         assert result.action_taken == "retry"
         assert result.retries_used >= 1
 
-    async def test_retries_element_not_found_static_method(self, fallback_controller, mock_browser):
-        mock_browser.safe_click = AsyncMock(
-            side_effect=[Exception("not found"), True]
-        )
+    async def test_retries_element_not_found_static_method(
+        self, fallback_controller, mock_browser
+    ):
+        mock_browser.safe_click = AsyncMock(side_effect=[Exception("not found"), True])
 
         result = await fallback_controller.handle_element_not_found(
             selector="#btn", params={"selector": "#btn"}
@@ -75,7 +76,9 @@ class TestFallbackController:
         assert result.recovered is True
 
     async def test_aborts_on_unknown_error(self, fallback_controller, mock_browser):
-        mock_browser.page.content = AsyncMock(return_value="<html><body>OK</body></html>")
+        mock_browser.page.content = AsyncMock(
+            return_value="<html><body>OK</body></html>"
+        )
         mock_browser.page.url = "https://example.com"
 
         result = await fallback_controller.handle_step_error(
@@ -89,10 +92,10 @@ class TestFallbackController:
         assert result.action_taken == "abort"
         assert result.retries_used == 0
 
-    async def test_element_not_found_exhausts_retries_then_fails(self, fallback_controller, mock_browser):
-        mock_browser.safe_click = AsyncMock(
-            side_effect=Exception("element not found")
-        )
+    async def test_element_not_found_exhausts_retries_then_fails(
+        self, fallback_controller, mock_browser
+    ):
+        mock_browser.safe_click = AsyncMock(side_effect=Exception("element not found"))
 
         result = await fallback_controller.handle_step_error(
             step_type="click",
@@ -111,16 +114,22 @@ class TestFallbackController:
         assert result.action_taken == "abort"
         assert result.retries_used == 3
 
-    async def test_is_blocked_detects_captcha_url(self, fallback_controller, mock_browser):
+    async def test_is_blocked_detects_captcha_url(
+        self, fallback_controller, mock_browser
+    ):
         mock_browser.page.url = "https://example.com/captcha?verify=true"
 
         result = await fallback_controller.is_blocked()
 
         assert result is True
 
-    async def test_is_blocked_returns_false_for_normal_page(self, fallback_controller, mock_browser):
+    async def test_is_blocked_returns_false_for_normal_page(
+        self, fallback_controller, mock_browser
+    ):
         mock_browser.page.url = "https://example.com"
-        mock_browser.page.content = AsyncMock(return_value="<html><body>Hello</body></html>")
+        mock_browser.page.content = AsyncMock(
+            return_value="<html><body>Hello</body></html>"
+        )
 
         result = await fallback_controller.is_blocked()
 
@@ -130,7 +139,6 @@ class TestFallbackController:
 @pytest.mark.asyncio
 class TestPlayerRecovery:
     async def test_player_recovers_from_timeout(self, mock_browser):
-        import asyncio
 
         call_count = 0
 
@@ -207,7 +215,9 @@ class TestPlayerRecovery:
             steps=[
                 WorkflowStep(type="navigate", params={"url": "https://example.com"}),
                 WorkflowStep(type="click", params={"selector": "#btn"}),
-                WorkflowStep(type="fill", params={"selector": "#input", "value": "test"}),
+                WorkflowStep(
+                    type="fill", params={"selector": "#input", "value": "test"}
+                ),
             ],
         )
         result = await player.execute(workflow)
@@ -236,7 +246,9 @@ class TestPlayerRecovery:
 
     async def test_challenge_detected_falls_back(self, mock_browser):
         mock_browser.page.url = "https://example.com/captcha?verify=true"
-        mock_browser.safe_goto = AsyncMock(side_effect=Exception("Something went wrong"))
+        mock_browser.safe_goto = AsyncMock(
+            side_effect=Exception("Something went wrong")
+        )
 
         mock_orch = AsyncMock()
         mock_orch.recover = AsyncMock(return_value=True)
@@ -291,9 +303,7 @@ class TestPlayerRecovery:
         assert len(result.recovery_actions) >= 1
 
     async def test_no_infinite_recovery_loop(self, mock_browser):
-        mock_browser.safe_click = AsyncMock(
-            side_effect=Exception("element not found")
-        )
+        mock_browser.safe_click = AsyncMock(side_effect=Exception("element not found"))
 
         player = WorkflowPlayer(mock_browser)
         fc = FallbackController(mock_browser)
@@ -354,7 +364,9 @@ class TestPlayerRecovery:
 
         workflow = Workflow(
             name="test-cp",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         await player.execute(workflow)
 
@@ -375,7 +387,9 @@ class TestPlayerRecovery:
 
 @pytest.mark.asyncio
 class TestFallbackControllerTimeout:
-    async def test_handle_timeout_retries_with_doubled_timeout(self, fallback_controller, mock_browser):
+    async def test_handle_timeout_retries_with_doubled_timeout(
+        self, fallback_controller, mock_browser
+    ):
         mock_browser.goto = AsyncMock(return_value=True)
         mock_browser.safe_goto = AsyncMock(return_value=True)
 
@@ -388,7 +402,9 @@ class TestFallbackControllerTimeout:
         assert result.action_taken == "retry"
         assert result.retries_used == 1
 
-    async def test_handle_timeout_fails_on_double_failure(self, fallback_controller, mock_browser):
+    async def test_handle_timeout_fails_on_double_failure(
+        self, fallback_controller, mock_browser
+    ):
         import asyncio
 
         async def slow_forever(*args, **kwargs):

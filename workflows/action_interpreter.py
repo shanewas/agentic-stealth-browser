@@ -4,7 +4,12 @@ from workflows.schema import STEP_SCHEMAS
 
 STEP_DEFAULTS: Dict[str, Dict[str, object]] = {
     "navigate": {"timeout": 30000, "wait_until": "domcontentloaded"},
-    "click": {"timeout": 30000, "wait_after": 500, "index": 0, "selector_fallbacks": []},
+    "click": {
+        "timeout": 30000,
+        "wait_after": 500,
+        "index": 0,
+        "selector_fallbacks": [],
+    },
     "fill": {"timeout": 30000, "submit": False},
     "type": {"timeout": 30000, "delay_ms": 50, "submit": False},
     "select": {"timeout": 30000},

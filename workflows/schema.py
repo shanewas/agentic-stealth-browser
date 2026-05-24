@@ -146,16 +146,12 @@ def validate_workflow(workflow: Workflow) -> ValidationResult:
 
         for req in schema["required"]:
             if req not in step.params:
-                errors.append(
-                    f"Step {i} ({step_type}): missing required field '{req}'"
-                )
+                errors.append(f"Step {i} ({step_type}): missing required field '{req}'")
 
         allowed = set(schema["required"] + schema["optional"])
         for key in step.params:
             if key not in allowed and key not in ("type",):
-                errors.append(
-                    f"Step {i} ({step_type}): unknown field '{key}'"
-                )
+                errors.append(f"Step {i} ({step_type}): unknown field '{key}'")
 
     if workflow.variables:
         for name, vdef in workflow.variables.items():
@@ -205,7 +201,11 @@ def validate_workflow_steps(workflow: Workflow) -> List[str]:
 
         elif step_type == "verify":
             visible = params.get("visible", True)
-            if "text" not in params and visible is True and "wait_for_text" not in params:
+            if (
+                "text" not in params
+                and visible is True
+                and "wait_for_text" not in params
+            ):
                 if not params.get("text"):
                     warnings.append(
                         f"Step {i} (verify): verifying element exists but not checking text content"
@@ -226,9 +226,7 @@ def validate_workflow_steps(workflow: Workflow) -> List[str]:
                 )
 
         elif step_type == "scoll":
-            warnings.append(
-                f"Step {i} (scoll): typo detected — did you mean 'scroll'?"
-            )
+            warnings.append(f"Step {i} (scoll): typo detected — did you mean 'scroll'?")
 
     if len(workflow.steps) > 20:
         warnings.append(
@@ -263,47 +261,57 @@ def workflow_diff(old: Workflow, new: Workflow) -> Dict[str, Any]:
         if old_step is None and new_step is not None:
             diff["steps_added"] += 1
             diff["added_step_indices"].append(i)
-            diff["details"].append({
-                "index": i,
-                "change": "added",
-                "new_type": new_step.type,
-                "new_params": new_step.params,
-            })
+            diff["details"].append(
+                {
+                    "index": i,
+                    "change": "added",
+                    "new_type": new_step.type,
+                    "new_params": new_step.params,
+                }
+            )
         elif old_step is not None and new_step is None:
             diff["steps_removed"] += 1
             diff["removed_step_indices"].append(i)
-            diff["details"].append({
-                "index": i,
-                "change": "removed",
-                "old_type": old_step.type,
-                "old_params": old_step.params,
-            })
+            diff["details"].append(
+                {
+                    "index": i,
+                    "change": "removed",
+                    "old_type": old_step.type,
+                    "old_params": old_step.params,
+                }
+            )
         elif old_step and new_step:
             if old_step.type != new_step.type:
                 diff["steps_modified"] += 1
                 diff["modified_step_indices"].append(i)
-                diff["details"].append({
-                    "index": i,
-                    "change": "type_changed",
-                    "old_type": old_step.type,
-                    "new_type": new_step.type,
-                })
+                diff["details"].append(
+                    {
+                        "index": i,
+                        "change": "type_changed",
+                        "old_type": old_step.type,
+                        "new_type": new_step.type,
+                    }
+                )
             elif old_step.params != new_step.params:
                 diff["steps_modified"] += 1
                 diff["modified_step_indices"].append(i)
                 param_diff = {}
-                all_keys = set(list(old_step.params.keys()) + list(new_step.params.keys()))
+                all_keys = set(
+                    list(old_step.params.keys()) + list(new_step.params.keys())
+                )
                 for key in all_keys:
                     old_val = old_step.params.get(key)
                     new_val = new_step.params.get(key)
                     if old_val != new_val:
                         param_diff[key] = {"old": old_val, "new": new_val}
-                diff["details"].append({
-                    "index": i,
-                    "change": "params_modified",
-                    "step_type": old_step.type,
-                    "param_diff": param_diff,
-                })
+                diff["details"].append(
+                    {
+                        "index": i,
+                        "change": "params_modified",
+                        "step_type": old_step.type,
+                        "param_diff": param_diff,
+                    }
+                )
 
     return diff
 
@@ -337,4 +345,6 @@ def workflow_to_dict(workflow: Workflow) -> dict:
 
 
 def workflow_to_yaml_str(workflow: Workflow) -> str:
-    return yaml.dump(workflow_to_dict(workflow), default_flow_style=False, sort_keys=False)
+    return yaml.dump(
+        workflow_to_dict(workflow), default_flow_style=False, sort_keys=False
+    )

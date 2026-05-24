@@ -9,7 +9,6 @@ Policy files load from ~/.agentic-browser/policies/ (YAML).
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -18,9 +17,21 @@ import yaml
 
 
 POLICY_DIR = Path.home() / ".agentic-browser" / "policies"
-ALLOWED_STEP_TYPES = {"navigate", "click", "fill", "type", "select", "verify",
-                      "wait", "wait_for_element", "scroll", "screenshot",
-                      "execute_js", "conditional", "run_workflow"}
+ALLOWED_STEP_TYPES = {
+    "navigate",
+    "click",
+    "fill",
+    "type",
+    "select",
+    "verify",
+    "wait",
+    "wait_for_element",
+    "scroll",
+    "screenshot",
+    "execute_js",
+    "conditional",
+    "run_workflow",
+}
 
 
 @dataclass
@@ -37,7 +48,9 @@ class Policy:
     description: str = ""
     enabled: bool = True
     default_allow: bool = True
-    allowed_step_types: Set[str] = field(default_factory=lambda: ALLOWED_STEP_TYPES.copy())
+    allowed_step_types: Set[str] = field(
+        default_factory=lambda: ALLOWED_STEP_TYPES.copy()
+    )
     blocked_step_types: Set[str] = field(default_factory=set)
     domain_rules: List[DomainRule] = field(default_factory=list)
     require_approval_for: List[str] = field(default_factory=list)
@@ -51,6 +64,7 @@ class Policy:
 
     def is_domain_allowed(self, url: str) -> bool:
         from urllib.parse import urlparse
+
         try:
             parsed = urlparse(url)
             host = parsed.hostname or parsed.netloc
@@ -85,16 +99,16 @@ class PolicyEngine:
                     data = yaml.safe_load(f)
                 if not data or "name" not in data:
                     continue
-                domain_rules = [
-                    DomainRule(**r) for r in data.get("domain_rules", [])
-                ]
+                domain_rules = [DomainRule(**r) for r in data.get("domain_rules", [])]
                 policy = Policy(
                     name=data["name"],
                     version=data.get("version", "1.0"),
                     description=data.get("description", ""),
                     enabled=data.get("enabled", True),
                     default_allow=data.get("default_allow", True),
-                    allowed_step_types=set(data.get("allowed_step_types", ALLOWED_STEP_TYPES)),
+                    allowed_step_types=set(
+                        data.get("allowed_step_types", ALLOWED_STEP_TYPES)
+                    ),
                     blocked_step_types=set(data.get("blocked_step_types", [])),
                     domain_rules=domain_rules,
                     require_approval_for=data.get("require_approval_for", []),
@@ -103,7 +117,9 @@ class PolicyEngine:
                 count += 1
             except Exception as exc:
                 _logger = logging.getLogger("stealth.policy")
-                _logger.warning("Failed to load policy from %s: %s", yaml_file.name, exc)
+                _logger.warning(
+                    "Failed to load policy from %s: %s", yaml_file.name, exc
+                )
                 continue
         return count
 

@@ -37,7 +37,7 @@ class StealthMetric:
 @dataclass
 class EvalResult:
     run_id: int
-    mode: str          # "patched" | "baseline"
+    mode: str  # "patched" | "baseline"
     url: str
     success: bool
     load_time_ms: float
@@ -64,6 +64,7 @@ class StealthEvaluator:
     async def run_baseline_navigate(self, url: str) -> EvalResult:
         """Navigate to a URL without stealth patching (baseline)."""
         from core.agent_browser import AgentBrowser
+
         browser = None
         try:
             start = time.monotonic()
@@ -78,16 +79,24 @@ class StealthEvaluator:
             elapsed = (time.monotonic() - start) * 1000
             block = not ok
             return EvalResult(
-                run_id=0, mode="baseline", url=url,
-                success=ok, load_time_ms=elapsed,
-                block_detected=block, block_type="navigation_failed" if block else "",
+                run_id=0,
+                mode="baseline",
+                url=url,
+                success=ok,
+                load_time_ms=elapsed,
+                block_detected=block,
+                block_type="navigation_failed" if block else "",
             )
         except Exception as exc:
             elapsed = (time.monotonic() - start) * 1000
             return EvalResult(
-                run_id=0, mode="baseline", url=url,
-                success=False, load_time_ms=elapsed,
-                block_detected=True, block_type="exception",
+                run_id=0,
+                mode="baseline",
+                url=url,
+                success=False,
+                load_time_ms=elapsed,
+                block_detected=True,
+                block_type="exception",
                 error=str(exc),
             )
         finally:
@@ -100,6 +109,7 @@ class StealthEvaluator:
     async def run_patched_navigate(self, url: str) -> EvalResult:
         """Navigate to a URL with full stealth patching."""
         from core.agent_browser import AgentBrowser
+
         browser = None
         try:
             start = time.monotonic()
@@ -114,16 +124,24 @@ class StealthEvaluator:
             elapsed = (time.monotonic() - start) * 1000
             block = not ok
             return EvalResult(
-                run_id=0, mode="patched", url=url,
-                success=ok, load_time_ms=elapsed,
-                block_detected=block, block_type="navigation_failed" if block else "",
+                run_id=0,
+                mode="patched",
+                url=url,
+                success=ok,
+                load_time_ms=elapsed,
+                block_detected=block,
+                block_type="navigation_failed" if block else "",
             )
         except Exception as exc:
             elapsed = (time.monotonic() - start) * 1000
             return EvalResult(
-                run_id=0, mode="patched", url=url,
-                success=False, load_time_ms=elapsed,
-                block_detected=True, block_type="exception",
+                run_id=0,
+                mode="patched",
+                url=url,
+                success=False,
+                load_time_ms=elapsed,
+                block_detected=True,
+                block_type="exception",
                 error=str(exc),
             )
         finally:
@@ -159,7 +177,9 @@ class StealthEvaluator:
                 "count": len(results),
                 "success_rate": successes / len(results),
                 "detection_rate": blocks / len(results),
-                "avg_load_time_ms": sum(load_times) / len(load_times) if load_times else 0,
+                "avg_load_time_ms": sum(load_times) / len(load_times)
+                if load_times
+                else 0,
                 "min_load_time_ms": min(load_times) if load_times else 0,
                 "max_load_time_ms": max(load_times) if load_times else 0,
             }
@@ -177,29 +197,38 @@ class StealthEvaluator:
             "baseline": baseline_stats,
             "comparison": {
                 "success_rate_delta": improvement,
-                "success_improvement_pct": (improvement * 100) if baseline_success > 0 else 0,
+                "success_improvement_pct": (improvement * 100)
+                if baseline_success > 0
+                else 0,
                 "detection_rate_reduction": (
                     baseline_stats["detection_rate"] - patched_stats["detection_rate"]
                 ),
                 "load_time_overhead_ms": (
-                    patched_stats["avg_load_time_ms"] - baseline_stats["avg_load_time_ms"]
+                    patched_stats["avg_load_time_ms"]
+                    - baseline_stats["avg_load_time_ms"]
                 ),
             },
             "raw_results": {
                 "patched": [
                     {
-                        "run_id": r.run_id, "url": r.url,
-                        "success": r.success, "load_time_ms": r.load_time_ms,
-                        "block_detected": r.block_detected, "block_type": r.block_type,
+                        "run_id": r.run_id,
+                        "url": r.url,
+                        "success": r.success,
+                        "load_time_ms": r.load_time_ms,
+                        "block_detected": r.block_detected,
+                        "block_type": r.block_type,
                         "error": r.error,
                     }
                     for r in self.patched_results[-20:]
                 ],
                 "baseline": [
                     {
-                        "run_id": r.run_id, "url": r.url,
-                        "success": r.success, "load_time_ms": r.load_time_ms,
-                        "block_detected": r.block_detected, "block_type": r.block_type,
+                        "run_id": r.run_id,
+                        "url": r.url,
+                        "success": r.success,
+                        "load_time_ms": r.load_time_ms,
+                        "block_detected": r.block_detected,
+                        "block_type": r.block_type,
                         "error": r.error,
                     }
                     for r in self.baseline_results[-20:]
@@ -221,10 +250,21 @@ async def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Evaluate stealth effectiveness (patched vs baseline)",
     )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--iterations", type=int, default=3, help="Number of evaluation iterations per URL")
-    parser.add_argument("--urls", nargs="*", help="URLs to evaluate (default: httpbin test URLs)")
-    parser.add_argument("--report", type=str, default="", help="Path to write JSON report")
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=3,
+        help="Number of evaluation iterations per URL",
+    )
+    parser.add_argument(
+        "--urls", nargs="*", help="URLs to evaluate (default: httpbin test URLs)"
+    )
+    parser.add_argument(
+        "--report", type=str, default="", help="Path to write JSON report"
+    )
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     args = parser.parse_args(argv)
 

@@ -3,7 +3,7 @@
 Detection Testing Suite for Agentic Stealth Browser (Phase 3)
 Tests stealth effectiveness against real protected sites.
 
-Addresses P1 crash (#100 / related to #256 E2E recovery): 
+Addresses P1 crash (#100 / related to #256 E2E recovery):
   Previously used `browser.browser.content()` (wrong attr, Context has no content).
   Now uses `browser.page.content()` with safe guards (post naming hygiene).
   Also hardened finally close check.
@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.agent_browser import AgentBrowser
@@ -29,26 +30,26 @@ class DetectionTester:
             "name": "Cloudflare Challenge",
             "url": "https://nowsecure.nl",
             "platform": "cloudflare",
-            "expected_signals": ["captcha", "challenge"]
+            "expected_signals": ["captcha", "challenge"],
         },
         {
             "name": "LinkedIn Profile",
             "url": "https://www.linkedin.com/in/williamhgates",
             "platform": "linkedin",
-            "expected_signals": ["unusual activity", "security verification"]
+            "expected_signals": ["unusual activity", "security verification"],
         },
         {
             "name": "Amazon JP",
             "url": "https://www.amazon.co.jp/dp/B08L5V9Y5H",
             "platform": "amazon",
-            "expected_signals": ["captcha", "robot"]
+            "expected_signals": ["captcha", "robot"],
         },
         {
             "name": "Upwork Search",
             "url": "https://www.upwork.com/nx/search/jobs/",
             "platform": "upwork",
-            "expected_signals": ["captcha", "blocked"]
-        }
+            "expected_signals": ["captcha", "blocked"],
+        },
     ]
 
     def __init__(self):
@@ -57,7 +58,7 @@ class DetectionTester:
             "total_tests": 0,
             "detected": 0,
             "passed": 0,
-            "signals_found": []
+            "signals_found": [],
         }
 
     async def run_single_test(self, test_case: Dict) -> Dict:
@@ -73,7 +74,7 @@ class DetectionTester:
             "detected": False,
             "signals": [],
             "success": False,
-            "error": None
+            "error": None,
         }
 
         try:
@@ -81,9 +82,7 @@ class DetectionTester:
 
             # Navigate with stealth + recovery (supports #256 E2E recovery scenarios)
             success = await browser.safe_goto(
-                test_case["url"],
-                platform=test_case["platform"],
-                warm_up=False
+                test_case["url"], platform=test_case["platform"], warm_up=False
             )
 
             if not success:
@@ -94,7 +93,7 @@ class DetectionTester:
 
             # Check for detection signals (fixed P1: use .page not .browser)
             try:
-                page = getattr(browser, 'page', None)
+                page = getattr(browser, "page", None)
                 if page:
                     content = await page.content()
                     content_lower = content.lower()
@@ -106,12 +105,21 @@ class DetectionTester:
 
                     # Additional generic checks
                     detection_keywords = [
-                        "captcha", "challenge", "verify", "unusual activity",
-                        "blocked", "robot", "security check", "access denied"
+                        "captcha",
+                        "challenge",
+                        "verify",
+                        "unusual activity",
+                        "blocked",
+                        "robot",
+                        "security check",
+                        "access denied",
                     ]
 
                     for keyword in detection_keywords:
-                        if keyword in content_lower and keyword not in result["signals"]:
+                        if (
+                            keyword in content_lower
+                            and keyword not in result["signals"]
+                        ):
                             result["signals"].append(keyword)
                             result["detected"] = True
                 else:
@@ -136,7 +144,7 @@ class DetectionTester:
         finally:
             # Robust close (use .page or direct close; supports context manager too)
             try:
-                if getattr(browser, 'page', None) or getattr(browser, 'browser', None):
+                if getattr(browser, "page", None) or getattr(browser, "browser", None):
                     await browser.close()
             except Exception:
                 pass  # best effort close in test runner
@@ -165,7 +173,9 @@ class DetectionTester:
         print(f"Total Tests     : {self.scorecard['total_tests']}")
         print(f"Detected        : {self.scorecard['detected']}")
         print(f"Passed          : {self.scorecard['passed']}")
-        print(f"Detection Rate  : {self.scorecard['detected'] / max(1, self.scorecard['total_tests']) * 100:.1f}%")
+        print(
+            f"Detection Rate  : {self.scorecard['detected'] / max(1, self.scorecard['total_tests']) * 100:.1f}%"
+        )
 
         if self.scorecard["detected"] > 0:
             print("\n⚠️  Sites with detection signals:")
@@ -178,7 +188,7 @@ class DetectionTester:
     def save_historical_record(self, filepath: str = "tests/detection_history.json"):
         """Append current results to historical tracking file."""
         history = []
-        
+
         if Path(filepath).exists():
             try:
                 with open(filepath, "r") as f:
@@ -189,18 +199,18 @@ class DetectionTester:
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "scorecard": self.scorecard,
-            "results": self.results
+            "results": self.results,
         }
-        
+
         history.append(record)
-        
+
         if len(history) > 50:
             history = history[-50:]
-        
+
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
         with open(filepath, "w") as f:
             json.dump(history, f, indent=2)
-        
+
         print(f"Historical record saved. Total runs tracked: {len(history)}")
         return filepath
 
@@ -213,7 +223,7 @@ class DetectionTester:
         output = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "scorecard": self.scorecard,
-            "results": self.results
+            "results": self.results,
         }
 
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)

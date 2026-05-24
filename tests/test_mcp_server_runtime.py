@@ -24,7 +24,9 @@ class _FakePage:
 
 
 class _FakeScraper:
-    async def scrape_page(self, url: str, extract_images: bool = False, platform: str = "unknown"):
+    async def scrape_page(
+        self, url: str, extract_images: bool = False, platform: str = "unknown"
+    ):
         return {
             "url": url,
             "extract_images": extract_images,
@@ -54,7 +56,9 @@ class _FakeBrowser:
         self._pages = [self._page]
         self._closed = False
 
-    async def launch(self, headless=True, debug=False, debug_cdp=False, preset=None, region=None):
+    async def launch(
+        self, headless=True, debug=False, debug_cdp=False, preset=None, region=None
+    ):
         self.current_preset = preset
         self.current_region = region or "global"
         self.debug = debug
@@ -64,7 +68,15 @@ class _FakeBrowser:
     def page_getter(self):
         return self._page
 
-    async def safe_goto(self, url: str, warm_up=True, platform="unknown", rate_limit=True, domain=None, account=None):
+    async def safe_goto(
+        self,
+        url: str,
+        warm_up=True,
+        platform="unknown",
+        rate_limit=True,
+        domain=None,
+        account=None,
+    ):
         _ = (warm_up, platform, rate_limit, domain, account)
         self._page.url = url
         self._page._title = f"Visited {url}"
@@ -82,7 +94,13 @@ class _FakeBrowser:
     async def get_health_status(self):
         return {"status": "ok", "launched": True, "region": self.current_region}
 
-    async def debug_report(self, print_report: bool = False, limit: int = None, cursor: str = None, since_ts: str = None):
+    async def debug_report(
+        self,
+        print_report: bool = False,
+        limit: int = None,
+        cursor: str = None,
+        since_ts: str = None,
+    ):
         _ = (print_report, limit, cursor, since_ts)
         return {"status": "success", "report": {"ok": True}}
 
@@ -99,11 +117,15 @@ class _FakeBrowser:
             "warning": "SECURITY: localhost only.",
         }
 
-    def get_replay_sequence(self, limit: int = 30, cursor: str = None, since_ts: str = None):
+    def get_replay_sequence(
+        self, limit: int = 30, cursor: str = None, since_ts: str = None
+    ):
         _ = (cursor, since_ts)
         return {
             "status": "ok",
-            "sequence": [{"event": "navigate", "ts": 1}, {"event": "click", "ts": 2}][:limit],
+            "sequence": [{"event": "navigate", "ts": 1}, {"event": "click", "ts": 2}][
+                :limit
+            ],
         }
 
     def get_pages(self):
@@ -118,7 +140,9 @@ class _TrackingReplayBrowser(_FakeBrowser):
         super().__init__(*args, **kwargs)
         self.last_limit = None
 
-    def get_replay_sequence(self, limit: int = 30, cursor: str = None, since_ts: str = None):
+    def get_replay_sequence(
+        self, limit: int = 30, cursor: str = None, since_ts: str = None
+    ):
         _ = (cursor, since_ts)
         self.last_limit = limit
         return {
@@ -128,7 +152,13 @@ class _TrackingReplayBrowser(_FakeBrowser):
 
 
 class _LargeDebugBrowser(_FakeBrowser):
-    async def debug_report(self, print_report: bool = False, limit: int = None, cursor: str = None, since_ts: str = None):
+    async def debug_report(
+        self,
+        print_report: bool = False,
+        limit: int = None,
+        cursor: str = None,
+        since_ts: str = None,
+    ):
         _ = (print_report, limit, cursor, since_ts)
         return {
             "status": "success",
@@ -169,12 +199,19 @@ async def test_tools_manifest_contains_required_runtime_tools():
 async def test_initialize_and_tools_list_jsonrpc_shape():
     server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
     init_resp = await server.handle_jsonrpc(
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}}
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26"},
+        }
     )
     assert init_resp["result"]["protocolVersion"] == "2025-03-26"
     assert "tools" in init_resp["result"]["capabilities"]
 
-    list_resp = await server.handle_jsonrpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    list_resp = await server.handle_jsonrpc(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    )
     assert "tools" in list_resp["result"]
     assert len(list_resp["result"]["tools"]) >= 8
 
@@ -188,7 +225,10 @@ async def test_launch_then_navigate_tool_flow():
             "jsonrpc": "2.0",
             "id": 11,
             "method": "tools/call",
-            "params": {"name": "stealth_launch", "arguments": {"session_name": "demo", "headless": True, "region": "us"}},
+            "params": {
+                "name": "stealth_launch",
+                "arguments": {"session_name": "demo", "headless": True, "region": "us"},
+            },
         }
     )
     launch_payload = _tool_structured_content(launch_resp)
@@ -200,7 +240,10 @@ async def test_launch_then_navigate_tool_flow():
             "jsonrpc": "2.0",
             "id": 12,
             "method": "tools/call",
-            "params": {"name": "stealth_navigate", "arguments": {"session_name": "demo", "url": "https://example.com"}},
+            "params": {
+                "name": "stealth_navigate",
+                "arguments": {"session_name": "demo", "url": "https://example.com"},
+            },
         }
     )
     nav_payload = _tool_structured_content(nav_resp)
@@ -226,7 +269,10 @@ async def test_cookie_load_blocks_path_traversal_by_security_policy():
             "jsonrpc": "2.0",
             "id": 22,
             "method": "tools/call",
-            "params": {"name": "stealth_load_cookies", "arguments": {"session_name": "demo", "cookies_path": "../secret.json"}},
+            "params": {
+                "name": "stealth_load_cookies",
+                "arguments": {"session_name": "demo", "cookies_path": "../secret.json"},
+            },
         }
     )
     payload = _tool_structured_content(cookies_resp)
@@ -262,7 +308,10 @@ async def test_observability_tabs_snapshot_timeline_and_debug_tools():
             "jsonrpc": "2.0",
             "id": 32,
             "method": "tools/call",
-            "params": {"name": "stealth_navigate", "arguments": {"session_name": "obs", "url": "https://example.com"}},
+            "params": {
+                "name": "stealth_navigate",
+                "arguments": {"session_name": "obs", "url": "https://example.com"},
+            },
         }
     )
 
@@ -271,7 +320,10 @@ async def test_observability_tabs_snapshot_timeline_and_debug_tools():
             "jsonrpc": "2.0",
             "id": 33,
             "method": "tools/call",
-            "params": {"name": "stealth_tabs_list", "arguments": {"session_name": "obs"}},
+            "params": {
+                "name": "stealth_tabs_list",
+                "arguments": {"session_name": "obs"},
+            },
         }
     )
     tabs_payload = _tool_structured_content(tabs_resp)
@@ -284,7 +336,10 @@ async def test_observability_tabs_snapshot_timeline_and_debug_tools():
             "jsonrpc": "2.0",
             "id": 34,
             "method": "tools/call",
-            "params": {"name": "stealth_tab_snapshot", "arguments": {"session_name": "obs", "tab_id": tab_id}},
+            "params": {
+                "name": "stealth_tab_snapshot",
+                "arguments": {"session_name": "obs", "tab_id": tab_id},
+            },
         }
     )
     snap_payload = _tool_structured_content(snap_resp)
@@ -297,7 +352,10 @@ async def test_observability_tabs_snapshot_timeline_and_debug_tools():
             "jsonrpc": "2.0",
             "id": 35,
             "method": "tools/call",
-            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs", "limit": 2}},
+            "params": {
+                "name": "stealth_session_timeline",
+                "arguments": {"session_name": "obs", "limit": 2},
+            },
         }
     )
     timeline_payload = _tool_structured_content(timeline_resp)
@@ -309,7 +367,10 @@ async def test_observability_tabs_snapshot_timeline_and_debug_tools():
             "jsonrpc": "2.0",
             "id": 36,
             "method": "tools/call",
-            "params": {"name": "stealth_debug_report", "arguments": {"session_name": "obs"}},
+            "params": {
+                "name": "stealth_debug_report",
+                "arguments": {"session_name": "obs"},
+            },
         }
     )
     debug_payload = _tool_structured_content(debug_resp)
@@ -336,7 +397,10 @@ async def test_timeline_limit_uses_env_default_and_max(monkeypatch):
             "jsonrpc": "2.0",
             "id": 42,
             "method": "tools/call",
-            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs"}},
+            "params": {
+                "name": "stealth_session_timeline",
+                "arguments": {"session_name": "obs"},
+            },
         }
     )
     default_payload = _tool_structured_content(default_resp)
@@ -349,7 +413,10 @@ async def test_timeline_limit_uses_env_default_and_max(monkeypatch):
             "jsonrpc": "2.0",
             "id": 43,
             "method": "tools/call",
-            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs", "limit": 999}},
+            "params": {
+                "name": "stealth_session_timeline",
+                "arguments": {"session_name": "obs", "limit": 999},
+            },
         }
     )
     clamped_payload = _tool_structured_content(clamped_resp)
@@ -359,7 +426,9 @@ async def test_timeline_limit_uses_env_default_and_max(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_observability_payload_is_truncated_when_debug_report_is_large(monkeypatch):
+async def test_observability_payload_is_truncated_when_debug_report_is_large(
+    monkeypatch,
+):
     monkeypatch.setenv("STEALTH_MCP_OBSERVABILITY_MAX_CHARS", "2000")
     server = StealthMCPServer(agent_browser_cls=_LargeDebugBrowser)
     await server.handle_jsonrpc(
@@ -376,7 +445,10 @@ async def test_observability_payload_is_truncated_when_debug_report_is_large(mon
             "jsonrpc": "2.0",
             "id": 52,
             "method": "tools/call",
-            "params": {"name": "stealth_debug_report", "arguments": {"session_name": "obs"}},
+            "params": {
+                "name": "stealth_debug_report",
+                "arguments": {"session_name": "obs"},
+            },
         }
     )
     payload = _tool_structured_content(debug_resp)
@@ -408,7 +480,10 @@ async def test_observability_payload_is_truncated_for_large_timeline(monkeypatch
             "jsonrpc": "2.0",
             "id": 54,
             "method": "tools/call",
-            "params": {"name": "stealth_session_timeline", "arguments": {"session_name": "obs", "limit": 400}},
+            "params": {
+                "name": "stealth_session_timeline",
+                "arguments": {"session_name": "obs", "limit": 400},
+            },
         }
     )
     payload = _tool_structured_content(timeline_resp)
@@ -448,7 +523,10 @@ async def test_snapshot_retention_prunes_old_files(monkeypatch, tmp_path):
             "jsonrpc": "2.0",
             "id": 62,
             "method": "tools/call",
-            "params": {"name": "stealth_tabs_list", "arguments": {"session_name": "obs"}},
+            "params": {
+                "name": "stealth_tabs_list",
+                "arguments": {"session_name": "obs"},
+            },
         }
     )
     tab_id = _tool_structured_content(tabs_resp)["tabs"][0]["tab_id"]
@@ -459,7 +537,10 @@ async def test_snapshot_retention_prunes_old_files(monkeypatch, tmp_path):
                 "jsonrpc": "2.0",
                 "id": 63 + idx,
                 "method": "tools/call",
-                "params": {"name": "stealth_tab_snapshot", "arguments": {"session_name": "obs", "tab_id": tab_id}},
+                "params": {
+                    "name": "stealth_tab_snapshot",
+                    "arguments": {"session_name": "obs", "tab_id": tab_id},
+                },
             }
         )
         snap_payload = _tool_structured_content(snap_resp)
@@ -480,7 +561,10 @@ async def test_stealth_get_cdp_endpoint_disabled_by_default_and_enabled_when_fla
             "jsonrpc": "2.0",
             "id": 71,
             "method": "tools/call",
-            "params": {"name": "stealth_launch", "arguments": {"session_name": "cdp-test"}},
+            "params": {
+                "name": "stealth_launch",
+                "arguments": {"session_name": "cdp-test"},
+            },
         }
     )
     resp_disabled = await server.handle_jsonrpc(
@@ -488,7 +572,10 @@ async def test_stealth_get_cdp_endpoint_disabled_by_default_and_enabled_when_fla
             "jsonrpc": "2.0",
             "id": 72,
             "method": "tools/call",
-            "params": {"name": "stealth_get_cdp_endpoint", "arguments": {"session_name": "cdp-test"}},
+            "params": {
+                "name": "stealth_get_cdp_endpoint",
+                "arguments": {"session_name": "cdp-test"},
+            },
         }
     )
     payload_d = _tool_structured_content(resp_disabled)
@@ -505,7 +592,10 @@ async def test_stealth_get_cdp_endpoint_disabled_by_default_and_enabled_when_fla
             "jsonrpc": "2.0",
             "id": 73,
             "method": "tools/call",
-            "params": {"name": "stealth_launch", "arguments": {"session_name": "cdp-enabled", "debug_cdp": True}},
+            "params": {
+                "name": "stealth_launch",
+                "arguments": {"session_name": "cdp-enabled", "debug_cdp": True},
+            },
         }
     )
     resp_enabled = await server2.handle_jsonrpc(
@@ -513,7 +603,10 @@ async def test_stealth_get_cdp_endpoint_disabled_by_default_and_enabled_when_fla
             "jsonrpc": "2.0",
             "id": 74,
             "method": "tools/call",
-            "params": {"name": "stealth_get_cdp_endpoint", "arguments": {"session_name": "cdp-enabled"}},
+            "params": {
+                "name": "stealth_get_cdp_endpoint",
+                "arguments": {"session_name": "cdp-enabled"},
+            },
         }
     )
     payload_e = _tool_structured_content(resp_enabled)

@@ -78,6 +78,7 @@ class TestDifferentialBehavior:
     def test_casual_vs_power_typing_speed(self):
         """Power user should have faster typing than casual."""
         from behavior.persona_rotator import PERSONA_TEMPLATES
+
         casual = PERSONA_TEMPLATES["casual_user"]
         power = PERSONA_TEMPLATES["power_user"]
         assert power.typing_speed > casual.typing_speed
@@ -85,6 +86,7 @@ class TestDifferentialBehavior:
     def test_casual_vs_power_mouse_precision(self):
         """Power user should have higher mouse precision."""
         from behavior.persona_rotator import PERSONA_TEMPLATES
+
         casual = PERSONA_TEMPLATES["casual_user"]
         power = PERSONA_TEMPLATES["power_user"]
         assert power.mouse_precision > casual.mouse_precision
@@ -92,6 +94,7 @@ class TestDifferentialBehavior:
     def test_mobile_vs_desktop_device_type(self):
         """Mobile persona should have different device type."""
         from behavior.persona_rotator import PERSONA_TEMPLATES
+
         mobile = PERSONA_TEMPLATES["mobile_user"]
         power = PERSONA_TEMPLATES["power_user"]
         assert mobile.device_type != power.device_type
@@ -103,6 +106,7 @@ class TestDifferentialTLS:
     def test_us_vs_japan_tls_profiles(self):
         """US and Japan should have different TLS profiles."""
         from stealth.tls_fingerprint import get_tls_manager
+
         us = get_tls_manager("us")
         jp = get_tls_manager("japan")
         us_profile = us.get_profile()
@@ -114,6 +118,7 @@ class TestDifferentialTLS:
     def test_ja3_chrome_vs_firefox_different(self):
         """Chrome and Firefox JA3 should differ."""
         from stealth.tls_ja3_ja4 import JA3Fingerprint
+
         chrome = JA3Fingerprint.get_chrome_ja3()
         firefox = JA3Fingerprint.get_firefox_ja3()
         assert chrome["ja3_hash"] != firefox["ja3_hash"]

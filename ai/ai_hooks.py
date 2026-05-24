@@ -37,7 +37,12 @@ class AIHooks:
     ]
     _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
 
-    def __init__(self, provider: str = "none", api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self,
+        provider: str = "none",
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
         self.provider = provider
         self.api_key = api_key
         self.model = model
@@ -52,8 +57,10 @@ class AIHooks:
         if not content or not isinstance(content, str):
             return ""
         safe = content[:max_len]
+
         def _replace(m):
             return "[REDACTED: potential instruction override]"
+
         safe = self._INJECTION_RE.sub(_replace, safe)
         safe = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", safe)
         return safe
@@ -65,7 +72,7 @@ class AIHooks:
 
     def extract_emails(self, text: str) -> List[str]:
         """P3 #98: Extract email addresses from text without LLM."""
-        email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
         return re.findall(email_pattern, text)
 
     async def analyze_page(self, page_content: str, task: str) -> str:
@@ -116,10 +123,14 @@ class AIHooks:
             result = {
                 "links": self.extract_links(safe_text),
                 "emails": self.extract_emails(safe_text),
-                "phones": re.findall(r'\+?[\d\s\-\(\)]{10,}', safe_text),
-                "prices": re.findall(r'\$[\d,]+\.?\d*', safe_text),
+                "phones": re.findall(r"\+?[\d\s\-\(\)]{10,}", safe_text),
+                "prices": re.findall(r"\$[\d,]+\.?\d*", safe_text),
             }
-            return {"status": "heuristic_extraction", "data": result, "sanitized_len": len(safe_text)}
+            return {
+                "status": "heuristic_extraction",
+                "data": result,
+                "sanitized_len": len(safe_text),
+            }
 
         safe_text = self.sanitize_for_llm(text)
         return {"status": "ai_disabled", "data": {}, "sanitized_len": len(safe_text)}

@@ -20,7 +20,9 @@ import pytest
 
 
 @pytest.mark.e2e
-@pytest.mark.skip(reason="Placeholder for #256/#125: real E2E on protected sites causes loops. See issues above.")
+@pytest.mark.skip(
+    reason="Placeholder for #256/#125: real E2E on protected sites causes loops. See issues above."
+)
 def test_e2e_protected_sites_placeholder():
     """Stub test - skipped by default. No actual browser navigation here."""
     # Intentionally empty; real logic belongs in future non-looping implementation.

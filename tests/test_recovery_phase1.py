@@ -124,17 +124,17 @@ class TestAntiBlockOrchestrator:
     def test_circuit_breaker(self):
         orch = AntiBlockOrchestrator()
         key = "test-platform"
-        
+
         # Initially circuit should be closed
         assert orch._check_circuit_breaker(key) is False
-        
+
         # Record failures to trip circuit
         for _ in range(5):
             orch._record_failure(key)
-        
+
         # Circuit should now be open
         assert orch._check_circuit_breaker(key) is True
-        
+
         # Reset circuit
         orch._reset_circuit(key)
         assert orch._check_circuit_breaker(key) is False
@@ -158,7 +158,7 @@ class TestAntiBlockOrchestrator:
         orch = AntiBlockOrchestrator()
         ctx = RecoveryContext(platform="test", url="https://example.com")
         orch._update_recovery_history(ctx, RecoveryAction.RETRY, success=True)
-        
+
         key = orch._get_history_key(ctx)
         assert key in orch.recovery_history
         assert orch.recovery_history[key]["total_attempts"] == 1
@@ -167,12 +167,12 @@ class TestAntiBlockOrchestrator:
         orch = AntiBlockOrchestrator()
         # Set a small max history for testing
         orch._max_history_size = 5
-        
+
         # Add more entries than the limit
         for i in range(10):
             ctx = RecoveryContext(platform=f"test-{i}", url=f"https://example{i}.com")
             orch._update_recovery_history(ctx, RecoveryAction.RETRY, success=True)
-        
+
         # History should not exceed the limit
         assert len(orch.recovery_history) <= orch._max_history_size
 

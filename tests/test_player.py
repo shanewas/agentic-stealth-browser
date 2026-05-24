@@ -1,10 +1,10 @@
 """Tests for WorkflowPlayer execution engine."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from workflows.player import ExecutionResult, WorkflowPlayer
+from workflows.player import WorkflowPlayer
 from workflows.schema import Workflow, WorkflowStep
 
 
@@ -20,7 +20,9 @@ class MockBrowser:
         self.safe_goto = AsyncMock(return_value=True)
         self.safe_click = AsyncMock(return_value=True)
         self.safe_type = AsyncMock(return_value=True)
-        self.screenshot_on_error = AsyncMock(return_value="screenshots/error_step_0_navigate_1234567890.png")
+        self.screenshot_on_error = AsyncMock(
+            return_value="screenshots/error_step_0_navigate_1234567890.png"
+        )
 
 
 @pytest.fixture
@@ -38,19 +40,28 @@ class TestNavigate:
     async def test_execute_navigate_step(self, player, mock_browser):
         workflow = Workflow(
             name="test-nav",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         result = await player.execute(workflow)
         assert result.success
         assert result.steps_executed == 1
-        mock_browser.safe_goto.assert_called_once_with("https://example.com", platform="unknown")
+        mock_browser.safe_goto.assert_called_once_with(
+            "https://example.com", platform="unknown"
+        )
 
     async def test_execute_navigate_fallback_to_goto(self, player, mock_browser):
         del mock_browser.safe_goto
         mock_browser.goto = AsyncMock(return_value=True)
         workflow = Workflow(
             name="test-nav",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com", "platform": "test"})],
+            steps=[
+                WorkflowStep(
+                    type="navigate",
+                    params={"url": "https://example.com", "platform": "test"},
+                )
+            ],
         )
         result = await player.execute(workflow)
         assert result.success
@@ -89,7 +100,11 @@ class TestFill:
     async def test_execute_fill_step(self, player, mock_browser):
         workflow = Workflow(
             name="test-fill",
-            steps=[WorkflowStep(type="fill", params={"selector": "#input", "value": "hello"})],
+            steps=[
+                WorkflowStep(
+                    type="fill", params={"selector": "#input", "value": "hello"}
+                )
+            ],
         )
         result = await player.execute(workflow)
         assert result.success
@@ -115,9 +130,7 @@ class TestVerify:
         assert result.success
 
     async def test_execute_verify_step_fail(self, player, mock_browser):
-        mock_browser.page.evaluate = AsyncMock(
-            side_effect=[True, "Wrong Text", True]
-        )
+        mock_browser.page.evaluate = AsyncMock(side_effect=[True, "Wrong Text", True])
         workflow = Workflow(
             name="test-verify",
             steps=[
@@ -141,7 +154,9 @@ class TestEndToEnd:
             steps=[
                 WorkflowStep(type="navigate", params={"url": "https://example.com"}),
                 WorkflowStep(type="click", params={"selector": "#btn"}),
-                WorkflowStep(type="fill", params={"selector": "#input", "value": "test"}),
+                WorkflowStep(
+                    type="fill", params={"selector": "#input", "value": "test"}
+                ),
             ],
         )
         result = await player.execute(workflow)
@@ -157,7 +172,9 @@ class TestExecutionResult:
     async def test_execution_result_on_success(self, player):
         workflow = Workflow(
             name="test",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         result = await player.execute(workflow)
         assert result.success is True
@@ -167,9 +184,7 @@ class TestExecutionResult:
         assert result.error_message is None
 
     async def test_execution_result_on_fail(self, player, mock_browser):
-        mock_browser.page.evaluate = AsyncMock(
-            side_effect=[True, "Wrong Text", True]
-        )
+        mock_browser.page.evaluate = AsyncMock(side_effect=[True, "Wrong Text", True])
         workflow = Workflow(
             name="test",
             steps=[
@@ -226,7 +241,9 @@ class TestVariableResolution:
         )
         result = await player.execute(workflow)
         assert result.success
-        mock_browser.safe_goto.assert_called_once_with("https://example.com", platform="unknown")
+        mock_browser.safe_goto.assert_called_once_with(
+            "https://example.com", platform="unknown"
+        )
 
 
 @pytest.mark.asyncio
@@ -329,7 +346,9 @@ class TestRunWorkflow:
 @pytest.mark.asyncio
 class TestScreenshot:
     async def test_screenshot_step(self, player, mock_browser):
-        mock_browser.screenshot_on_error = AsyncMock(return_value="screenshots/test.png")
+        mock_browser.screenshot_on_error = AsyncMock(
+            return_value="screenshots/test.png"
+        )
         workflow = Workflow(
             name="test-screenshot",
             steps=[WorkflowStep(type="screenshot", params={"path": "test.png"})],
@@ -381,9 +400,7 @@ class TestExecuteJs:
         workflow = Workflow(
             name="test-js",
             steps=[
-                WorkflowStep(
-                    type="execute_js", params={"code": "console.log('hello')"}
-                )
+                WorkflowStep(type="execute_js", params={"code": "console.log('hello')"})
             ],
         )
         result = await player.execute(workflow)
@@ -423,7 +440,9 @@ class TestExecutionTime:
     async def test_execution_time_is_recorded(self, player):
         workflow = Workflow(
             name="test-time",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         result = await player.execute(workflow)
         assert result.execution_time > 0

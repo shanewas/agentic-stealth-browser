@@ -55,7 +55,9 @@ class BasePlugin:
     async def on_page_loaded(self, ctx: PluginContext, url: str) -> None:
         pass
 
-    async def on_scraped(self, ctx: PluginContext, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def on_scraped(
+        self, ctx: PluginContext, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         return None
 
     async def on_close(self, ctx: PluginContext) -> None:
@@ -70,7 +72,9 @@ class ExamplePlugin(BasePlugin):
 
     async def on_launch(self, ctx: PluginContext) -> None:
         if ctx.logger:
-            ctx.logger.info(f"[{self.name}] Browser launched (session={getattr(ctx.session, 'session_name', '?')})")
+            ctx.logger.info(
+                f"[{self.name}] Browser launched (session={getattr(ctx.session, 'session_name', '?')})"
+            )
 
     async def on_navigate(self, ctx: PluginContext, url: str) -> None:
         if ctx.logger:

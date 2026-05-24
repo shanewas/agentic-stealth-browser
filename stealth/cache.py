@@ -105,8 +105,12 @@ class StealthCache:
         }
 
 
-def make_cache_key(profile: str, fingerprint_seed: Optional[str] = None,
-                   hardware: Optional[Dict] = None, screen: Optional[Dict] = None) -> str:
+def make_cache_key(
+    profile: str,
+    fingerprint_seed: Optional[str] = None,
+    hardware: Optional[Dict] = None,
+    screen: Optional[Dict] = None,
+) -> str:
     """Create a deterministic cache key from parameters."""
     parts = [profile, fingerprint_seed or ""]
     if hardware:
@@ -122,9 +126,13 @@ _script_cache = StealthCache(maxsize=32, ttl=7200.0)  # 2 hour TTL
 _profile_cache = StealthCache(maxsize=64, ttl=86400.0)  # 24 hour TTL
 
 
-def get_cached_script(profile: str, fingerprint_seed: Optional[str] = None,
-                      hardware: Optional[Dict] = None, screen: Optional[Dict] = None,
-                      generator=None) -> str:
+def get_cached_script(
+    profile: str,
+    fingerprint_seed: Optional[str] = None,
+    hardware: Optional[Dict] = None,
+    screen: Optional[Dict] = None,
+    generator=None,
+) -> str:
     """Get stealth script from cache or generate and cache it.
 
     Args:

@@ -25,18 +25,21 @@ from __future__ import annotations
 import functools
 import logging
 import warnings
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
+from typing import Any, Callable, Dict, TypeVar, cast
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 _deprecation_log = logging.getLogger("stealth.deprecations")
 
 
-def deprecated(version: str, replacement: str = "", message: str = "") -> Callable[[F], F]:
+def deprecated(
+    version: str, replacement: str = "", message: str = ""
+) -> Callable[[F], F]:
     """Decorator to mark a function/method as deprecated.
 
     Emits a DeprecationWarning and logs at WARN level.
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -46,7 +49,9 @@ def deprecated(version: str, replacement: str = "", message: str = "") -> Callab
             warnings.warn(msg, DeprecationWarning, stacklevel=2)
             _deprecation_log.warning(msg)
             return func(*args, **kwargs)
+
         return cast(F, wrapper)
+
     return decorator
 
 
@@ -76,12 +81,17 @@ class ConnectionPoolShim:
             warn_deprecated("ConnectionPool", "v2.0.0", "NavigationHistory")
             cls._warned = True
         from core.connection_pool import ConnectionPool as _CP
+
         return _CP(*args, **kwargs)
 
 
 def shim_context_attr(owner: Any, name: str) -> Any:
     """Access `self.context` on AgentBrowser while emitting a deprecation warning."""
-    warn_deprecated(f"{type(owner).__name__}.{name}", "v2.0.0", f"{type(owner).__name__}.browser_context")
+    warn_deprecated(
+        f"{type(owner).__name__}.{name}",
+        "v2.0.0",
+        f"{type(owner).__name__}.browser_context",
+    )
     if hasattr(owner, "browser"):
         return getattr(owner, "browser")
     return None

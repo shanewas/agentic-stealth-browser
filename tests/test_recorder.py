@@ -1,16 +1,10 @@
 """Tests for WorkflowRecorder and SelectorGenerator."""
 
-import time
-
-import pytest
-
 from workflows.recorder import (
-    RecordedEvent,
-    RecordedStep,
     WorkflowRecorder,
     _detect_variable,
 )
-from workflows.schema import Workflow, WorkflowStep, load_workflow, validate_workflow
+from workflows.schema import Workflow, load_workflow, validate_workflow
 from workflows.selector_generator import SelectorGenerator
 
 
@@ -35,7 +29,10 @@ def _make_key_event(key="a", text="hello"):
 
 
 def _make_nav_event(url="https://example.com"):
-    return {"method": "Page.frameNavigated", "params": {"frame": {"url": url, "id": "main"}}}
+    return {
+        "method": "Page.frameNavigated",
+        "params": {"frame": {"url": url, "id": "main"}},
+    }
 
 
 def _make_scroll_event(delta_y=100):
@@ -46,7 +43,10 @@ def _make_scroll_event(delta_y=100):
 
 
 def _make_mousemove_event():
-    return {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 50, "y": 50}}
+    return {
+        "method": "Input.dispatchMouseEvent",
+        "params": {"type": "mouseMoved", "x": 50, "y": 50},
+    }
 
 
 def _make_focus_event():
@@ -59,14 +59,24 @@ def _make_resize_event():
 
 class TestSelectorGeneration:
     def test_id_selector_ranked_highest(self):
-        info = {"tagName": "button", "id": "submit-btn", "className": "btn primary", "textContent": "Submit"}
+        info = {
+            "tagName": "button",
+            "id": "submit-btn",
+            "className": "btn primary",
+            "textContent": "Submit",
+        }
         candidates = SelectorGenerator.generate_candidates(info)
         assert candidates[0]["strategy"] == "id"
         assert candidates[0]["stability"] == 0.95
         assert candidates[0]["selector"] == "#submit-btn"
 
     def test_generated_id_not_used(self):
-        info = {"tagName": "button", "id": "a1b2c3d4e5f678", "className": "btn", "textContent": "Submit"}
+        info = {
+            "tagName": "button",
+            "id": "a1b2c3d4e5f678",
+            "className": "btn",
+            "textContent": "Submit",
+        }
         best = SelectorGenerator.get_best_selector(info)
         assert not best.startswith("#a1b2c3d4e5f678")
 
@@ -98,7 +108,12 @@ class TestSelectorGeneration:
         assert any("data-testid" in f for f in fallbacks)
 
     def test_text_based_selector(self):
-        info = {"tagName": "button", "id": "", "className": "", "textContent": "Sign In"}
+        info = {
+            "tagName": "button",
+            "id": "",
+            "className": "",
+            "textContent": "Sign In",
+        }
         candidates = SelectorGenerator.generate_candidates(info)
         strategies = [c["strategy"] for c in candidates]
         assert "text" in strategies
@@ -149,7 +164,12 @@ class TestInputRecording:
     def test_input_with_newline_creates_type_with_submit(self):
         recorder = WorkflowRecorder()
         recorder.on_cdp_event(_make_key_event(text="query"))
-        recorder.on_cdp_event({"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "Enter"}})
+        recorder.on_cdp_event(
+            {
+                "method": "Input.dispatchKeyEvent",
+                "params": {"type": "keyDown", "key": "Enter"},
+            }
+        )
         steps = recorder.to_steps()
         type_steps = [s for s in steps if s.step_type == "type"]
         assert len(type_steps) == 1
@@ -246,20 +266,38 @@ class TestWorkflowOutput:
     def test_to_workflow_yaml_round_trips(self):
         recorder = WorkflowRecorder()
         recorder.on_cdp_event(_make_nav_event("https://example.com"))
-        recorder.on_cdp_event(_make_click_event(tag="button", el_id="my-btn", text="Click Me"))
+        recorder.on_cdp_event(
+            _make_click_event(tag="button", el_id="my-btn", text="Click Me")
+        )
         yaml_str = recorder.to_workflow_yaml(name="test-roundtrip")
         assert "name: test-roundtrip" in yaml_str
-        workflow = load_workflow({"name": "test-roundtrip", "steps": [
-            {"type": "navigate", "url": "https://example.com"},
-            {"type": "click", "selector": "#my-btn", "selector_fallbacks": ["button.btn", 'button:has-text("Click Me")', "button", "button:nth-child(1)"]},
-        ]})
+        workflow = load_workflow(
+            {
+                "name": "test-roundtrip",
+                "steps": [
+                    {"type": "navigate", "url": "https://example.com"},
+                    {
+                        "type": "click",
+                        "selector": "#my-btn",
+                        "selector_fallbacks": [
+                            "button.btn",
+                            'button:has-text("Click Me")',
+                            "button",
+                            "button:nth-child(1)",
+                        ],
+                    },
+                ],
+            }
+        )
         result = validate_workflow(workflow)
         assert result.valid
 
     def test_output_includes_metadata(self):
         recorder = WorkflowRecorder()
         recorder.on_cdp_event(_make_nav_event("https://example.com"))
-        workflow = recorder.to_workflow(name="meta-test", description="Recorded session")
+        workflow = recorder.to_workflow(
+            name="meta-test", description="Recorded session"
+        )
         assert workflow.description is not None
         assert "Recorded" in workflow.description
 

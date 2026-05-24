@@ -26,7 +26,12 @@ steps:
 
 class TestLoadWorkflow:
     def test_load_from_yaml_string(self):
-        workflow = load_workflow({"name": "test", "steps": [{"type": "navigate", "url": "https://example.com"}]})
+        workflow = load_workflow(
+            {
+                "name": "test",
+                "steps": [{"type": "navigate", "url": "https://example.com"}],
+            }
+        )
         assert workflow.name == "test"
         assert len(workflow.steps) == 1
         assert workflow.steps[0].type == "navigate"
@@ -78,10 +83,19 @@ class TestRoundtrip:
             "name": "example",
             "description": "A test workflow",
             "variables": {
-                "my_var": {"type": "string", "default": "hello", "required": True, "description": "a var"},
+                "my_var": {
+                    "type": "string",
+                    "default": "hello",
+                    "required": True,
+                    "description": "a var",
+                },
             },
             "steps": [
-                {"type": "navigate", "url": "https://example.com", "wait_until": "load"},
+                {
+                    "type": "navigate",
+                    "url": "https://example.com",
+                    "wait_until": "load",
+                },
                 {"type": "click", "selector": "#btn", "timeout": 5000},
             ],
         }
@@ -169,19 +183,23 @@ class TestVariableResolverBasic:
 
 class TestResolveWorkflow:
     def test_replaces_variables_in_step_values(self):
-        workflow = load_workflow({
-            "name": "test",
-            "steps": [
-                {"type": "navigate", "url": "{{base_url}}/dashboard"},
-                {"type": "fill", "selector": "input", "value": "{{username}}"},
-            ],
-            "variables": {
-                "base_url": {"type": "string", "default": "https://example.com"},
-                "username": {"type": "string"},
-            },
-        })
+        workflow = load_workflow(
+            {
+                "name": "test",
+                "steps": [
+                    {"type": "navigate", "url": "{{base_url}}/dashboard"},
+                    {"type": "fill", "selector": "input", "value": "{{username}}"},
+                ],
+                "variables": {
+                    "base_url": {"type": "string", "default": "https://example.com"},
+                    "username": {"type": "string"},
+                },
+            }
+        )
         resolver = VariableResolver({"username": "admin"})
-        resolved = resolver.resolve_workflow(workflow, runtime_vars={"base_url": "https://prod.example.com"})
+        resolved = resolver.resolve_workflow(
+            workflow, runtime_vars={"base_url": "https://prod.example.com"}
+        )
 
         assert resolved.steps[0].params["url"] == "https://prod.example.com/dashboard"
         assert resolved.steps[1].params["value"] == "admin"

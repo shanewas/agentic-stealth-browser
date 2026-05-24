@@ -9,29 +9,30 @@ import re as _re
 from typing import Dict, Any
 from .cache import make_cache_key, _script_cache
 
+
 class StealthConfig:
     """Consistent high-quality fingerprint profile"""
-    
+
     # Stable fingerprint (looks like a real mid-range Windows laptop)
     HARDWARE = {
         "hardwareConcurrency": 8,
         "deviceMemory": 8,
         "platform": "Win32",
     }
-    
+
     WEBGL = {
         "vendor": "Intel Inc.",
         "renderer": "Intel(R) UHD Graphics 620",
         "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
     }
-    
+
     SCREEN = {
         "colorDepth": 24,
         "pixelDepth": 24,
     }
-    
+
     LANGUAGES = ["en-US", "en"]
-    
+
     PLUGINS = [
         {"name": "PDF Viewer", "filename": "internal-pdf-viewer"},
         {"name": "Chrome PDF Viewer", "filename": "mhjfbmdgcfjbbpaeojofohoefgiehjai"},
@@ -43,10 +44,12 @@ def get_playwright_version() -> str:
     """Detect installed Playwright version for #279 future-proofing (new signals on updates)."""
     try:
         import playwright
+
         return getattr(playwright, "__version__", "unknown")
     except Exception:
         try:
             from importlib.metadata import version as _v
+
             return _v("playwright")
         except Exception:
             return "unknown"
@@ -77,7 +80,12 @@ def check_stealth_compatibility() -> Dict[str, Any]:
 
 # lru_cache removed (hardware dict unhashable; fp_seed varies per session so hit rate low anyway)
 # P3 #72/#63: use StealthCache for profile-keyed caching with TTL
-def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = None, hardware: Dict[str, Any] = None, screen: Dict[str, Any] = None) -> str:
+def get_stealth_script(
+    profile: str = "windows_laptop",
+    fingerprint_seed: str = None,
+    hardware: Dict[str, Any] = None,
+    screen: Dict[str, Any] = None,
+) -> str:
     """
     Returns a comprehensive stealth injection script.
     Designed to be injected via browser.add_init_script()
@@ -89,7 +97,16 @@ def get_stealth_script(profile: str = "windows_laptop", fingerprint_seed: str = 
     """
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     hw = hardware or {"hardwareConcurrency": 8, "deviceMemory": 8}
-    scr = screen or {"width": 1920, "height": 1080, "availWidth": 1920, "availHeight": 1055, "colorDepth": 24, "pixelDepth": 24, "devicePixelRatio": 1.0, "orientation": "landscape-primary"}
+    scr = screen or {
+        "width": 1920,
+        "height": 1080,
+        "availWidth": 1920,
+        "availHeight": 1055,
+        "colorDepth": 24,
+        "pixelDepth": 24,
+        "devicePixelRatio": 1.0,
+        "orientation": "landscape-primary",
+    }
 
     cache_key = make_cache_key(profile, fingerprint_seed, hardware, screen)
     cached = _script_cache.get(cache_key)
@@ -432,28 +449,33 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
     
     // === End Stealth ===
     """
-    
 
     # Sanitize seed: remove JS-unsafe characters (quotes, backslashes, semicolons, angle brackets)
     # This prevents injection when the seed is interpolated into JS string literals.
     import re as _re_san  # use distinct name to avoid clash
-    _safe_seed = _re_san.sub(r'["\'\\;<>]', '', seed)
+
+    _safe_seed = _re_san.sub(r'["\'\\;<>]', "", seed)
     if not _safe_seed:
         _safe_seed = "agentic-default-seed"
     seed = _safe_seed
 
     # Inject the runtime seed into the JS IIFE call (makes canvas noise / fp per-session unique)
     # Use json.dumps for safe JS string interpolation (escapes quotes, backslashes, etc.)
-    script = script.replace("__DYNAMIC_SEED_PLACEHOLDER__", json.dumps(seed)[1:-1])  # strip surrounding quotes
+    script = script.replace(
+        "__DYNAMIC_SEED_PLACEHOLDER__", json.dumps(seed)[1:-1]
+    )  # strip surrounding quotes
     # Generate a stable per-session WebRTC fake IP from the fingerprint seed.
     # Use realistic residential IP ranges (NOT RFC5737 TEST-NET ranges which are detectable).
     # Deterministic: same seed always produces the same fake IP.
     import hashlib as _hashlib
+
     _seed_hash = int(_hashlib.sha256(seed.encode()).hexdigest(), 16)
     _fake_ip_octet = (_seed_hash % 200) + 20  # 20-219 range for last octet
     _fake_ip_b = (_seed_hash >> 8) % 256
     _fake_ip_c = max(1, (_seed_hash >> 16) % 256)  # avoid .0.x subnet
-    script = script.replace("__FAKE_WEBRTC_IP__", f"72.{_fake_ip_b}.{_fake_ip_c}.{_fake_ip_octet}")
+    script = script.replace(
+        "__FAKE_WEBRTC_IP__", f"72.{_fake_ip_b}.{_fake_ip_c}.{_fake_ip_octet}"
+    )
     # P2: inject persona-correlated hardware (#255) + update placeholders
     # Use json.dumps for safe JS value interpolation (handles type coercion, prevents injection)
     script = script.replace("__HW_CONC__", json.dumps(hw.get("hardwareConcurrency", 8)))
@@ -466,9 +488,13 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
     script = script.replace("__SCREEN_CD__", json.dumps(scr.get("colorDepth", 24)))
     script = script.replace("__SCREEN_PD__", json.dumps(scr.get("pixelDepth", 24)))
     script = script.replace("__DPR__", json.dumps(scr.get("devicePixelRatio", 1.0)))
-    script = script.replace("__ORIENT__", json.dumps(scr.get("orientation", "landscape-primary")))
+    script = script.replace(
+        "__ORIENT__", json.dumps(scr.get("orientation", "landscape-primary"))
+    )
     # also update any old hardcoded if present (use sanitized seed)
-    script = _re.sub(r'\}\)\("agentic-[^"]*seed[^"]*"\);', '})("' + seed + '");', script)
+    script = _re.sub(
+        r'\}\)\("agentic-[^"]*seed[^"]*"\);', '})("' + seed + '");', script
+    )
     return script.strip()
 
 

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 @dataclass
 class WarmingPhase:
     """A single phase in the warming schedule."""
+
     phase: int
     days: int  # How many days this phase lasts
     max_actions: int  # Max actions per session
@@ -34,11 +35,11 @@ class WarmingPhase:
 
 # Default warming schedule: gradual ramp-up over 14 days
 DEFAULT_WARMING_SCHEDULE = [
-    WarmingPhase(0, 2, 5, 3, 200, 5, 1, 8.0, 20.0),     # Day 1-2: Very light
-    WarmingPhase(1, 2, 10, 5, 500, 10, 2, 5.0, 15.0),    # Day 3-4: Light
-    WarmingPhase(2, 3, 20, 8, 1000, 15, 3, 3.0, 10.0),   # Day 5-7: Moderate
-    WarmingPhase(3, 3, 35, 12, 2000, 20, 4, 2.0, 8.0),   # Day 8-10: Normal-ish
-    WarmingPhase(4, 4, 50, 15, 5000, 30, 5, 1.0, 5.0),   # Day 11-14: Near full
+    WarmingPhase(0, 2, 5, 3, 200, 5, 1, 8.0, 20.0),  # Day 1-2: Very light
+    WarmingPhase(1, 2, 10, 5, 500, 10, 2, 5.0, 15.0),  # Day 3-4: Light
+    WarmingPhase(2, 3, 20, 8, 1000, 15, 3, 3.0, 10.0),  # Day 5-7: Moderate
+    WarmingPhase(3, 3, 35, 12, 2000, 20, 4, 2.0, 8.0),  # Day 8-10: Normal-ish
+    WarmingPhase(4, 4, 50, 15, 5000, 30, 5, 1.0, 5.0),  # Day 11-14: Near full
 ]
 
 
@@ -308,7 +309,7 @@ class AccountWarmer:
             self._logger.log_action(
                 "account_warming",
                 {"account_id": self.account_id, "message": msg},
-                level="info"
+                level="info",
             )
         else:
             print(f"[AccountWarmer:{self.account_id}] {msg}")

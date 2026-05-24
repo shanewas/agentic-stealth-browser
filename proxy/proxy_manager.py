@@ -41,14 +41,20 @@ class ProxyConfig:
         if not self.host or not self.host.strip():
             errors.append("host must be a non-empty string")
         elif any(c in self.host for c in ("/", "\\", " ")):
-            errors.append(f"host contains invalid characters (spaces or path separators): {self.host!r}")
+            errors.append(
+                f"host contains invalid characters (spaces or path separators): {self.host!r}"
+            )
 
         # Port validation
         if not isinstance(self.port, int) or self.port < 1 or self.port > 65535:
             errors.append(f"port must be 1-65535, got {self.port}")
 
         # Country validation (2-letter code)
-        if not isinstance(self.country, str) or len(self.country) != 2 or not self.country.isalpha():
+        if (
+            not isinstance(self.country, str)
+            or len(self.country) != 2
+            or not self.country.isalpha()
+        ):
             errors.append(f"country must be a 2-letter code, got {self.country!r}")
 
         # Username validation (no control chars or newlines)
@@ -68,7 +74,9 @@ class ProxyConfig:
         # Provider validation
         _SUPPORTED_PROVIDERS = ["decodo", "smartproxy", "oxylabs", "selfhosted"]
         if self.provider not in _SUPPORTED_PROVIDERS:
-            errors.append(f"provider must be one of {_SUPPORTED_PROVIDERS}, got {self.provider!r}")
+            errors.append(
+                f"provider must be one of {_SUPPORTED_PROVIDERS}, got {self.provider!r}"
+            )
 
         return errors
 
@@ -79,6 +87,7 @@ class ProxyConfig:
         audit logs, recovery history, and status reports.
         """
         from dataclasses import asdict
+
         d = asdict(self)
         d["password"] = "***REDACTED***"
         # Mask most of the username, keep first 3 chars
@@ -116,7 +125,7 @@ class ProxyManager:
 
     def get_site_sensitivity(self, domain: str) -> str:
         """P4 #119: Determine the sensitivity level for a given domain.
-        
+
         Returns one of: "low", "medium", "high", "critical".
         Higher sensitivity sites require better proxies (residential/mobile).
         """
@@ -144,7 +153,9 @@ class ProxyManager:
         }
         return tier_map.get(sensitivity, "residential")
 
-    def record_proxy_result(self, session_name: str, success: bool, response_time: float = 0.0) -> None:
+    def record_proxy_result(
+        self, session_name: str, success: bool, response_time: float = 0.0
+    ) -> None:
         """P4 #119: Record the result of a proxy request for health tracking."""
         if session_name not in self._proxy_health:
             self._proxy_health[session_name] = {
@@ -172,7 +183,7 @@ class ProxyManager:
         """P4 #119: Get health information for a proxy session."""
         if session_name:
             return self._proxy_health.get(session_name, {"status": "unknown"})
-        
+
         # Return summary for all tracked proxies
         summary = {}
         for name, health in self._proxy_health.items():
@@ -188,9 +199,11 @@ class ProxyManager:
             }
         return summary
 
-    def should_rotate_proxy(self, session_name: Optional[str] = None, threshold: int = 3) -> bool:
+    def should_rotate_proxy(
+        self, session_name: Optional[str] = None, threshold: int = 3
+    ) -> bool:
         """P4 #119: Check if the current proxy should be rotated based on health.
-        
+
         Returns True if consecutive failures exceed the threshold.
         """
         if session_name and session_name in self._proxy_health:
@@ -204,12 +217,13 @@ class ProxyManager:
         country: str = "jp",
         session_name: Optional[str] = None,
         duration_minutes: int = 1440,
-        tier: ProxyTier = "residential"
+        tier: ProxyTier = "residential",
     ) -> ProxyConfig:
         """Create a Decodo residential (or tiered) proxy config with sticky session"""
 
         if session_name is None:
             import uuid
+
             session_name = f"agent-{uuid.uuid4().hex[:8]}"
 
         proxy_user = (
@@ -226,7 +240,7 @@ class ProxyManager:
             country=country,
             session_name=session_name,
             session_duration_minutes=duration_minutes,
-            tier=tier
+            tier=tier,
         )
 
         errors = config.validate()
@@ -234,11 +248,15 @@ class ProxyManager:
             raise ValueError(f"Invalid proxy configuration: {'; '.join(errors)}")
 
         self.current_config = config
-        self._proxy_history.append({"action": "create", "config": config, "ts": __import__("time").time()})
+        self._proxy_history.append(
+            {"action": "create", "config": config, "ts": __import__("time").time()}
+        )
         self._rotation_count = getattr(self, "_rotation_count", 0) + 1
         return config
 
-    def select_tier(self, desired_tier: ProxyTier, country: str = "jp", **kwargs) -> ProxyConfig:
+    def select_tier(
+        self, desired_tier: ProxyTier, country: str = "jp", **kwargs
+    ) -> ProxyConfig:
         """High-level tier selection helper."""
         if not self.current_config:
             return self.create_decodo_config(
@@ -246,7 +264,7 @@ class ProxyManager:
                 password=kwargs.get("password", ""),
                 country=country,
                 tier=desired_tier,
-                **{k: v for k, v in kwargs.items() if k not in ["user", "password"]}
+                **{k: v for k, v in kwargs.items() if k not in ["user", "password"]},
             )
         self.current_config.tier = desired_tier
         return self.current_config
@@ -267,7 +285,7 @@ class ProxyManager:
         return {
             "server": f"{protocol}://{cfg.host}:{cfg.port}",
             "username": cfg.username,
-            "password": cfg.password
+            "password": cfg.password,
         }
 
     def get_curl_proxy_string(self) -> str:
@@ -289,7 +307,9 @@ class ProxyManager:
         proxy_url = f"socks5://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}"
 
         try:
-            async with httpx.AsyncClient(proxies={"http://": proxy_url, "https://": proxy_url}, timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                proxies={"http://": proxy_url, "https://": proxy_url}, timeout=timeout
+            ) as client:
                 response = await client.get("https://api.ipify.org?format=json")
                 if response.status_code == 200:
                     ip_data = response.json()
@@ -299,14 +319,14 @@ class ProxyManager:
                         "provider": cfg.provider,
                         "country": cfg.country,
                         "session": cfg.session_name,
-                        "tier": cfg.tier
+                        "tier": cfg.tier,
                     }
         except Exception as e:
             return {
                 "status": "error",
                 "message": str(e),
                 "provider": cfg.provider,
-                "tier": getattr(cfg, 'tier', 'unknown')
+                "tier": getattr(cfg, "tier", "unknown"),
             }
 
         return {"status": "error", "message": "Unknown failure"}
@@ -326,7 +346,7 @@ class ProxyManager:
             "session_name": cfg.session_name,
             "duration_minutes": cfg.session_duration_minutes,
             "tier": cfg.tier,
-            "history_length": len(self._proxy_history)
+            "history_length": len(self._proxy_history),
         }
 
     def _safe_extract_base_user(self, proxy_username: str) -> str:
@@ -356,14 +376,21 @@ class ProxyManager:
         if not self.current_config:
             return None
         cfg = self.current_config
-        base_user = self._safe_extract_base_user(getattr(cfg, 'username', None))
+        base_user = self._safe_extract_base_user(getattr(cfg, "username", None))
         new_config = self.create_decodo_config(
             user=base_user,
             password=cfg.password,
             country=cfg.country,
             session_name=f"rotated-{__import__('uuid').uuid4().hex[:6]}",
             duration_minutes=30,
-            tier=cfg.tier
+            tier=cfg.tier,
         )
-        self._proxy_history.append({"action": "rotate", "reason": reason, "old": cfg.session_name, "new": new_config.session_name})
+        self._proxy_history.append(
+            {
+                "action": "rotate",
+                "reason": reason,
+                "old": cfg.session_name,
+                "new": new_config.session_name,
+            }
+        )
         return new_config

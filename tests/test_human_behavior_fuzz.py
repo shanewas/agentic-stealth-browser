@@ -76,9 +76,11 @@ class MockPage:
 
     async def query_selector(self, selector):
         self._calls.append(("query_selector", selector))
+
         class MockElement:
             async def bounding_box(self):
                 return {"x": 100, "y": 200, "width": 200, "height": 50}
+
         return MockElement()
 
     async def keyboard_press(self, key):
@@ -140,9 +142,7 @@ class TestHumanBehaviorFuzz:
         """Test move_mouse_naturally() with various speed values."""
         behavior = self._make_behavior()
         for speed in ["normal", "fast", "slow", "unknown", ""]:
-            asyncio.run(
-                behavior.move_mouse_naturally(600, 500, speed=speed)
-            )
+            asyncio.run(behavior.move_mouse_naturally(600, 500, speed=speed))
 
     def test_human_click_with_various_inputs(self):
         """Test human_click() with various input combinations."""
@@ -152,9 +152,7 @@ class TestHumanBehaviorFuzz:
         # With coordinates
         asyncio.run(behavior.human_click(x=300, y=200))
         # With both (selector takes precedence)
-        asyncio.run(
-            behavior.human_click("button", x=300, y=200)
-        )
+        asyncio.run(behavior.human_click("button", x=300, y=200))
         # With neither (should click at current position)
         asyncio.run(behavior.human_click())
 
@@ -166,9 +164,7 @@ class TestHumanBehaviorFuzz:
         # Very large scroll
         asyncio.run(behavior.scroll_naturally(100000))
         # Negative scroll (scroll up)
-        asyncio.run(
-            behavior.scroll_naturally(-500, direction="up")
-        )
+        asyncio.run(behavior.scroll_naturally(-500, direction="up"))
         # Zero scroll
         asyncio.run(behavior.scroll_naturally(0))
 
@@ -176,71 +172,47 @@ class TestHumanBehaviorFuzz:
         """Test type_like_human() with various text inputs."""
         behavior = self._make_behavior()
         # Empty string
-        asyncio.run(
-            behavior.type_like_human("input", "")
-        )
+        asyncio.run(behavior.type_like_human("input", ""))
         # Single character
-        asyncio.run(
-            behavior.type_like_human("input", "a")
-        )
+        asyncio.run(behavior.type_like_human("input", "a"))
         # Short string
-        asyncio.run(
-            behavior.type_like_human("input", "hello")
-        )
+        asyncio.run(behavior.type_like_human("input", "hello"))
         # Special characters
-        asyncio.run(
-            behavior.type_like_human("input", "!@#$%")
-        )
+        asyncio.run(behavior.type_like_human("input", "!@#$%"))
         # Unicode
-        asyncio.run(
-            behavior.type_like_human("input", "Hello 世界")
-        )
+        asyncio.run(behavior.type_like_human("input", "Hello 世界"))
         # Low mistake rate only (high rates are too slow for tests)
         for rate in [0.0, 0.01]:
-            asyncio.run(
-                behavior.type_like_human("input", "test", mistake_rate=rate)
-            )
+            asyncio.run(behavior.type_like_human("input", "test", mistake_rate=rate))
 
     def test_simulate_reading_with_various_durations(self):
         """Test simulate_reading() with various duration values."""
         behavior = self._make_behavior()
         # Very short
-        asyncio.run(
-            behavior.simulate_reading(0.1)
-        )
+        asyncio.run(behavior.simulate_reading(0.1))
         # Long (capped for test)
-        asyncio.run(
-            behavior.simulate_reading(2.0)
-        )
+        asyncio.run(behavior.simulate_reading(2.0))
         # Various content factors
         for factor in [0.1, 0.5, 1.0, 2.0, 5.0]:
-            asyncio.run(
-                behavior.simulate_reading(0.5, content_factor=factor)
-            )
+            asyncio.run(behavior.simulate_reading(0.5, content_factor=factor))
 
     def test_random_idle_behavior_with_various_durations(self):
         """Test random_idle_behavior() with various duration values."""
         behavior = self._make_behavior()
         for duration in [0.1, 0.5, 1.0, 2.0]:
-            asyncio.run(
-                behavior.random_idle_behavior(duration_seconds=duration)
-            )
+            asyncio.run(behavior.random_idle_behavior(duration_seconds=duration))
 
     def test_micro_movement_with_various_durations(self):
         """Test micro_movement_while_waiting() with various duration values."""
         behavior = self._make_behavior()
         for duration in [10, 100, 500, 1000]:
-            asyncio.run(
-                behavior.micro_movement_while_waiting(duration)
-            )
+            asyncio.run(behavior.micro_movement_while_waiting(duration))
 
     def test_think_before_action_with_various_importance(self):
         """Test think_before_action() with various importance levels."""
         behavior = self._make_behavior()
         for importance in ["normal", "critical", "low", "unknown", ""]:
-            asyncio.run(
-                behavior.think_before_action(importance)
-            )
+            asyncio.run(behavior.think_before_action(importance))
 
     def test_fatigue_ramps_over_time(self):
         """Test that fatigue level increases with actions."""
@@ -268,16 +240,13 @@ class TestHumanBehaviorFuzz:
 
         # Micro movement should be fastest with off realism
         import time
+
         start = time.time()
-        asyncio.run(
-            behavior_off.micro_movement_while_waiting(100)
-        )
+        asyncio.run(behavior_off.micro_movement_while_waiting(100))
         off_time = time.time() - start
 
         start = time.time()
-        asyncio.run(
-            behavior_full.micro_movement_while_waiting(100)
-        )
+        asyncio.run(behavior_full.micro_movement_while_waiting(100))
         full_time = time.time() - start
 
         # Off should be faster than full
@@ -287,17 +256,13 @@ class TestHumanBehaviorFuzz:
         """Test simulate_distraction() with various max_seconds values."""
         behavior = self._make_behavior()
         for max_sec in [0.1, 0.5, 1.0, 2.0, 5.0]:
-            asyncio.run(
-                behavior.simulate_distraction(max_sec)
-            )
+            asyncio.run(behavior.simulate_distraction(max_sec))
 
     def test_simulate_changed_mind_probability(self):
         """Test simulate_changed_mind() with various probability values."""
         behavior = self._make_behavior()
         for prob in [0.0, 0.1, 0.5, 0.9, 1.0]:
-            result = asyncio.run(
-                behavior.simulate_changed_mind(probability=prob)
-            )
+            result = asyncio.run(behavior.simulate_changed_mind(probability=prob))
             assert isinstance(result, bool)
 
     def test_apply_viewport_jitter_handles_errors(self):
@@ -339,9 +304,7 @@ class TestHumanBehaviorPropertyTests:
         """Property: mouse position should be updated after any move operation."""
         behavior = self._make_behavior()
         old_pos = behavior.last_mouse_pos
-        asyncio.run(
-            behavior.move_mouse_naturally(800, 600)
-        )
+        asyncio.run(behavior.move_mouse_naturally(800, 600))
         # Position should have changed (or at least been recorded)
         assert behavior.last_mouse_pos[0] >= 0
         assert behavior.last_mouse_pos[1] >= 0
@@ -350,9 +313,7 @@ class TestHumanBehaviorPropertyTests:
         """Property: action_count should increase after think_before_action."""
         behavior = self._make_behavior()
         initial_count = behavior.action_count
-        asyncio.run(
-            behavior.think_before_action("normal")
-        )
+        asyncio.run(behavior.think_before_action("normal"))
         assert behavior.action_count > initial_count
 
     def test_fatigue_never_negative(self):

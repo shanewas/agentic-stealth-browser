@@ -48,31 +48,43 @@ from stealth.profiles import Persona, DEFAULT_PERSONA
 # Existing raw Playwright/RuntimeError paths remain for compat; new code prefers these.
 class StealthBrowserError(Exception):
     """Base exception for all Agentic Stealth Browser library errors (DX #249)."""
+
     pass
 
 
 class LaunchError(StealthBrowserError):
     """Raised when browser launch or context creation fails (stealth, proxy, etc.)."""
+
     pass
 
 
 class RecoveryError(StealthBrowserError):
     """Raised or catchable during anti-block recovery orchestration."""
+
     pass
 
 
 class BlockDetectedError(StealthBrowserError):
     """Explicit signal that a block/challenge was detected (for user catch blocks)."""
-    def __init__(self, block_type: Optional[str] = None, platform: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+
+    def __init__(
+        self,
+        block_type: Optional[str] = None,
+        platform: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ):
         self.block_type = block_type
         self.platform = platform
         self.details = details or {}
-        msg = f"Block detected: {block_type or 'unknown'} on {platform or 'unknown site'}"
+        msg = (
+            f"Block detected: {block_type or 'unknown'} on {platform or 'unknown site'}"
+        )
         super().__init__(msg)
 
 
 class RateLimitError(StealthBrowserError):
     """Raised when rate limiter enforces a wait or limit (informational subclass)."""
+
     pass
 
 
@@ -94,6 +106,7 @@ class _BrowserPool:
 
     Single-process singleton pool (simple, no extra deps).
     """
+
     _instance: Optional["_BrowserPool"] = None
     _init_lock = threading.Lock()  # thread-safe singleton creation
 
@@ -109,7 +122,9 @@ class _BrowserPool:
                 cls._instance._launch_args: list = []
         return cls._instance
 
-    async def ensure_browser(self, headless: bool = True, args: Optional[list] = None) -> Browser:
+    async def ensure_browser(
+        self, headless: bool = True, args: Optional[list] = None
+    ) -> Browser:
         async with self._lock:
             if self._browser is None:
                 if self._pw is None:
@@ -191,10 +206,14 @@ class AgentBrowser:
         metrics_collector: Optional[MetricsCollector] = None,
         light_mode: bool = False,
         use_pooled_context: bool = False,  # P1 #57/#48/#47: opt-in for shared Browser + new_context reuse (when rotation not required)
-        rate_limits: Optional[dict] = None,  # #136: tool rate-limit config (e.g. {"tool_calls_per_minute": 30, "total_calls_cap": 600})
+        rate_limits: Optional[
+            dict
+        ] = None,  # #136: tool rate-limit config (e.g. {"tool_calls_per_minute": 30, "total_calls_cap": 600})
     ):
         self.session_manager = SessionManager()
-        self.session = self.session_manager.create_session(session_name, anonymous, ephemeral=ephemeral)
+        self.session = self.session_manager.create_session(
+            session_name, anonymous, ephemeral=ephemeral
+        )
         self.proxy_manager = ProxyManager()
         self.human = None
         self.orchestrator = None
@@ -204,11 +223,17 @@ class AgentBrowser:
         self.recovery = None
         self.cookie_manager = None
         self.session_orchestrator = None
-        self.context: Optional[BrowserContext] = None  # Deprecated alias for self.browser (#93). Removed in v2.1.0. Prefer self.browser.
-        self.browser_context: Optional[BrowserContext] = None  # Canonical browser context reference (v2.0.0+).
-        self.browser = None   # Playwright BrowserContext (persistent or pooled) — see launch() docstring
-        self.page = None      # Playwright Page (main) — use this for most page actions
-        self.rng = random.Random()  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
+        self.context: Optional[BrowserContext] = (
+            None  # Deprecated alias for self.browser (#93). Removed in v2.1.0. Prefer self.browser.
+        )
+        self.browser_context: Optional[BrowserContext] = (
+            None  # Canonical browser context reference (v2.0.0+).
+        )
+        self.browser = None  # Playwright BrowserContext (persistent or pooled) — see launch() docstring
+        self.page = None  # Playwright Page (main) — use this for most page actions
+        self.rng = (
+            random.Random()
+        )  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
         self.persona = persona or DEFAULT_PERSONA  # Persona foundation integration
 
         # P1 #79/#87 (global singletons + multi-instance isolation):
@@ -228,18 +253,24 @@ class AgentBrowser:
 
         # #136: Tool-level rate limiter for public API surface (MCP tool calls)
         if rate_limits is not None:
-            self._rate_limiter: Optional[ToolRateLimiter] = ToolRateLimiter(**rate_limits)
+            self._rate_limiter: Optional[ToolRateLimiter] = ToolRateLimiter(
+                **rate_limits
+            )
         else:
             self._rate_limiter = None
 
         # P2/P3 DX & Observability (#281, #265, #288): health/status, debug, presets
         self.debug_mode: bool = False
-        self.debug_cdp: bool = False  # #377: opt-in CDP remote debugging (localhost-only WS endpoint)
+        self.debug_cdp: bool = (
+            False  # #377: opt-in CDP remote debugging (localhost-only WS endpoint)
+        )
         self.current_preset: Optional[str] = None
         self.current_region: str = "global"
         self.tls_manager: Optional[Any] = None
         self.debug_reporter: Optional[Any] = None
-        self._launch_options: Dict[str, Any] = {}  # for rotation relaunch preservation (incl. debug/preset/region)
+        self._launch_options: Dict[
+            str, Any
+        ] = {}  # for rotation relaunch preservation (incl. debug/preset/region)
         self._custom_launch_options: Dict[str, Any] = {}  # #143: custom PW launch opts
 
         # P2 #182: pluggable page_getter for internal decoupling and extensibility (overridable for multi-page, testing, custom routing)
@@ -272,8 +303,10 @@ class AgentBrowser:
         """
         if self._page_getter is not None:
             return self._page_getter
+
         def _default():
             return getattr(self, "page", None)
+
         return _default
 
     @page_getter.setter
@@ -286,14 +319,15 @@ class AgentBrowser:
     def _register_atexit_shutdown(self):
         """#161: Register atexit handler for graceful close on process exit.
 
-        Uses sync wrapper around async close(). WARNING: atexit is a best-effort
-        fallback. Production code MUST use `async with AgentBrowser()` to guarantee
-        cleanup. The atexit handler cannot reliably await async cleanup in all
-        scenarios (e.g. when a running loop exists, the task is scheduled but not
-    awaited before interpreter shutdown).
+            Uses sync wrapper around async close(). WARNING: atexit is a best-effort
+            fallback. Production code MUST use `async with AgentBrowser()` to guarantee
+            cleanup. The atexit handler cannot reliably await async cleanup in all
+            scenarios (e.g. when a running loop exists, the task is scheduled but not
+        awaited before interpreter shutdown).
         """
         if self._atexit_registered:
             return
+
         def _atexit_cleanup_sync():
             try:
                 # If there's a running loop, we cannot safely run async close in it.
@@ -308,6 +342,7 @@ class AgentBrowser:
                     # There IS a running loop. We can't call asyncio.run() inside it.
                     # Schedule close and log that it may not complete.
                     import logging
+
                     logger = logging.getLogger("agent_browser.atexit")
                     logger.warning(
                         "atexit: running loop detected — close() scheduled but NOT awaited. "
@@ -321,24 +356,29 @@ class AgentBrowser:
                     asyncio.run(self.close())
                 except RuntimeError as e:
                     import logging
+
                     logging.getLogger("agent_browser.atexit").warning(
                         "atexit: asyncio.run(close) failed: %s", e
                     )
                 except Exception as e:
                     import logging
+
                     logging.getLogger("agent_browser.atexit").warning(
                         "atexit: close() failed: %s", e
                     )
             except Exception as e:
                 import logging
+
                 logging.getLogger("agent_browser.atexit").warning(
                     "atexit: unexpected error: %s", e
                 )
+
         try:
             atexit.register(_atexit_cleanup_sync)
             self._atexit_registered = True
         except Exception as e:
             import logging
+
             logging.getLogger("agent_browser.atexit").warning(
                 "atexit: registration failed: %s", e
             )
@@ -352,14 +392,16 @@ class AgentBrowser:
         light_mode: Optional[bool] = None,
         use_pooled_context: Optional[bool] = None,
         resume: bool = False,  # P2: lighter warm-up when resuming from saved sessions
-        debug: bool = False,   # P2/P3 DX: enable DebugReporter (#265)
+        debug: bool = False,  # P2/P3 DX: enable DebugReporter (#265)
         debug_cdp: bool = False,  # #377: optional CDP attach (remote-debugging on localhost: random-port only; security: never 0.0.0.0)
         preset: Optional[str] = None,  # P2/P3: platform preset (#288)
         region: Optional[str] = None,  # P2/P3: TLS region override
-        launch_options: Optional[Dict[str, Any]] = None,  # #143: custom Playwright launch_persistent_context / context opts (merged safely, e.g. ignore_default_args, extra args)
+        launch_options: Optional[
+            Dict[str, Any]
+        ] = None,  # #143: custom Playwright launch_persistent_context / context opts (merged safely, e.g. ignore_default_args, extra args)
     ):  # combined: #57/#48/#47 pooled + P2 resume + #351 health/debug/preset/region
         """Launch browser with full stealth + human behavior.
-        
+
         IMPORTANT NAMING (to avoid integration bugs like BUG-02/BUG-03):
             - self.browser  -> Playwright BrowserContext (persistent context)
             - self.page     -> Playwright Page (main page created after launch)
@@ -428,11 +470,12 @@ class AgentBrowser:
             self.current_preset = preset
             try:
                 from stealth.presets import get_preset
+
                 p = get_preset(preset)
                 # derive region from preset if not explicitly passed
-                if not region and hasattr(p, 'tls_region'):
+                if not region and hasattr(p, "tls_region"):
                     reg = p.tls_region
-                    region = reg.value if hasattr(reg, 'value') else str(reg)
+                    region = reg.value if hasattr(reg, "value") else str(reg)
             except Exception:
                 pass
         if region:
@@ -440,9 +483,15 @@ class AgentBrowser:
         self._custom_launch_options = launch_options or {}  # #143
         # store for rotation relaunch
         self._launch_options = {
-            "headless": headless, "slow_mo": slow_mo, "headed": headed,
-            "light_mode": light_mode, "use_pooled_context": use_pooled_context,
-            "debug": self.debug_mode, "debug_cdp": self.debug_cdp, "preset": self.current_preset, "region": self.current_region,
+            "headless": headless,
+            "slow_mo": slow_mo,
+            "headed": headed,
+            "light_mode": light_mode,
+            "use_pooled_context": use_pooled_context,
+            "debug": self.debug_mode,
+            "debug_cdp": self.debug_cdp,
+            "preset": self.current_preset,
+            "region": self.current_region,
             "resume": resume,
             "launch_options": launch_options,  # #143 preserve custom for rotation relaunch
         }
@@ -465,22 +514,53 @@ class AgentBrowser:
         # #377: CDP remote debugging opt-in (localhost-only for security). Applied to browser args in classic path.
         # (Pooled path uses shared browser launch in _BrowserPool; CDP debug sessions should use default non-pooled for now - minimal surface change.)
         if getattr(self, "debug_cdp", False):
-            cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"]
-            all_args = list(dict.fromkeys(all_args + cdp_flags))  # dedupe preserving order
+            cdp_flags = [
+                "--remote-debugging-address=127.0.0.1",
+                "--remote-debugging-port=0",
+            ]
+            all_args = list(
+                dict.fromkeys(all_args + cdp_flags)
+            )  # dedupe preserving order
 
         # Persona integration hook (foundation only for #109)
         # Uses dataclass overrides for consistent fingerprint. No other side effects yet.
-        p_over = getattr(self, "persona", None).to_launch_overrides() if getattr(self, "persona", None) else {}
+        p_over = (
+            getattr(self, "persona", None).to_launch_overrides()
+            if getattr(self, "persona", None)
+            else {}
+        )
         vp = p_over.get("viewport", {"width": 1366, "height": 768})
-        ua = p_over.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        ua = p_over.get(
+            "user_agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
         loc = p_over.get("locale", "en-US")
         tz = p_over.get("timezone_id", "America/New_York")
 
         # P2: persona power-correlated hardware for deviceMemory / hardwareConcurrency in stealth script
         persona_obj = getattr(self, "persona", None)
-        hw_fingerprint = persona_obj.device.get_hardware_fingerprint() if persona_obj and hasattr(persona_obj, "device") else {"hardwareConcurrency": 8, "deviceMemory": 8}
+        hw_fingerprint = (
+            persona_obj.device.get_hardware_fingerprint()
+            if persona_obj and hasattr(persona_obj, "device")
+            else {"hardwareConcurrency": 8, "deviceMemory": 8}
+        )
         # #124 #198: persona screen profile for viewport+screen/DPR/orient variety & consistency
-        screen_profile = persona_obj.device.get_screen_profile() if persona_obj and hasattr(persona_obj, "device") and hasattr(persona_obj.device, "get_screen_profile") else {"width": 1920, "height": 1080, "availWidth": 1920, "availHeight": 1055, "colorDepth": 24, "pixelDepth": 24, "devicePixelRatio": 1.0, "orientation": "landscape-primary"}
+        screen_profile = (
+            persona_obj.device.get_screen_profile()
+            if persona_obj
+            and hasattr(persona_obj, "device")
+            and hasattr(persona_obj.device, "get_screen_profile")
+            else {
+                "width": 1920,
+                "height": 1080,
+                "availWidth": 1920,
+                "availHeight": 1055,
+                "colorDepth": 24,
+                "pixelDepth": 24,
+                "devicePixelRatio": 1.0,
+                "orientation": "landscape-primary",
+            }
+        )
 
         # #279 future-proofing: detect PW version + new signals, warn gracefully (no hard fail)
         try:
@@ -496,14 +576,18 @@ class AgentBrowser:
         # Proxy wiring (#14, #29): if caller pre-configured ProxyManager (e.g. create_decodo_config before launch),
         # pass the Playwright proxy dict (socks5 supported) so real traffic uses residential proxy.
         # Foundation for rotation (#38/#16). get_playwright_proxy_args is no longer dead code.
-        proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
+        proxy_args = getattr(
+            self.proxy_manager, "get_playwright_proxy_args", lambda: {}
+        )()
         launch_proxy = proxy_args if proxy_args else None
 
         self._using_pool = bool(getattr(self, "use_pooled_context", False))
         if self._using_pool:
             # Scalability path: single shared Chromium + many cheap contexts. No per-instance user_data persistence.
             user_data = Path(self.session["user_data_dir"])
-            user_data.mkdir(parents=True, exist_ok=True)  # keep dir for meta/cookies consistency
+            user_data.mkdir(
+                parents=True, exist_ok=True
+            )  # keep dir for meta/cookies consistency
             pool = _BrowserPool()
             self._pool = pool
             context_opts = {
@@ -518,7 +602,11 @@ class AgentBrowser:
             # #143: merge user-provided custom launch/context options safely (non-overriding critical keys)
             custom = getattr(self, "_custom_launch_options", {}) or {}
             for k, v in (custom or {}).items():
-                if k not in ("user_data_dir", "headless", "slow_mo"):  # protect launch-time ones for pooled path
+                if k not in (
+                    "user_data_dir",
+                    "headless",
+                    "slow_mo",
+                ):  # protect launch-time ones for pooled path
                     context_opts[k] = v
             self.browser = await pool.create_context(**context_opts)
             self.browser_context = self.browser
@@ -553,7 +641,9 @@ class AgentBrowser:
                     udir = Path(str(user_data))
                     port_file = udir / "DevToolsActivePort"
                     if port_file.exists():
-                        port_text = port_file.read_text().strip().splitlines()[0].strip()
+                        port_text = (
+                            port_file.read_text().strip().splitlines()[0].strip()
+                        )
                         port = int(port_text)
                         probe_url = f"http://127.0.0.1:{port}/json/version"
                         with urllib.request.urlopen(probe_url, timeout=3) as r:
@@ -568,7 +658,7 @@ class AgentBrowser:
                     self._cdp_ws_endpoint = None
                     self._cdp_port = None
                     self._cdp_browser_version = None
-        
+
         # Per-session stable fingerprint seed (canvas/WebGL noise + fonts) for consistency across reloads
         # and variation between sessions. Addresses #150 (re-apply), #94, #210 etc.
         session_name = (self.session or {}).get("name", "default-session")
@@ -579,14 +669,26 @@ class AgentBrowser:
         # - every navigation, reload, and subframe
         # This ensures stealth patches (canvas/Offscreen/WebGL/font) are re-applied after nav/reload (#150)
         # and use the per-session seed for stable but unique fp.
-        stealth_script = get_stealth_script(fingerprint_seed=fp_seed, hardware=hw_fingerprint, screen=screen_profile)
+        stealth_script = get_stealth_script(
+            fingerprint_seed=fp_seed, hardware=hw_fingerprint, screen=screen_profile
+        )
         await self.browser.add_init_script(stealth_script)
         if getattr(self, "debug_reporter", None):
             try:
-                self.debug_reporter.record_patch("stealth_init_script", {"seed": fp_seed, "hardware": bool(hw_fingerprint), "screen": bool(screen_profile), "length": len(stealth_script) if isinstance(stealth_script, str) else "n/a"})
+                self.debug_reporter.record_patch(
+                    "stealth_init_script",
+                    {
+                        "seed": fp_seed,
+                        "hardware": bool(hw_fingerprint),
+                        "screen": bool(screen_profile),
+                        "length": len(stealth_script)
+                        if isinstance(stealth_script, str)
+                        else "n/a",
+                    },
+                )
             except Exception:
                 pass
-        
+
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
@@ -597,7 +699,11 @@ class AgentBrowser:
         # Create human behavior controller + orchestrator
         # #222 fix: pass self.rng so helpers use the per-AgentBrowser rng instance instead of global random (reproducible when seeded in future)
         # Pass persona.device for device-aware scroll + future behavior (#244 P2)
-        self.human = HumanBehavior(self.page, rng=self.rng, device_profile=getattr(self.persona, "device", None))
+        self.human = HumanBehavior(
+            self.page,
+            rng=self.rng,
+            device_profile=getattr(self.persona, "device", None),
+        )
         self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
 
         # Seed JS mouse tracker from Python last_pos for continuity (#24 #101).
@@ -606,14 +712,13 @@ class AgentBrowser:
             await self.human.initialize_mouse_tracker()
         except Exception:
             pass
-        
+
         # Initialize audit logging
         # P2 #128: Pass correlation_id from metrics to logger for consistent tracing
         self.logger = AuditLogger(
-            self.session["name"],
-            correlation_id=self.metrics.get_correlation_id()
+            self.session["name"], correlation_id=self.metrics.get_correlation_id()
         )
-        
+
         # P2/P3 DX: enable debug reporter for fingerprint/headers/patches when debug=True (#265, supports health + MCP debug_report)
         if getattr(self, "debug_mode", False):
             try:
@@ -623,11 +728,16 @@ class AgentBrowser:
                 pass
             try:
                 from audit.logger import DebugReporter
+
                 extra_h = get_extra_http_headers()
-                self.debug_reporter = DebugReporter(self.logger, self.tls_manager, extra_h)
+                self.debug_reporter = DebugReporter(
+                    self.logger, self.tls_manager, extra_h
+                )
                 if self.tls_manager and hasattr(self.debug_reporter, "record_patch"):
                     try:
-                        self.debug_reporter.record_patch("tls_profile_launch", self.tls_manager.get_profile())
+                        self.debug_reporter.record_patch(
+                            "tls_profile_launch", self.tls_manager.get_profile()
+                        )
                     except Exception:
                         pass
             except Exception:
@@ -635,10 +745,10 @@ class AgentBrowser:
 
         # Initialize scraper
         self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
-        
+
         # Initialize AI hooks (disabled by default)
         self.ai = AIHooks(provider="none")
-        
+
         # Initialize Anti-Block Recovery Orchestrator (Phase 1 improvement)
         # BUG-04 fix: pass page getter so content-based block detection (CAPTCHA, LinkedIn security, etc.) works
         self.recovery = AntiBlockOrchestrator(
@@ -646,13 +756,17 @@ class AgentBrowser:
             session_manager=self.session_manager,
             proxy_manager=self.proxy_manager,
             page_getter=self.page_getter,  # #182: use the (overridable) page_getter for better decoupling
-            light_mode=getattr(self, "light_mode", None),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
-            rng=self.rng  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
+            light_mode=getattr(
+                self, "light_mode", None
+            ),  # ultra-narrow absolute final: light_mode on AgentBrowser automatically reduces expensive recovery detection (content calls, heavy path) for #92/#84 + #174
+            rng=self.rng,  # #222: wire the AgentBrowser rng to recovery (for backoff jitter etc, eliminates its global random usage)
         )
 
         # Wire active session for #90 P1: auto cookie/session cleanup on ACCOUNT_RESTRICTION
         if self.recovery:
-            self.recovery.set_current_session_name(self.session.get("name") if self.session else None)
+            self.recovery.set_current_session_name(
+                self.session.get("name") if self.session else None
+            )
 
         # Rotation relaunch hook wiring (#38, #16): recovery can now actually change the live browser/proxy/session
         # by calling this after deciding to rotate + sleeping. Hook is async, updates self.page etc dynamically
@@ -663,7 +777,7 @@ class AgentBrowser:
         # Store playwright instance for proper cleanup (only in non-pooled classic path)
         if not getattr(self, "_using_pool", False):
             # pw is defined only in else branch
-            if 'pw' in locals():
+            if "pw" in locals():
                 self._pw = pw
 
         # P2 #97: Record launch in metrics
@@ -689,7 +803,11 @@ class AgentBrowser:
         Only called on recovery paths; headless defaults to True for recovery relaunches.
         """
         # Updated guard for pooled mode (#57 etc): allow rotation if we have browser (pooled uses _pool not _pw)
-        has_launcher = bool(getattr(self, "browser", None)) and (bool(getattr(self, "_pw", None)) or bool(getattr(self, "_pool", None)) or getattr(self, "_using_pool", False))
+        has_launcher = bool(getattr(self, "browser", None)) and (
+            bool(getattr(self, "_pw", None))
+            or bool(getattr(self, "_pool", None))
+            or getattr(self, "_using_pool", False)
+        )
         if not has_launcher:
             return
 
@@ -704,7 +822,9 @@ class AgentBrowser:
                 self.page = None
             if getattr(self, "browser", None):
                 try:
-                    if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
+                    if getattr(self, "_using_pool", False) and getattr(
+                        self, "_pool", None
+                    ):
                         await self._pool.release_context(self.browser)
                     else:
                         await self.browser.close()
@@ -740,29 +860,53 @@ class AgentBrowser:
 
             # #377: CDP flags on rotation relaunch (if debug_cdp was set on original launch)
             if getattr(self, "debug_cdp", False):
-                cdp_flags = ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"]
+                cdp_flags = [
+                    "--remote-debugging-address=127.0.0.1",
+                    "--remote-debugging-port=0",
+                ]
                 all_args = list(dict.fromkeys(all_args + cdp_flags))
 
-            p_over = getattr(self, "persona", None).to_launch_overrides() if getattr(self, "persona", None) else {}
+            p_over = (
+                getattr(self, "persona", None).to_launch_overrides()
+                if getattr(self, "persona", None)
+                else {}
+            )
             vp = p_over.get("viewport", {"width": 1366, "height": 768})
-            ua = p_over.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            ua = p_over.get(
+                "user_agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            )
             loc = p_over.get("locale", "en-US")
             tz = p_over.get("timezone_id", "America/New_York")
 
             # P2: persona power-correlated hardware (re-apply on rotation too)
             persona_obj = getattr(self, "persona", None)
-            hw_fingerprint = persona_obj.device.get_hardware_fingerprint() if persona_obj and hasattr(persona_obj, "device") else {"hardwareConcurrency": 8, "deviceMemory": 8}
+            hw_fingerprint = (
+                persona_obj.device.get_hardware_fingerprint()
+                if persona_obj and hasattr(persona_obj, "device")
+                else {"hardwareConcurrency": 8, "deviceMemory": 8}
+            )
 
             # Proxy now reflects the rotated config (from recovery's create_decodo or rotate_proxy)
-            proxy_args = getattr(self.proxy_manager, "get_playwright_proxy_args", lambda: {})()
+            proxy_args = getattr(
+                self.proxy_manager, "get_playwright_proxy_args", lambda: {}
+            )()
             launch_proxy = proxy_args if proxy_args else None
 
             # 4. Relaunch: use pooled create_context if in pool mode, else classic persistent (using stored _pw)
-            opts = getattr(self, "_launch_options", {"headless": True, "slow_mo": 0, "headed": False})
+            opts = getattr(
+                self,
+                "_launch_options",
+                {"headless": True, "slow_mo": 0, "headed": False},
+            )
             h = opts.get("headless", True)
             sm = opts.get("slow_mo", 0)
             hd = opts.get("headed", False)
-            self._custom_launch_options = opts.get("launch_options") or getattr(self, "_custom_launch_options", {}) or {}  # #143 preserve across rotation
+            self._custom_launch_options = (
+                opts.get("launch_options")
+                or getattr(self, "_custom_launch_options", {})
+                or {}
+            )  # #143 preserve across rotation
             if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
                 context_opts = {
                     "viewport": vp,
@@ -797,7 +941,9 @@ class AgentBrowser:
                 for k, v in (custom or {}).items():
                     if k not in ("user_data_dir",):
                         lp_kwargs[k] = v
-                self.browser = await self._pw.chromium.launch_persistent_context(**lp_kwargs)
+                self.browser = await self._pw.chromium.launch_persistent_context(
+                    **lp_kwargs
+                )
                 self.browser_context = self.browser
 
                 # #377 rediscover after rotation relaunch (classic path)
@@ -806,11 +952,15 @@ class AgentBrowser:
                         udir = Path(str(user_data))
                         port_file = udir / "DevToolsActivePort"
                         if port_file.exists():
-                            port_text = port_file.read_text().strip().splitlines()[0].strip()
+                            port_text = (
+                                port_file.read_text().strip().splitlines()[0].strip()
+                            )
                             port = int(port_text)
                             probe_url = f"http://127.0.0.1:{port}/json/version"
                             with urllib.request.urlopen(probe_url, timeout=3) as r:
-                                ver = json.loads(r.read().decode("utf-8", errors="replace"))
+                                ver = json.loads(
+                                    r.read().decode("utf-8", errors="replace")
+                                )
                             self._cdp_ws_endpoint = ver.get("webSocketDebuggerUrl")
                             self._cdp_port = port
                             self._cdp_browser_version = ver.get("Browser", "unknown")
@@ -829,8 +979,17 @@ class AgentBrowser:
             session_name = (self.session or {}).get("name", "default-session")
             fp_seed = f"agentic-{session_name}-canvas-v4"
             # Apply screen profile from persona (rotation must preserve this, matching launch())
-            screen_profile = p_over.get("screen", p_over.get("viewport", {"width": vp["width"], "height": vp["height"]}))
-            await self.browser.add_init_script(get_stealth_script(fingerprint_seed=fp_seed, hardware=hw_fingerprint, screen=screen_profile))
+            screen_profile = p_over.get(
+                "screen",
+                p_over.get("viewport", {"width": vp["width"], "height": vp["height"]}),
+            )
+            await self.browser.add_init_script(
+                get_stealth_script(
+                    fingerprint_seed=fp_seed,
+                    hardware=hw_fingerprint,
+                    screen=screen_profile,
+                )
+            )
 
             # 5b. Re-check stealth compatibility after relaunch (matching launch())
             try:
@@ -842,7 +1001,11 @@ class AgentBrowser:
             # Pass device for consistent scroll physics across rotation (#244)
             # Use a fresh RNG seeded from session name for independence from pre-rotation state
             rotation_rng = random.Random(session_name)
-            self.human = HumanBehavior(self.page, rng=rotation_rng, device_profile=getattr(self.persona, "device", None))
+            self.human = HumanBehavior(
+                self.page,
+                rng=rotation_rng,
+                device_profile=getattr(self.persona, "device", None),
+            )
             self.orchestrator = BehaviorOrchestrator(self.human, rng=rotation_rng)
             self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
 
@@ -855,22 +1018,34 @@ class AgentBrowser:
             # 7. Update recovery's browser ref and page_getter (#182: now delegates to AgentBrowser.page_getter for pluggability)
             if self.recovery:
                 self.recovery.browser = self.browser
-                self.recovery._get_page = self.page_getter  # uses the overridable getter (defaults to current self.page)
+                self.recovery._get_page = (
+                    self.page_getter
+                )  # uses the overridable getter (defaults to current self.page)
 
             if log:
-                log.log_action("rotation_relaunch_succeeded", {
-                    "session": (self.session or {}).get("name"),
-                    "proxy_rotated": bool(launch_proxy),
-                    "new_proxy": new_proxy_name,
-                })
+                log.log_action(
+                    "rotation_relaunch_succeeded",
+                    {
+                        "session": (self.session or {}).get("name"),
+                        "proxy_rotated": bool(launch_proxy),
+                        "new_proxy": new_proxy_name,
+                    },
+                )
         except Exception as e:
             if log:
-                log.log_error("rotation_relaunch_failed", str(e), {"proxy": new_proxy_name})
+                log.log_error(
+                    "rotation_relaunch_failed", str(e), {"proxy": new_proxy_name}
+                )
             # Do not raise: let the recovery retry path surface the failure naturally (max_retries etc)
             # The old context is already closed, but browser may be in partial state; next operation will raise appropriately.
-    
-    async def goto(self, url: str, warm_up: bool = True, max_retries: int = 3,
-                   platform: str = "unknown"):
+
+    async def goto(
+        self,
+        url: str,
+        warm_up: bool = True,
+        max_retries: int = 3,
+        platform: str = "unknown",
+    ):
         """Navigate with session warming and basic error recovery.
 
         P3 #5: When recovery orchestrator is available, delegates to safe_goto()
@@ -888,7 +1063,7 @@ class AgentBrowser:
 
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
-        
+
         for attempt in range(max_retries):
             try:
                 # Safe LinkedIn warm-up heuristic (fixes CodeQL py/incomplete-url-substring-sanitization)
@@ -896,31 +1071,51 @@ class AgentBrowser:
                 _is_linkedin = False
                 try:
                     _netloc = urlparse(url).netloc.lower()
-                    _is_linkedin = _netloc == "linkedin.com" or _netloc.endswith(".linkedin.com")
+                    _is_linkedin = _netloc == "linkedin.com" or _netloc.endswith(
+                        ".linkedin.com"
+                    )
                 except Exception:
                     _is_linkedin = False
-                if warm_up and _is_linkedin and attempt == 0 and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: legacy goto path now skips warm-up cost/latency under light_mode (matches safe_goto + class/launch doc promises for launch/warm-up perf)
+                if (
+                    warm_up
+                    and _is_linkedin
+                    and attempt == 0
+                    and not getattr(self, "light_mode", False)
+                ):  # ultra-narrow absolute final closer for ONLY #174 and #113: legacy goto path now skips warm-up cost/latency under light_mode (matches safe_goto + class/launch doc promises for launch/warm-up perf)
                     # Natural session warming
-                    await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+                    await self.page.goto(
+                        "https://www.linkedin.com/feed/", wait_until="domcontentloaded"
+                    )
                     await self.human.scroll_naturally(280)
                     await self.human.think(900, 1600)
-                
+
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                if not getattr(self, "light_mode", False):  # absolute final polish for #174/#113 launch/warm-up cost: also skip post-goto think delay in legacy goto (now fully matches safe_goto light_mode behavior)
+                if not getattr(
+                    self, "light_mode", False
+                ):  # absolute final polish for #174/#113 launch/warm-up cost: also skip post-goto think delay in legacy goto (now fully matches safe_goto light_mode behavior)
                     await self.human.think(500, 1200)
                 return True
-                
+
             except Exception as e:
                 if attempt == max_retries - 1:
                     raise e
-                if not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: skip retry think latency cost too in legacy goto under light_mode (completes full launch/warm-up cost reduction, no artificial delays remain)
+                if not getattr(
+                    self, "light_mode", False
+                ):  # ultra-narrow absolute final closer for ONLY #174 and #113: skip retry think latency cost too in legacy goto under light_mode (completes full launch/warm-up cost reduction, no artificial delays remain)
                     await self.human.think(2000, 4000)  # Wait before retry
                 continue
-        
+
         return False
-    
-    async def safe_goto(self, url: str, warm_up: bool = True, platform: str = "unknown",
-                        rate_limit: bool = True, domain: str = None, account: str = None):
+
+    async def safe_goto(
+        self,
+        url: str,
+        warm_up: bool = True,
+        platform: str = "unknown",
+        rate_limit: bool = True,
+        domain: str = None,
+        account: str = None,
+    ):
         """
         Navigate with full anti-block recovery.
         Uses the AntiBlockOrchestrator for intelligent detection and recovery.
@@ -940,6 +1135,7 @@ class AgentBrowser:
         if domain is None:
             try:
                 from urllib.parse import urlparse
+
                 domain = urlparse(url).netloc
             except Exception:
                 domain = "unknown"
@@ -949,7 +1145,9 @@ class AgentBrowser:
             self.account_warming.start_session()
             if self.account_warming.should_stop_session():
                 reason = self.account_warming.get_reason_to_stop()
-                self.account_health.record_event("warming_limit", severity=0.1, details={"reason": reason})
+                self.account_health.record_event(
+                    "warming_limit", severity=0.1, details={"reason": reason}
+                )
                 raise RuntimeError(f"Account warming limit reached: {reason}")
 
         # P3: Account health check - enforce cooling off
@@ -963,7 +1161,12 @@ class AgentBrowser:
 
         # P0 #20: Domain/account rate limiting (default enabled)
         if rate_limit:
-            effective_account = account or self.account_id or (self.session.get("name") if self.session else None) or "default"
+            effective_account = (
+                account
+                or self.account_id
+                or (self.session.get("name") if self.session else None)
+                or "default"
+            )
             rl = self.rate_limiter
             wait_time = await rl.wait_if_needed(effective_account, domain)
             if wait_time > 0:
@@ -972,7 +1175,7 @@ class AgentBrowser:
 
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
-        
+
         if not self.recovery:
             # Fallback to normal goto if recovery not initialized
             return await self.goto(url, warm_up=warm_up)
@@ -983,24 +1186,32 @@ class AgentBrowser:
             _is_linkedin = False
             try:
                 _netloc = urlparse(url).netloc.lower()
-                _is_linkedin = _netloc == "linkedin.com" or _netloc.endswith(".linkedin.com")
+                _is_linkedin = _netloc == "linkedin.com" or _netloc.endswith(
+                    ".linkedin.com"
+                )
             except Exception:
                 _is_linkedin = False
-            if warm_up and _is_linkedin and not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto now skips linkedin warm-up cost/latency under light_mode (matches legacy goto + doc promises for launch/warm-up perf)
-                await self.page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+            if (
+                warm_up and _is_linkedin and not getattr(self, "light_mode", False)
+            ):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto now skips linkedin warm-up cost/latency under light_mode (matches legacy goto + doc promises for launch/warm-up perf)
+                await self.page.goto(
+                    "https://www.linkedin.com/feed/", wait_until="domcontentloaded"
+                )
                 await self.human.scroll_naturally(280)
                 await self.human.think(900, 1600)
-            
-            response = await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            if not getattr(self, "light_mode", False):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto skips post-goto think under light_mode completing full warm-up cost reduction for launch perf (#174 #113)
+
+            response = await self.page.goto(
+                url, wait_until="domcontentloaded", timeout=45000
+            )
+            if not getattr(
+                self, "light_mode", False
+            ):  # ultra-narrow absolute final closer for ONLY #174 and #113: safe_goto skips post-goto think under light_mode completing full warm-up cost reduction for launch perf (#174 #113)
                 await self.human.think(500, 1200)
             return response
 
         try:
-            result = await self.recovery.execute_with_recovery(
-                func=_navigate,
-                platform=platform,
-                url=url
+            await self.recovery.execute_with_recovery(
+                func=_navigate, platform=platform, url=url
             )
             # P3: Record success to all tracking systems
             self.account_health.record_success()
@@ -1013,13 +1224,16 @@ class AgentBrowser:
             return True
         except Exception as e:
             # P3: Record failure to all tracking systems
-            self.account_health.record_event("navigation_failed", severity=0.2, details={"url": url, "error": str(e)})
-            self.adaptive_tuner.record_feedback(blocked=True, block_type="navigation_error", platform=platform)
-            self.logger.log_error("safe_goto_failed", str(e), {"url": url, "platform": platform})
+            self.account_health.record_event(
+                "navigation_failed", severity=0.2, details={"url": url, "error": str(e)}
+            )
+            self.adaptive_tuner.record_feedback(
+                blocked=True, block_type="navigation_error", platform=platform
+            )
+            self.logger.log_error(
+                "safe_goto_failed", str(e), {"url": url, "platform": platform}
+            )
             return False
-
-
-
 
     async def load_cookies(self, cookies_path: str):
         """
@@ -1033,9 +1247,6 @@ class AgentBrowser:
         # sameSite normalization now handled inside modern load path or by Playwright.
         return await self.load_cookies_from_file(cookies_path, encryption_key=None)
 
-
-
-
     async def safe_click(self, selector: str, platform: str = "unknown"):
         """Click with recovery logic."""
         # #136: tool-level rate limit check
@@ -1048,9 +1259,27 @@ class AgentBrowser:
         async def _click():
             # P2 thinking pause before the click action itself (#251)
             if self.human:
-                await self.human.think_before_action("critical" if any(k in selector.lower() for k in ["submit","login","send","save","post","confirm","button"]) else "normal")
+                await self.human.think_before_action(
+                    "critical"
+                    if any(
+                        k in selector.lower()
+                        for k in [
+                            "submit",
+                            "login",
+                            "send",
+                            "save",
+                            "post",
+                            "confirm",
+                            "button",
+                        ]
+                    )
+                    else "normal"
+                )
                 # occasional distraction before committing (#178)
-                if getattr(self.human, "_fatigue_factor", lambda: 0)() > 0.15 or self.rng.random() < 0.09:
+                if (
+                    getattr(self.human, "_fatigue_factor", lambda: 0)() > 0.15
+                    or self.rng.random() < 0.09
+                ):
                     await self.human.simulate_distraction(0.35)
             await self.page.click(selector, timeout=10000)
             await self.human.think(300, 800) if self.human else asyncio.sleep(0.3)
@@ -1060,7 +1289,7 @@ class AgentBrowser:
                 await self.recovery.execute_with_recovery(
                     func=_click,
                     platform=platform,
-                    url=getattr(self.page, 'url', '') if self.page else ''
+                    url=getattr(self.page, "url", "") if self.page else "",
                 )
             else:
                 await _click()
@@ -1080,7 +1309,9 @@ class AgentBrowser:
 
         async def _type():
             if self.human:
-                await self.human.think_before_action("normal")  # deliberate before committing text (#251)
+                await self.human.think_before_action(
+                    "normal"
+                )  # deliberate before committing text (#251)
             await self.human.type_like_human(selector, text)
 
         try:
@@ -1088,7 +1319,7 @@ class AgentBrowser:
                 await self.recovery.execute_with_recovery(
                     func=_type,
                     platform=platform,
-                    url=getattr(self.page, 'url', '') if self.page else ''
+                    url=getattr(self.page, "url", "") if self.page else "",
                 )
             else:
                 await _type()
@@ -1096,7 +1327,6 @@ class AgentBrowser:
         except Exception as e:
             self.logger.log_error("safe_type_failed", str(e), {"selector": selector})
             return False
-
 
     async def human_scroll_and_read(self, duration_seconds: float = 6.0):
         """Simulate natural reading behavior using the enhanced human behavior layer."""
@@ -1110,8 +1340,9 @@ class AgentBrowser:
                 await p.mouse.wheel(0, self.rng.randint(200, 400))
             await asyncio.sleep(1.5)
 
-
-    async def load_cookies_from_file(self, cookies_path: str, encryption_key: Any = None) -> Dict[str, Any]:
+    async def load_cookies_from_file(
+        self, cookies_path: str, encryption_key: Any = None
+    ) -> Dict[str, Any]:
         """Load cookies using the resilient CookieManager.
 
         Supports encryption_key (str or list[str] for #270 key rotation) for P1 #82 secure (encrypted) cookie loads.
@@ -1121,7 +1352,9 @@ class AgentBrowser:
             raise RuntimeError("Browser not launched. Call launch() first.")
 
         self.cookie_manager = CookieManager(self.browser)
-        result = await self.cookie_manager.load_cookies(cookies_path, encryption_key=encryption_key)
+        result = await self.cookie_manager.load_cookies(
+            cookies_path, encryption_key=encryption_key
+        )
 
         if result.get("status") == "success":
             # Also initialize session orchestrator
@@ -1136,7 +1369,9 @@ class AgentBrowser:
 
         return await self.cookie_manager.get_cookie_health()
 
-    async def save_cookies_to_file(self, cookies_path: str, encrypt: bool = False, encryption_key: Any = None) -> Dict[str, Any]:
+    async def save_cookies_to_file(
+        self, cookies_path: str, encrypt: bool = False, encryption_key: Any = None
+    ) -> Dict[str, Any]:
         """Save cookies to file (plain or encrypted) via CookieManager.
 
         P1 #82: Use encrypt=True + any secret key for at-rest Fernet encryption + integrity protection.
@@ -1155,7 +1390,6 @@ class AgentBrowser:
         return await self.cookie_manager.save_cookies_to_file(
             cookies_path, encrypt=encrypt, encryption_key=encryption_key
         )
-
 
     async def warm_up_before_work(self, intensity: str = "medium") -> Dict[str, Any]:
         """Perform natural warm-up before real automation work.
@@ -1180,7 +1414,20 @@ class AgentBrowser:
 
         def _should_profile(act_name: str) -> bool:
             # profile the ones that involve clicks/hovers/mouse moves (core of #169 complaint)
-            return any(k in act_name.lower() for k in ("mouse", "click", "hover", "micro", "scroll", "idle", "read", "search", "jitter"))
+            return any(
+                k in act_name.lower()
+                for k in (
+                    "mouse",
+                    "click",
+                    "hover",
+                    "micro",
+                    "scroll",
+                    "idle",
+                    "read",
+                    "search",
+                    "jitter",
+                )
+            )
 
         async def _run_step(name: str, coro_func):
             """Run a warm-up step, wrapped in profile_action when appropriate, best-effort."""
@@ -1199,7 +1446,11 @@ class AgentBrowser:
                 errors.append(err_msg)
                 if self.logger:
                     try:
-                        self.logger.log_error("warm_up_step_failed", str(e), {"step": name, "intensity": intensity})
+                        self.logger.log_error(
+                            "warm_up_step_failed",
+                            str(e),
+                            {"step": name, "intensity": intensity},
+                        )
                     except Exception:
                         pass
                 # best-effort: continue; profile already logged the failure visibly
@@ -1210,22 +1461,37 @@ class AgentBrowser:
                 intensity = "light"
 
             if intensity == "light":
-                await _run_step("scroll_light", lambda: self.human.scroll_naturally(200))
+                await _run_step(
+                    "scroll_light", lambda: self.human.scroll_naturally(200)
+                )
                 await _run_step("think_light", lambda: self.human.think(800, 1500))
 
             elif intensity == "medium":
                 await _run_step("scroll_med", lambda: self.human.scroll_naturally(350))
                 await _run_step("think_med", lambda: self.human.think(1200, 2200))
-                await _run_step("micro_move", lambda: self.human.micro_movement_while_waiting(600))
+                await _run_step(
+                    "micro_move", lambda: self.human.micro_movement_while_waiting(600)
+                )
                 if self.rng.random() < 0.4:
-                    await _run_step("random_idle", lambda: self.human.random_idle_behavior(3.0))
+                    await _run_step(
+                        "random_idle", lambda: self.human.random_idle_behavior(3.0)
+                    )
 
             elif intensity == "heavy":
-                await _run_step("simulate_reading", lambda: self.human.simulate_reading(6.0, content_factor=1.3))  # P2 #131 variable read time
-                await _run_step("viewport_jitter", lambda: self.human.apply_viewport_jitter())
+                await _run_step(
+                    "simulate_reading",
+                    lambda: self.human.simulate_reading(6.0, content_factor=1.3),
+                )  # P2 #131 variable read time
+                await _run_step(
+                    "viewport_jitter", lambda: self.human.apply_viewport_jitter()
+                )
                 if self.rng.random() < 0.5:
-                    await _run_step("fake_search", lambda: self.human.fake_search_action())
-                await _run_step("random_idle_heavy", lambda: self.human.random_idle_behavior(4.0))
+                    await _run_step(
+                        "fake_search", lambda: self.human.fake_search_action()
+                    )
+                await _run_step(
+                    "random_idle_heavy", lambda: self.human.random_idle_behavior(4.0)
+                )
 
             status = "success"
             if attempted > 0 and succeeded == 0:
@@ -1233,7 +1499,12 @@ class AgentBrowser:
             elif attempted > 0 and succeeded < attempted:
                 status = "partial"
 
-            result = {"status": status, "intensity": intensity, "steps_attempted": attempted, "steps_succeeded": succeeded}
+            result = {
+                "status": status,
+                "intensity": intensity,
+                "steps_attempted": attempted,
+                "steps_succeeded": succeeded,
+            }
             if errors:
                 result["errors"] = errors[:3]  # limit
             if self.logger:
@@ -1246,12 +1517,21 @@ class AgentBrowser:
             # top level unexpected
             if self.logger:
                 try:
-                    self.logger.log_error("warm_up_failed", str(e), {"intensity": intensity})
+                    self.logger.log_error(
+                        "warm_up_failed", str(e), {"intensity": intensity}
+                    )
                 except Exception:
                     pass
-            return {"status": "error", "message": str(e), "steps_attempted": attempted, "steps_succeeded": succeeded}
+            return {
+                "status": "error",
+                "message": str(e),
+                "steps_attempted": attempted,
+                "steps_succeeded": succeeded,
+            }
 
-    async def warm_up_before_work_background(self, intensity: str = "medium") -> asyncio.Task:
+    async def warm_up_before_work_background(
+        self, intensity: str = "medium"
+    ) -> asyncio.Task:
         """P4 #146: Non-blocking warm-up that runs in the background.
 
         Returns an asyncio.Task that can be awaited later if needed.
@@ -1262,6 +1542,7 @@ class AgentBrowser:
             # ... do other work ...
             result = await task  # wait for warm-up to complete
         """
+
         async def _run_warmup():
             return await self.warm_up_before_work(intensity=intensity)
 
@@ -1274,7 +1555,9 @@ class AgentBrowser:
             return {"status": "no_manager"}
         return await self.cookie_manager.refresh_cookies_if_needed(max_age_hours)
 
-    async def cleanup_compromised_session(self, remove_dir: bool = False) -> Dict[str, Any]:
+    async def cleanup_compromised_session(
+        self, remove_dir: bool = False
+    ) -> Dict[str, Any]:
         """#90 P1: Invalidate current session cookies + mark as compromised.
 
         Call this after ACCOUNT_RESTRICTION (or any detected compromise) to avoid
@@ -1285,7 +1568,9 @@ class AgentBrowser:
         if self.session:
             name = self.session.get("name")
             if self.session_manager:
-                result = self.session_manager.cleanup_session(name, remove_dir=remove_dir)
+                result = self.session_manager.cleanup_session(
+                    name, remove_dir=remove_dir
+                )
 
         if self.cookie_manager:
             try:
@@ -1306,7 +1591,6 @@ class AgentBrowser:
         result["status"] = "cleaned"
         return result
 
-
     async def screenshot_on_error(self, name: str = "error"):
         """Take screenshot on error for visual debugging.
         #149 fix: always log failure reason (via logger if available), fixed time.time() call, best-effort.
@@ -1321,6 +1605,7 @@ class AgentBrowser:
             return None
         try:
             import os
+
             os.makedirs("screenshots", exist_ok=True)
             filename = f"screenshots/{name}_{int(time.time())}.png"
             await p.screenshot(path=filename, full_page=True)
@@ -1330,13 +1615,14 @@ class AgentBrowser:
             msg = f"Screenshot failed: {e}"
             if getattr(self, "logger", None):
                 try:
-                    self.logger.log_error("screenshot_on_error_failed", str(e), {"name": name})
+                    self.logger.log_error(
+                        "screenshot_on_error_failed", str(e), {"name": name}
+                    )
                 except Exception:
                     print(msg)
             else:
                 print(msg)
             return None
-
 
     async def profile_action(self, name: str, action_func):
         """Profile the execution time of an action.
@@ -1346,10 +1632,10 @@ class AgentBrowser:
         try:
             result = await action_func()
             duration = time.time() - start
-            
+
             # Record in per-instance metrics (P1 #79 isolation; always present now)
             self.metrics.record_time(name, duration)
-            
+
             print(f"[Profile] {name}: {duration:.2f}s")
             return result
         except Exception as e:
@@ -1357,25 +1643,38 @@ class AgentBrowser:
             print(f"[Profile] {name} FAILED after {duration:.2f}s: {e}")
             if getattr(self, "logger", None):
                 try:
-                    self.logger.log_error("profile_action_failed", str(e), {"name": name, "duration": duration})
+                    self.logger.log_error(
+                        "profile_action_failed",
+                        str(e),
+                        {"name": name, "duration": duration},
+                    )
                 except Exception:
                     pass
             raise
 
-
-    async def safe_goto_with_rate_limit(self, url: str, domain: str = None, account: str = None, **kwargs):
+    async def safe_goto_with_rate_limit(
+        self, url: str, domain: str = None, account: str = None, **kwargs
+    ):
         """Navigate with rate limiting protection (now per-instance for #79/#87 isolation).
         Deprecated: safe_goto now has rate_limit=True by default (#20).
         This method is kept for backward compatibility.
         """
-        return await self.safe_goto(url, rate_limit=True, domain=domain, account=account, **kwargs)
+        return await self.safe_goto(
+            url, rate_limit=True, domain=domain, account=account, **kwargs
+        )
 
-    def set_rate_limit(self, domain: str, requests_per_minute: int = 8, cooldown_seconds: int = 60, account: Optional[str] = None):
+    def set_rate_limit(
+        self,
+        domain: str,
+        requests_per_minute: int = 8,
+        cooldown_seconds: int = 60,
+        account: Optional[str] = None,
+    ):
         """Configure custom rate limit for a domain (applied to this instance's limiter)."""
         from production.rate_limiter import RateLimitConfig
+
         config = RateLimitConfig(
-            requests_per_minute=requests_per_minute,
-            cooldown_seconds=cooldown_seconds
+            requests_per_minute=requests_per_minute, cooldown_seconds=cooldown_seconds
         )
         # Per-instance: target the sub-limiter for the given (or default) account
         dl = self.rate_limiter.get_limiter(account or "default")
@@ -1423,7 +1722,9 @@ class AgentBrowser:
                 tls_info = {
                     "region": getattr(self.tls_manager, "region", None),
                     "name": prof.get("name") if isinstance(prof, dict) else None,
-                    "description": prof.get("description") if isinstance(prof, dict) else None,
+                    "description": prof.get("description")
+                    if isinstance(prof, dict)
+                    else None,
                 }
             except Exception:
                 pass
@@ -1435,7 +1736,10 @@ class AgentBrowser:
                 proxy_info = self.proxy_manager.get_current_proxy_info() or proxy_info
             elif hasattr(self.proxy_manager, "current_config"):
                 cfg = self.proxy_manager.current_config
-                proxy_info = {"provider": getattr(cfg, "provider", None), "host": getattr(cfg, "host", None)}
+                proxy_info = {
+                    "provider": getattr(cfg, "provider", None),
+                    "host": getattr(cfg, "host", None),
+                }
         except Exception:
             pass
 
@@ -1446,7 +1750,11 @@ class AgentBrowser:
             if self.recovery:
                 fc = getattr(self.recovery, "failure_counts", {}) or {}
                 recovery_info["failure_counts"] = fc
-                block_count = sum(fc.values()) if fc else getattr(self.recovery, "block_count", 0) or 0
+                block_count = (
+                    sum(fc.values())
+                    if fc
+                    else getattr(self.recovery, "block_count", 0) or 0
+                )
                 last_block = getattr(self.recovery, "last_block_type", None)
                 if last_block:
                     recovery_info["last_block"] = str(last_block)
@@ -1492,7 +1800,13 @@ class AgentBrowser:
             "timestamp": time.time(),
         }
 
-    async def debug_report(self, print_report: bool = False, limit: Optional[int] = None, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> Dict[str, Any]:
+    async def debug_report(
+        self,
+        print_report: bool = False,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+        since_ts: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """#265: Full debug dump of TLS fingerprint, headers, stealth patches. Supports health flows too.
         #381: limit/cursor/since_ts forwarded to control recent_audit pagination in report.
         """
@@ -1500,10 +1814,11 @@ class AgentBrowser:
             try:
                 from audit.logger import DebugReporter
                 from stealth.headers import get_extra_http_headers
+
                 self.debug_reporter = DebugReporter(
                     getattr(self, "logger", None),
                     getattr(self, "tls_manager", None),
-                    get_extra_http_headers()
+                    get_extra_http_headers(),
                 )
             except Exception as e:
                 return {"status": "error", "message": f"DebugReporter unavailable: {e}"}
@@ -1537,11 +1852,17 @@ class AgentBrowser:
         if not getattr(self, "_cdp_ws_endpoint", None):
             try:
                 # best-effort re-probe using last known user_data if available (from _launch_options or session)
-                udir = Path(self.session.get("user_data_dir", "")) if getattr(self, "session", None) else None
+                udir = (
+                    Path(self.session.get("user_data_dir", ""))
+                    if getattr(self, "session", None)
+                    else None
+                )
                 if udir and udir.exists():
                     port_file = udir / "DevToolsActivePort"
                     if port_file.exists():
-                        port_text = port_file.read_text().strip().splitlines()[0].strip()
+                        port_text = (
+                            port_file.read_text().strip().splitlines()[0].strip()
+                        )
                         port = int(port_text)
                         probe_url = f"http://127.0.0.1:{port}/json/version"
                         with urllib.request.urlopen(probe_url, timeout=3) as r:
@@ -1573,9 +1894,14 @@ class AgentBrowser:
         """#288: Runtime apply of platform preset (tunes recovery/behavior notes; TLS best on (re)launch)."""
         try:
             from stealth.presets import get_preset, list_presets
+
             available = list_presets()
             if name not in available:
-                return {"status": "error", "available": available, "message": f"Unknown preset '{name}'"}
+                return {
+                    "status": "error",
+                    "available": available,
+                    "message": f"Unknown preset '{name}'",
+                }
             preset = get_preset(name)
             self.current_preset = name
             if hasattr(preset, "tls_region"):
@@ -1600,7 +1926,9 @@ class AgentBrowser:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def switch_region(self, new_region: str, relaunch: bool = False) -> Dict[str, Any]:
+    async def switch_region(
+        self, new_region: str, relaunch: bool = False
+    ) -> Dict[str, Any]:
         """P2 #155: Switch TLS/region profile mid-session.
 
         Updates current_region, tls_manager, and relevant headers/patches.
@@ -1653,28 +1981,44 @@ class AgentBrowser:
         """
         score = 62
         p = str(getattr(self, "current_preset", "")).lower()
-        if "light" in p or "minimal" in p: score -= 5
-        elif p: score += 8
-        if getattr(self, "light_mode", False): score -= 6
+        if "light" in p or "minimal" in p:
+            score -= 5
+        elif p:
+            score += 8
+        if getattr(self, "light_mode", False):
+            score -= 6
         score = max(28, min(94, score))
         return {
             "config_hint": score,
             "detectability_risk_pct": 100 - score,
             "note": "This is a config-based heuristic, NOT an empirical stealth measurement. "
-                    "Use a detection test page for actual results.",
-            "advice": "launched config score"
+            "Use a detection test page for actual results.",
+            "advice": "launched config score",
         }
 
     # Backward compat alias — old name still works
     get_config_hint = get_stealth_score
 
-    def get_replay_sequence(self, limit: int = 30, cursor: Optional[str] = None, since_ts: Optional[str] = None) -> Dict[str, Any]:
+    def get_replay_sequence(
+        self,
+        limit: int = 30,
+        cursor: Optional[str] = None,
+        since_ts: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """#253 basic replay from AuditLogger. Supports #381 pagination params (forwarded; cursor treated as 'before' for older pages)."""
         if not getattr(self, "logger", None):
             return {"status": "no_logger", "sequence": []}
         try:
-            replay_fn = getattr(self.logger, "replay_sequence", lambda l, c=None, s=None: [])
-            return {"status": "ok", "sequence": replay_fn(limit, cursor, since_ts), "count": 0}
+            replay_fn = getattr(
+                self.logger,
+                "replay_sequence",
+                lambda limit_, cursor_=None, since_ts_=None: [],
+            )
+            return {
+                "status": "ok",
+                "sequence": replay_fn(limit, cursor, since_ts),
+                "count": 0,
+            }
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -1696,10 +2040,13 @@ class AgentBrowser:
             raise RuntimeError("Browser not launched. Call launch() first.")
         new_p = await self.browser.new_page()
         if make_current:
-            old_p = getattr(self, "page", None)
             self.page = new_p
             # re-wire for convenience (human etc now target the new current page)
-            self.human = HumanBehavior(new_p, rng=self.rng, device_profile=getattr(self.persona, "device", None))
+            self.human = HumanBehavior(
+                new_p,
+                rng=self.rng,
+                device_profile=getattr(self.persona, "device", None),
+            )
             self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
             self.scraper = StealthScraper(new_p, self.human, self.orchestrator)
             # update recovery page_getter via our pluggable one
@@ -1715,7 +2062,9 @@ class AgentBrowser:
         """
         if self.browser and hasattr(self.browser, "pages"):
             try:
-                return list(self.browser.pages)  # Playwright BrowserContext exposes .pages
+                return list(
+                    self.browser.pages
+                )  # Playwright BrowserContext exposes .pages
             except Exception:
                 pass
         return [self.page] if self.page else []
@@ -1734,7 +2083,9 @@ class AgentBrowser:
                 # still allow, user may have external
                 pass
             self.page = page
-            self.human = HumanBehavior(page, rng=self.rng, device_profile=getattr(self.persona, "device", None))
+            self.human = HumanBehavior(
+                page, rng=self.rng, device_profile=getattr(self.persona, "device", None)
+            )
             self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
             self.scraper = StealthScraper(page, self.human, self.orchestrator)
             if self.recovery:
@@ -1758,7 +2109,9 @@ class AgentBrowser:
 
             if self.browser:
                 try:
-                    if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
+                    if getattr(self, "_using_pool", False) and getattr(
+                        self, "_pool", None
+                    ):
                         await self._pool.release_context(self.browser)
                     else:
                         await self.browser.close()
@@ -1773,7 +2126,7 @@ class AgentBrowser:
                 # do not shutdown shared pool here; individual close only releases its ctx
                 # full shutdown via _pool.shutdown() on app exit if desired
                 pass
-            elif hasattr(self, '_pw') and self._pw:
+            elif hasattr(self, "_pw") and self._pw:
                 try:
                     await self._pw.stop()
                 except Exception:
@@ -1803,9 +2156,13 @@ class AgentBrowser:
             # Default launch parameters — callers can still call launch() explicitly first
             await self.launch(
                 light_mode=getattr(self, "light_mode", None),
-                use_pooled_context=getattr(self, "use_pooled_context", None),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+                use_pooled_context=getattr(
+                    self, "use_pooled_context", None
+                ),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
                 resume=getattr(self, "_resume", False),  # P2 resume preservation
-                launch_options=getattr(self, "_custom_launch_options", None)  # #143: preserve custom opts on implicit launch
+                launch_options=getattr(
+                    self, "_custom_launch_options", None
+                ),  # #143: preserve custom opts on implicit launch
             )
         return self
 

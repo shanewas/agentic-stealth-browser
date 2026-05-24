@@ -17,12 +17,21 @@ class MockPage:
     def __init__(self):
         self._url = "https://linkedin.com"
         self._calls = []
+
         class Mouse:
-            async def move(self, x, y): pass
-            async def wheel(self, dx, dy): pass
+            async def move(self, x, y):
+                pass
+
+            async def wheel(self, dx, dy):
+                pass
+
         class Keyboard:
-            async def press(self, k): pass
-            async def type(self, t, **kw): pass
+            async def press(self, k):
+                pass
+
+            async def type(self, t, **kw):
+                pass
+
         self.mouse = Mouse()
         self.keyboard = Keyboard()
 
@@ -67,6 +76,7 @@ class TestLinkedInActions:
 
     def _make_actions(self):
         from linkedin.actions import LinkedInActions
+
         page = MockPage()
         human = MockHuman()
         return LinkedInActions(page, human)
@@ -74,9 +84,8 @@ class TestLinkedInActions:
     def test_view_profile_navigates_to_profile(self):
         li = self._make_actions()
         import asyncio
-        asyncio.run(
-            li.view_profile("testuser", duration_seconds=0.1)
-        )
+
+        asyncio.run(li.view_profile("testuser", duration_seconds=0.1))
         # Should have navigated to profile
         calls = li.page._calls
         goto_calls = [c for c in calls if c[0] == "goto"]
@@ -85,31 +94,27 @@ class TestLinkedInActions:
     def test_search_jobs_returns_list(self):
         li = self._make_actions()
         import asyncio
-        results = asyncio.run(
-            li.search_jobs("python", max_pages=1)
-        )
+
+        results = asyncio.run(li.search_jobs("python", max_pages=1))
         assert isinstance(results, list)
 
     def test_post_update_returns_boolean(self):
         li = self._make_actions()
         import asyncio
-        result = asyncio.run(
-            li.post_update("Test post")
-        )
+
+        result = asyncio.run(li.post_update("Test post"))
         assert isinstance(result, bool)
 
     def test_send_connection_request_returns_boolean(self):
         li = self._make_actions()
         import asyncio
-        result = asyncio.run(
-            li.send_connection_request("testuser")
-        )
+
+        result = asyncio.run(li.send_connection_request("testuser"))
         assert isinstance(result, bool)
 
     def test_endorse_skill_returns_boolean(self):
         li = self._make_actions()
         import asyncio
-        result = asyncio.run(
-            li.endorse_skill("testuser", "Python")
-        )
+
+        result = asyncio.run(li.endorse_skill("testuser", "Python"))
         assert isinstance(result, bool)

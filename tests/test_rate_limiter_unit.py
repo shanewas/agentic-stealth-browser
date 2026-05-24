@@ -8,6 +8,7 @@ Covers:
 - ToolRateLimiter cap enforcement
 - RateLimitConfig defaults
 """
+
 import sys
 from pathlib import Path
 
@@ -57,7 +58,9 @@ class TestDomainRateLimiter:
     def test_wait_after_exceeding_per_minute_limit(self):
         limiter = DomainRateLimiter()
         # Set very tight limit
-        limiter.set_limit("test.com", RateLimitConfig(requests_per_minute=2, cooldown_seconds=0))
+        limiter.set_limit(
+            "test.com", RateLimitConfig(requests_per_minute=2, cooldown_seconds=0)
+        )
         asyncio.run(limiter.wait_if_needed("test.com"))
         asyncio.run(limiter.wait_if_needed("test.com"))
         # With 2/min limit, the 3rd call should be blocked
@@ -110,7 +113,7 @@ class TestAccountRateLimiter:
         wait_b = asyncio.run(limiter.wait_if_needed("account-b", "example.com"))
         assert wait_a1 == 0.0
         assert wait_a2 == 0.0  # under per-minute limit (100)
-        assert wait_b == 0.0   # different account = isolated
+        assert wait_b == 0.0  # different account = isolated
 
     def test_get_limiter_creates_new(self):
         limiter = AccountRateLimiter()

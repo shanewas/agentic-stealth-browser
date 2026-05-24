@@ -25,12 +25,16 @@ class MetricsCollector:
     P2 #128: Added correlation_id for multi-account run tracing.
     """
 
-    def __init__(self, correlation_id: Optional[str] = None, session_name: Optional[str] = None):
+    def __init__(
+        self, correlation_id: Optional[str] = None, session_name: Optional[str] = None
+    ):
         self.counters: Dict[str, int] = defaultdict(int)
         self.timers: Dict[str, Dict[str, Any]] = {}  # {count, sum, min, max, last}
         self.gauges: Dict[str, float] = {}
         self.errors: list = []
-        self.start_time = time.monotonic()  # P2: monotonic for reliable elapsed (perf/compat)
+        self.start_time = (
+            time.monotonic()
+        )  # P2: monotonic for reliable elapsed (perf/compat)
         # P2 #128: Correlation ID for tracing across multi-account runs
         self.correlation_id: str = correlation_id or str(uuid.uuid4())[:8]
         self.session_name: Optional[str] = session_name
@@ -44,7 +48,13 @@ class MetricsCollector:
         """Record a timing metric. Stores aggregate stats (count, sum, min, max, last)
         instead of overwriting, so trends and averages are preserved."""
         if name not in self.timers:
-            self.timers[name] = {"count": 0, "sum": 0.0, "min": duration, "max": duration, "last": duration}
+            self.timers[name] = {
+                "count": 0,
+                "sum": 0.0,
+                "min": duration,
+                "max": duration,
+                "last": duration,
+            }
         t = self.timers[name]
         t["count"] += 1
         t["sum"] += duration
@@ -60,11 +70,15 @@ class MetricsCollector:
 
     def record_error(self, error_type: str, message: str):
         """Record an error occurrence."""
-        self.errors.append({
-            "type": error_type,
-            "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat()  # P2 #104: aware utc
-        })
+        self.errors.append(
+            {
+                "type": error_type,
+                "message": message,
+                "timestamp": datetime.now(
+                    timezone.utc
+                ).isoformat(),  # P2 #104: aware utc
+            }
+        )
         self.increment(f"errors_{error_type}")
 
     def get_prometheus_metrics(self) -> str:
@@ -72,39 +86,53 @@ class MetricsCollector:
         lines = []
 
         # Add correlation_id as a label
-        lines.append('# HELP correlation_id Current correlation ID for tracing')
-        lines.append('# TYPE correlation_id gauge')
+        lines.append("# HELP correlation_id Current correlation ID for tracing")
+        lines.append("# TYPE correlation_id gauge")
         lines.append(f'correlation_id{{id="{self.correlation_id}"}} 1')
 
         # Counters
         for name, value in self.counters.items():
-            lines.append(f'# TYPE {name} counter')
+            lines.append(f"# TYPE {name} counter")
             lines.append(f'{name}{{correlation_id="{self.correlation_id}"}} {value}')
 
         # Gauges
         for name, value in self.gauges.items():
-            lines.append(f'# TYPE {name} gauge')
+            lines.append(f"# TYPE {name} gauge")
             lines.append(f'{name}{{correlation_id="{self.correlation_id}"}} {value}')
 
         # Timers (as histograms with count, sum, min, max, last)
         for name, t in self.timers.items():
             if isinstance(t, dict):
-                lines.append(f'# TYPE {name}_seconds summary')
-                lines.append(f'{name}_seconds_count{{correlation_id="{self.correlation_id}"}} {t["count"]}')
-                lines.append(f'{name}_seconds_sum{{correlation_id="{self.correlation_id}"}} {t["sum"]:.6f}')
-                lines.append(f'{name}_seconds_min{{correlation_id="{self.correlation_id}"}} {t["min"]:.6f}')
-                lines.append(f'{name}_seconds_max{{correlation_id="{self.correlation_id}"}} {t["max"]:.6f}')
-                lines.append(f'{name}_seconds_last{{correlation_id="{self.correlation_id}"}} {t["last"]:.6f}')
+                lines.append(f"# TYPE {name}_seconds summary")
+                lines.append(
+                    f'{name}_seconds_count{{correlation_id="{self.correlation_id}"}} {t["count"]}'
+                )
+                lines.append(
+                    f'{name}_seconds_sum{{correlation_id="{self.correlation_id}"}} {t["sum"]:.6f}'
+                )
+                lines.append(
+                    f'{name}_seconds_min{{correlation_id="{self.correlation_id}"}} {t["min"]:.6f}'
+                )
+                lines.append(
+                    f'{name}_seconds_max{{correlation_id="{self.correlation_id}"}} {t["max"]:.6f}'
+                )
+                lines.append(
+                    f'{name}_seconds_last{{correlation_id="{self.correlation_id}"}} {t["last"]:.6f}'
+                )
             else:
                 # Legacy flat value (shouldn't happen after migration, but safe)
-                lines.append(f'# TYPE {name}_seconds gauge')
-                lines.append(f'{name}_seconds{{correlation_id="{self.correlation_id}"}} {t}')
+                lines.append(f"# TYPE {name}_seconds gauge")
+                lines.append(
+                    f'{name}_seconds{{correlation_id="{self.correlation_id}"}} {t}'
+                )
 
         return "\n".join(lines)
 
     def get_summary(self) -> Dict[str, Any]:
         """Return human-readable summary."""
-        uptime = time.monotonic() - self.start_time  # P2 #104/#58: monotonic delta (no datetime sub)
+        uptime = (
+            time.monotonic() - self.start_time
+        )  # P2 #104/#58: monotonic delta (no datetime sub)
 
         return {
             "correlation_id": self.correlation_id,
@@ -113,12 +141,19 @@ class MetricsCollector:
             "total_requests": self.counters.get("requests_total", 0),
             "errors": len(self.errors),
             "success_rate": round(
-                (self.counters.get("requests_total", 0) - len(self.errors)) /
-                max(1, self.counters.get("requests_total", 1)) * 100, 1
+                (self.counters.get("requests_total", 0) - len(self.errors))
+                / max(1, self.counters.get("requests_total", 1))
+                * 100,
+                1,
             ),
             "counters": dict(self.counters),
-            "timers": {k: {**v, "avg": round(v["sum"] / v["count"], 4)} if isinstance(v, dict) and v["count"] > 0 else v for k, v in self.timers.items()},
-            "recent_errors": self.errors[-5:] if self.errors else []
+            "timers": {
+                k: {**v, "avg": round(v["sum"] / v["count"], 4)}
+                if isinstance(v, dict) and v["count"] > 0
+                else v
+                for k, v in self.timers.items()
+            },
+            "recent_errors": self.errors[-5:] if self.errors else [],
         }
 
     def get_correlation_id(self) -> str:
@@ -136,5 +171,5 @@ metrics = MetricsCollector()
 
 
 # P1 #87: easy per-namespace isolated collector (additive)
-def metrics_for(ns): 
+def metrics_for(ns):
     return MetricsCollector()

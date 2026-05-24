@@ -40,6 +40,7 @@ from stealth.profiles import (
 
 # === advanced_stealth.py tests ===
 
+
 class TestStealthConfig:
     """Test StealthConfig dataclass."""
 
@@ -116,11 +117,15 @@ class TestGetStealthScript:
         script = get_stealth_script(fingerprint_seed=malicious_seed)
         # The malicious characters (quotes, semicolons, angle brackets) should be stripped
         # The sanitization replaces ["'\\;<>] with empty string
-        assert '"' not in malicious_seed.replace('"', '')  # verify our test is valid
+        assert '"' not in malicious_seed.replace('"', "")  # verify our test is valid
         # After sanitization, the seed should not contain the original malicious chars
         # The regex sub removes ["'\\;<>] from the seed
-        safe_seed = re.sub(r'["\'\\;<>]', '', malicious_seed)
-        assert safe_seed in script or safe_seed == "" or len(safe_seed) < len(malicious_seed)
+        safe_seed = re.sub(r'["\'\\;<>]', "", malicious_seed)
+        assert (
+            safe_seed in script
+            or safe_seed == ""
+            or len(safe_seed) < len(malicious_seed)
+        )
 
     def test_webrtc_ip_generation(self):
         script = get_stealth_script(fingerprint_seed="test")
@@ -181,6 +186,7 @@ class TestGetBehaviorScript:
 
 
 # === tls_fingerprint.py tests ===
+
 
 class TestTLSFingerprintManager:
     """Test TLS fingerprint management."""
@@ -279,6 +285,7 @@ class TestTLSFingerprintManager:
 
 # === headers.py tests ===
 
+
 class TestExtraHTTPHeaders:
     """Test HTTP header spoofing."""
 
@@ -316,6 +323,7 @@ class TestExtraHTTPHeaders:
 
 
 # === profiles.py tests ===
+
 
 class TestPersona:
     """Test Persona system."""

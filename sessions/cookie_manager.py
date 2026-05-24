@@ -2,7 +2,7 @@
 Cookie & Session Resilience Module
 Handles cookie loading, validation, refresh, and multi-session management.
 Cleaned up for Phase 8: removed duplication with sessions/session_manager.py (#134),
-AgentBrowser legacy now delegates (full consolidation in core P2 cluster); 
+AgentBrowser legacy now delegates (full consolidation in core P2 cluster);
 fixed broken SessionOrchestrator, added persist/resume + distributed bundle support (#236, #298).
 Phase 8 P1 #82: added optional at-rest encryption + integrity protection for cookie files and session bundles (Fernet).
 """
@@ -42,13 +42,9 @@ def _validate_path(path: str, must_exist_parent: bool = True) -> Path:
     if ".." in Path(path).parts:
         raise ValueError(f"Path traversal (..) not allowed: {path}")
     if not resolved.name.endswith((".json", ".jsonl")):
-        raise ValueError(
-            f"File must end with .json or .jsonl, got: {resolved.name}"
-        )
+        raise ValueError(f"File must end with .json or .jsonl, got: {resolved.name}")
     if must_exist_parent and not resolved.parent.exists():
-        raise ValueError(
-            f"Parent directory does not exist: {resolved.parent}"
-        )
+        raise ValueError(f"Parent directory does not exist: {resolved.parent}")
     return resolved
 
 
@@ -71,9 +67,13 @@ def _compute_hmac(key: str, data: bytes, session_name: str = "") -> str:
     return hmac.new(hmac_key, data, "sha256").hexdigest()
 
 
-def _verify_hmac(key: str, data: bytes, expected_hex: str, session_name: str = "") -> bool:
+def _verify_hmac(
+    key: str, data: bytes, expected_hex: str, session_name: str = ""
+) -> bool:
     """Recompute and compare HMAC; returns True iff the digest matches."""
-    return hmac.compare_digest(_compute_hmac(key, data, session_name=session_name), expected_hex)
+    return hmac.compare_digest(
+        _compute_hmac(key, data, session_name=session_name), expected_hex
+    )
 
 
 def _validate_cookie_domains(cookies: list, allowed_domains: list = None) -> list:
@@ -110,7 +110,9 @@ def _validate_cookie_domains(cookies: list, allowed_domains: list = None) -> lis
         else:
             logger.warning(
                 "Cookie rejected — domain %r not in allowed list %r (name=%s)",
-                domain, allowed_domains, cookie.get("name", "?"),
+                domain,
+                allowed_domains,
+                cookie.get("name", "?"),
             )
 
     return accepted
@@ -158,6 +160,7 @@ class CookieManager:
             # Derive a stable 32-byte key from arbitrary secret (user provided password etc)
             import hashlib
             import base64
+
             digest = hashlib.sha256(k).digest()
             fkey = base64.urlsafe_b64encode(digest)
             return Fernet(fkey)
@@ -206,7 +209,12 @@ class CookieManager:
                 continue
         return None
 
-    async def load_cookies(self, cookies_path: str, encryption_key: Optional[str] = None, allowed_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def load_cookies(
+        self,
+        cookies_path: str,
+        encryption_key: Optional[str] = None,
+        allowed_domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Load cookies from JSON file (Playwright format or simple list).
         Supports optional decryption when encryption_key provided (#82 P1 security).
         Backward compatible: plain files continue to work with no key.
@@ -218,7 +226,10 @@ class CookieManager:
         except ValueError as e:
             return {"status": "error", "message": str(e)}
         if not path.exists():
-            return {"status": "error", "message": f"Cookies file not found: {cookies_path}"}
+            return {
+                "status": "error",
+                "message": f"Cookies file not found: {cookies_path}",
+            }
 
         try:
             with open(path) as f:
@@ -233,33 +244,63 @@ class CookieManager:
                     decrypted = cipher.decrypt(token)
                     cookies_list = json.loads(decrypted)
                 except InvalidToken:
-                    return {"status": "error", "message": "Invalid encryption key or corrupted cookie file"}
+                    return {
+                        "status": "error",
+                        "message": "Invalid encryption key or corrupted cookie file",
+                    }
                 except Exception as e:
                     return {"status": "error", "message": f"Decryption failed: {e}"}
             elif isinstance(data, dict) and data.get("encrypted"):
-                return {"status": "error", "message": "Encrypted cookie file but no encryption_key provided"}
+                return {
+                    "status": "error",
+                    "message": "Encrypted cookie file but no encryption_key provided",
+                }
 
             # Fallback to plain / legacy formats
             if cookies_list is None:
                 if isinstance(data, list):
                     cookies_list = data
                 elif isinstance(data, dict):
-                    cookies_list = data.get("cookies", data.get("cookies_file_content", []))
+                    cookies_list = data.get(
+                        "cookies", data.get("cookies_file_content", [])
+                    )
 
             # Integrity check for plaintext payloads (#111)
-            if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
+            if (
+                isinstance(data, dict)
+                and not data.get("encrypted")
+                and "integrity" in data
+            ):
                 stored_hmac = data["integrity"]
                 # Build canonical payload without the integrity field
                 payload_copy = {k: v for k, v in data.items() if k != "integrity"}
-                raw = json.dumps(payload_copy, separators=(",", ":"), sort_keys=True).encode("utf-8")
+                raw = json.dumps(
+                    payload_copy, separators=(",", ":"), sort_keys=True
+                ).encode("utf-8")
                 # Best-effort session name: from self, from meta, or empty
                 verify_name = getattr(self, "session_name", "") or ""
                 if not verify_name and isinstance(data, dict):
-                    verify_name = data.get("meta", {}).get("session_name", "") if isinstance(data.get("meta"), dict) else ""
-                if not _verify_hmac(encryption_key or "", raw, stored_hmac, session_name=verify_name):
-                    return {"status": "integrity_error", "message": "Cookie file integrity check failed — file may have been tampered with"}
-            elif isinstance(data, dict) and not data.get("encrypted") and "integrity" not in data and isinstance(data, dict):
-                logger.warning("No integrity field in cookie file (legacy format); proceeding without verification")
+                    verify_name = (
+                        data.get("meta", {}).get("session_name", "")
+                        if isinstance(data.get("meta"), dict)
+                        else ""
+                    )
+                if not _verify_hmac(
+                    encryption_key or "", raw, stored_hmac, session_name=verify_name
+                ):
+                    return {
+                        "status": "integrity_error",
+                        "message": "Cookie file integrity check failed — file may have been tampered with",
+                    }
+            elif (
+                isinstance(data, dict)
+                and not data.get("encrypted")
+                and "integrity" not in data
+                and isinstance(data, dict)
+            ):
+                logger.warning(
+                    "No integrity field in cookie file (legacy format); proceeding without verification"
+                )
 
             if cookies_list is None:
                 cookies_list = []
@@ -276,7 +317,11 @@ class CookieManager:
                 try:
                     await self.browser_context.add_cookies(self.cookies)
                 except Exception as e:
-                    return {"status": "partial", "loaded": len(self.cookies), "error": str(e)}
+                    return {
+                        "status": "partial",
+                        "loaded": len(self.cookies),
+                        "error": str(e),
+                    }
 
             result = {"status": "success", "cookies_loaded": len(self.cookies)}
             if filtered_count:
@@ -285,7 +330,12 @@ class CookieManager:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def load_cookies_from_data(self, cookies_data: Any, encryption_key: Optional[str] = None, allowed_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def load_cookies_from_data(
+        self,
+        cookies_data: Any,
+        encryption_key: Optional[str] = None,
+        allowed_domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Load cookies from in-memory data (list / dict / JSON string or bytes).
         Supports optional decryption key for encrypted payloads (#82).
         Addresses P1 #145 (MCP cookies/state) + security.
@@ -307,28 +357,53 @@ class CookieManager:
                     decrypted = cipher.decrypt(token)
                     cookies_list = json.loads(decrypted)
                 except InvalidToken:
-                    return {"status": "error", "message": "Invalid encryption key for inline data"}
+                    return {
+                        "status": "error",
+                        "message": "Invalid encryption key for inline data",
+                    }
                 except Exception as e:
                     return {"status": "error", "message": f"Decryption failed: {e}"}
             elif isinstance(data, dict) and data.get("encrypted"):
-                return {"status": "error", "message": "Encrypted data provided but no key"}
+                return {
+                    "status": "error",
+                    "message": "Encrypted data provided but no key",
+                }
 
             # Integrity check for plaintext payloads (#111)
-            if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
+            if (
+                isinstance(data, dict)
+                and not data.get("encrypted")
+                and "integrity" in data
+            ):
                 stored_hmac = data["integrity"]
                 payload_copy = {k: v for k, v in data.items() if k != "integrity"}
-                raw = json.dumps(payload_copy, separators=(",", ":"), sort_keys=True).encode("utf-8")
+                raw = json.dumps(
+                    payload_copy, separators=(",", ":"), sort_keys=True
+                ).encode("utf-8")
                 session_name = getattr(self, "session_name", "") or ""
-                if not _verify_hmac(encryption_key or "", raw, stored_hmac, session_name=session_name):
-                    return {"status": "integrity_error", "message": "Inline data integrity check failed — data may have been tampered with"}
-            elif isinstance(data, dict) and not data.get("encrypted") and "integrity" not in data:
-                logger.warning("No integrity field in inline data (legacy format); proceeding without verification")
+                if not _verify_hmac(
+                    encryption_key or "", raw, stored_hmac, session_name=session_name
+                ):
+                    return {
+                        "status": "integrity_error",
+                        "message": "Inline data integrity check failed — data may have been tampered with",
+                    }
+            elif (
+                isinstance(data, dict)
+                and not data.get("encrypted")
+                and "integrity" not in data
+            ):
+                logger.warning(
+                    "No integrity field in inline data (legacy format); proceeding without verification"
+                )
 
             if cookies_list is None:
                 if isinstance(data, list):
                     cookies_list = data
                 elif isinstance(data, dict):
-                    cookies_list = data.get("cookies", data.get("cookies_file_content", []))
+                    cookies_list = data.get(
+                        "cookies", data.get("cookies_file_content", [])
+                    )
                 else:
                     cookies_list = []
 
@@ -344,9 +419,17 @@ class CookieManager:
                 try:
                     await self.browser_context.add_cookies(self.cookies)
                 except Exception as e:
-                    return {"status": "partial", "loaded": len(self.cookies), "error": str(e)}
+                    return {
+                        "status": "partial",
+                        "loaded": len(self.cookies),
+                        "error": str(e),
+                    }
 
-            result = {"status": "success", "cookies_loaded": len(self.cookies), "source": "inline_data"}
+            result = {
+                "status": "success",
+                "cookies_loaded": len(self.cookies),
+                "source": "inline_data",
+            }
             if filtered_count:
                 result["filtered_domains"] = filtered_count
             return result
@@ -394,7 +477,7 @@ class CookieManager:
             "total_cookies": len(self.cookies),
             "expired": expired,
             "refreshed": 0,
-            "note": "Cookie refresh typically requires re-login or token refresh flows outside this manager."
+            "note": "Cookie refresh typically requires re-login or token refresh flows outside this manager.",
         }
 
     async def clear_cookies(self) -> Dict[str, Any]:
@@ -418,7 +501,11 @@ class CookieManager:
         if self.browser_context:
             try:
                 await self.browser_context.clear_cookies()
-                return {"status": "success", "cleared": actual_count, "context_cleared": True}
+                return {
+                    "status": "success",
+                    "cleared": actual_count,
+                    "context_cleared": True,
+                }
             except Exception as e:
                 return {"status": "partial", "cleared": actual_count, "error": str(e)}
 
@@ -458,10 +545,15 @@ class CookieManager:
             "expiring_soon": expiring_soon,
             "secure": secure_count,
             "http_only": http_only_count,
-            "last_check": now.isoformat()
+            "last_check": now.isoformat(),
         }
 
-    async def save_cookies_to_file(self, cookies_path: str, encryption_key: Optional[str] = None, encrypt: bool = False) -> Dict[str, Any]:
+    async def save_cookies_to_file(
+        self,
+        cookies_path: str,
+        encryption_key: Optional[str] = None,
+        encrypt: bool = False,
+    ) -> Dict[str, Any]:
         """Save current in-memory cookies to a file.
         If encryption_key (or encrypt=True + key) provided, uses Fernet authenticated encryption (#82 P1).
         Plaintext format remains compatible. Supports both kwarg styles used by callers.
@@ -497,15 +589,33 @@ class CookieManager:
                 }
                 with open(path, "w") as f:
                     json.dump(payload, f, indent=2)
-                return {"status": "success", "saved": len(self.cookies), "encrypted": True, "path": str(path)}
+                return {
+                    "status": "success",
+                    "saved": len(self.cookies),
+                    "encrypted": True,
+                    "path": str(path),
+                }
             else:
                 # Plaintext (legacy compatible) + meta wrapper + integrity (#111)
                 payload = {"cookies": self.cookies, "meta": meta}
-                raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-                payload["integrity"] = _compute_hmac(encryption_key or "", raw, session_name=self.session_name if hasattr(self, "session_name") else "")
+                raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+                    "utf-8"
+                )
+                payload["integrity"] = _compute_hmac(
+                    encryption_key or "",
+                    raw,
+                    session_name=self.session_name
+                    if hasattr(self, "session_name")
+                    else "",
+                )
                 with open(path, "w") as f:
                     json.dump(payload, f, indent=2)
-                return {"status": "success", "saved": len(self.cookies), "encrypted": False, "path": str(path)}
+                return {
+                    "status": "success",
+                    "saved": len(self.cookies),
+                    "encrypted": False,
+                    "path": str(path),
+                }
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -530,7 +640,9 @@ class CookieManager:
 
         return self.sessions[session_name]
 
-    async def export_session_bundle(self, session_name: str, bundle_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+    async def export_session_bundle(
+        self, session_name: str, bundle_path: str, encryption_key: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Export full session + cookies for backup / transfer.
         Supports optional encryption_key for Fernet-encrypted bundles (#82 P1).
         Backward compatible (plain when no key).
@@ -581,7 +693,10 @@ class CookieManager:
                     "encrypted": True,
                     "version": 1,
                     "data": token.decode("utf-8"),
-                    "meta": {"exported_at": bundle.get("exported_at"), "bundle_for": session_name},
+                    "meta": {
+                        "exported_at": bundle.get("exported_at"),
+                        "bundle_for": session_name,
+                    },
                 }
                 with open(validated_bundle_path, "w") as f:
                     json.dump(payload, f, indent=2)
@@ -593,8 +708,12 @@ class CookieManager:
                 }
             else:
                 # Plaintext bundle — add integrity (#111)
-                raw = json.dumps(bundle, separators=(",", ":"), sort_keys=True).encode("utf-8")
-                bundle["integrity"] = _compute_hmac(encryption_key or "", raw, session_name=session_name)
+                raw = json.dumps(bundle, separators=(",", ":"), sort_keys=True).encode(
+                    "utf-8"
+                )
+                bundle["integrity"] = _compute_hmac(
+                    encryption_key or "", raw, session_name=session_name
+                )
                 with open(validated_bundle_path, "w") as f:
                     json.dump(bundle, f, indent=2)
                 return {
@@ -605,7 +724,13 @@ class CookieManager:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None, encryption_key: Optional[str] = None, allowed_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def import_session_bundle(
+        self,
+        bundle_path: str,
+        target_session_name: Optional[str] = None,
+        encryption_key: Optional[str] = None,
+        allowed_domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Import a bundle and create/resume session.
         Supports optional decryption when encryption_key provided (#82 P1).
         Backward compatible with plain bundles.
@@ -632,11 +757,20 @@ class CookieManager:
                     decrypted = cipher.decrypt(token)
                     bundle = json.loads(decrypted)
                 except InvalidToken:
-                    return {"status": "error", "message": "Invalid encryption key or corrupted bundle file"}
+                    return {
+                        "status": "error",
+                        "message": "Invalid encryption key or corrupted bundle file",
+                    }
                 except Exception as e:
-                    return {"status": "error", "message": f"Bundle decryption failed: {e}"}
+                    return {
+                        "status": "error",
+                        "message": f"Bundle decryption failed: {e}",
+                    }
             elif isinstance(data, dict) and data.get("encrypted"):
-                return {"status": "error", "message": "Encrypted bundle but no encryption_key provided"}
+                return {
+                    "status": "error",
+                    "message": "Encrypted bundle but no encryption_key provided",
+                }
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -644,24 +778,42 @@ class CookieManager:
         if isinstance(bundle, dict):
             has_required = any(k in bundle for k in ("meta", "cookies", "version"))
             if not has_required:
-                return {"status": "error", "message": "Bundle structure invalid: missing required keys (meta, cookies, or version)"}
+                return {
+                    "status": "error",
+                    "message": "Bundle structure invalid: missing required keys (meta, cookies, or version)",
+                }
 
         # Integrity check for plaintext bundles (#73)
         if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
             stored_hmac = data["integrity"]
             payload_copy = {k: v for k, v in data.items() if k != "integrity"}
-            raw = json.dumps(payload_copy, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            raw = json.dumps(
+                payload_copy, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")
             # Use the session name from the bundle's meta for verification
             # (same key used during export)
             bundle_meta = bundle.get("meta", {}) if isinstance(bundle, dict) else {}
             verify_name = bundle_meta.get("name", "") or target_session_name or ""
-            if not _verify_hmac(encryption_key or "", raw, stored_hmac, session_name=verify_name):
-                return {"status": "integrity_error", "message": "Bundle integrity check failed — bundle may have been tampered with"}
-        elif isinstance(data, dict) and not data.get("encrypted") and "integrity" not in data:
-            logger.warning("No integrity field in bundle (legacy format); proceeding without verification")
+            if not _verify_hmac(
+                encryption_key or "", raw, stored_hmac, session_name=verify_name
+            ):
+                return {
+                    "status": "integrity_error",
+                    "message": "Bundle integrity check failed — bundle may have been tampered with",
+                }
+        elif (
+            isinstance(data, dict)
+            and not data.get("encrypted")
+            and "integrity" not in data
+        ):
+            logger.warning(
+                "No integrity field in bundle (legacy format); proceeding without verification"
+            )
 
         meta = bundle.get("meta", {})
-        name = target_session_name or meta.get("name", f"imported-{datetime.now().strftime('%Y%m%d%H%M')}")
+        name = target_session_name or meta.get(
+            "name", f"imported-{datetime.now().strftime('%Y%m%d%H%M')}"
+        )
         cookies = bundle.get("cookies", []) or bundle.get("cookies_file_content", [])
 
         # Domain validation (#64)
@@ -745,7 +897,11 @@ class CookieManager:
                 if new_cipher is None:
                     results.append({"path": src_path, "status": "new_key_invalid"})
                     continue
-                plain = decrypted if isinstance(decrypted, (bytes, bytearray)) else str(decrypted).encode("utf-8")
+                plain = (
+                    decrypted
+                    if isinstance(decrypted, (bytes, bytearray))
+                    else str(decrypted).encode("utf-8")
+                )
                 new_token = new_cipher.encrypt(plain)
                 new_payload = {
                     "encrypted": True,
@@ -764,7 +920,9 @@ class CookieManager:
                 results.append({"path": src_path, "status": "error", "message": str(e)})
 
         return {
-            "status": "success" if any(r.get("status") == "rotated" for r in results) else "partial",
+            "status": "success"
+            if any(r.get("status") == "rotated" for r in results)
+            else "partial",
             "results": results,
         }
 
@@ -776,7 +934,11 @@ class SessionOrchestrator:
     in constructor and exposes create/export/import for tests + MCP wrappers.
     """
 
-    def __init__(self, session_manager: Optional[object] = None, cookie_manager: Optional["CookieManager"] = None):
+    def __init__(
+        self,
+        session_manager: Optional[object] = None,
+        cookie_manager: Optional["CookieManager"] = None,
+    ):
         self.main_session_manager = session_manager
         # Allow wiring a real CookieManager (with browser_context) instead of creating a disconnected one.
         # This addresses part of the original duplication/broken state concerns in #30.
@@ -793,20 +955,37 @@ class SessionOrchestrator:
         self.cookie_managers[session_name] = self.cm
         return sess
 
-    async def start_session(self, name: str, cookies_path: Optional[str] = None) -> Dict[str, Any]:
+    async def start_session(
+        self, name: str, cookies_path: Optional[str] = None
+    ) -> Dict[str, Any]:
         sess = self.cm.create_resilient_session(name)
         self.active_sessions[name] = sess
         if cookies_path:
             await self.cm.load_cookies(cookies_path)
         return {"status": "started", "session": name}
 
-    async def export_session_bundle(self, session_name: str, bundle_path: str, encryption_key: Optional[str] = None) -> Dict[str, Any]:
+    async def export_session_bundle(
+        self, session_name: str, bundle_path: str, encryption_key: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Delegate for full MCP test / agent contract. Forwards encryption_key for #82 bundle encryption."""
-        return await self.cm.export_session_bundle(session_name, bundle_path, encryption_key)
+        return await self.cm.export_session_bundle(
+            session_name, bundle_path, encryption_key
+        )
 
-    async def import_session_bundle(self, bundle_path: str, target_session_name: Optional[str] = None, encryption_key: Optional[str] = None, allowed_domains: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def import_session_bundle(
+        self,
+        bundle_path: str,
+        target_session_name: Optional[str] = None,
+        encryption_key: Optional[str] = None,
+        allowed_domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Delegate for full MCP test / agent contract. Forwards encryption_key for #82 bundle encryption."""
-        return await self.cm.import_session_bundle(bundle_path, target_session_name, encryption_key, allowed_domains=allowed_domains)
+        return await self.cm.import_session_bundle(
+            bundle_path,
+            target_session_name,
+            encryption_key,
+            allowed_domains=allowed_domains,
+        )
 
     async def export_all(self, out_dir: str) -> Dict[str, Any]:
         results = {}
@@ -819,4 +998,7 @@ class SessionOrchestrator:
 # P1 #82 cookie security (additive note + stub for encryption in follow-up)
 # Recommended: implement Fernet save/load using existing "cryptography" dep.
 async def _save_cookies_secure_stub(self, path, key=None):
-    return {"status": "todo", "note": "Implement full encrypted save per #82 (see agent_browser save_cookies_to_file entrypoint)"}
+    return {
+        "status": "todo",
+        "note": "Implement full encrypted save per #82 (see agent_browser save_cookies_to_file entrypoint)",
+    }

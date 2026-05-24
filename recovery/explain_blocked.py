@@ -14,7 +14,11 @@ Integrates with AuditLogger automatically when an orchestrator is passed.
 """
 
 from typing import Dict, Any, Optional, List
-from recovery.anti_block_orchestrator import BlockType, RecoveryContext, AntiBlockOrchestrator
+from recovery.anti_block_orchestrator import (
+    BlockType,
+    RecoveryContext,
+    AntiBlockOrchestrator,
+)
 from audit.logger import AuditLogger
 
 
@@ -59,7 +63,9 @@ async def explain_why_blocked(
         BlockType.UNKNOWN: "Unknown block type — the system detected something unusual but could not classify it precisely.",
     }
 
-    explanation = base_explanations.get(detected_type, base_explanations[BlockType.UNKNOWN])
+    explanation = base_explanations.get(
+        detected_type, base_explanations[BlockType.UNKNOWN]
+    )
 
     recs: List[str] = [
         "1. Rotate to a fresh high-quality residential proxy (sticky session < 30min old) and/or new anonymous browser profile.",
@@ -70,15 +76,26 @@ async def explain_why_blocked(
     ]
 
     if "linkedin" in platform_l or detected_type == BlockType.ACCOUNT_RESTRICTION:
-        recs.insert(0, "LINKEDIN-SPECIFIC: Always warm up on https://www.linkedin.com/feed/ with heavy behavior before viewing any profile. Use the linkedin_2026 preset.")
-        recs.append("After a restriction hit, wait 30-90+ minutes + new proxy before retrying. Consider a different persona entirely.")
+        recs.insert(
+            0,
+            "LINKEDIN-SPECIFIC: Always warm up on https://www.linkedin.com/feed/ with heavy behavior before viewing any profile. Use the linkedin_2026 preset.",
+        )
+        recs.append(
+            "After a restriction hit, wait 30-90+ minutes + new proxy before retrying. Consider a different persona entirely."
+        )
     if detected_type == BlockType.CAPTCHA:
-        recs.append("For persistent CAPTCHAs: run with headed=True for manual solving during development, or integrate a solver service for prod.")
+        recs.append(
+            "For persistent CAPTCHAs: run with headed=True for manual solving during development, or integrate a solver service for prod."
+        )
     if "amazon" in platform_l:
-        recs.append("Amazon loves consistent US residential + realistic first-page timing. Avoid datacenter proxies.")
+        recs.append(
+            "Amazon loves consistent US residential + realistic first-page timing. Avoid datacenter proxies."
+        )
 
     result = {
-        "block_type": detected_type.value if hasattr(detected_type, "value") else str(detected_type),
+        "block_type": detected_type.value
+        if hasattr(detected_type, "value")
+        else str(detected_type),
         "platform": platform,
         "explanation": explanation,
         "likely_root_cause": "Combination of TLS fingerprint / canvas/WebGL / header / behavioral timing / IP reputation signals failed to look human enough for the target.",

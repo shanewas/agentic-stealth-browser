@@ -15,28 +15,36 @@ from typing import List, Dict, Optional, Any
 
 class StealthScraper:
     """High-level scraping with built-in stealth and human behavior + optional recovery (#105)."""
-    
-    def __init__(self, page, human_behavior, orchestrator, recovery: Optional[Any] = None):
+
+    def __init__(
+        self, page, human_behavior, orchestrator, recovery: Optional[Any] = None
+    ):
         self.page = page  # Playwright Page (fixed naming from #105)
         self.human = human_behavior
         self.orchestrator = orchestrator
         self.recovery = recovery  # AntiBlockOrchestrator scaffolding to prevent bypass
-    
+
     async def _safe_goto(self, url: str, platform: str = "scrape"):
         """Navigation preferring recovery wrapper if present (#105)."""
         if self.recovery and hasattr(self.recovery, "execute_with_recovery"):
+
             async def _nav():
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 return True
+
             try:
-                await self.recovery.execute_with_recovery(func=_nav, platform=platform, url=url)
+                await self.recovery.execute_with_recovery(
+                    func=_nav, platform=platform, url=url
+                )
                 return True
             except Exception:
                 pass
         await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
         return True
-    
-    async def scrape_page(self, url: str, extract_images: bool = False, platform: str = "unknown") -> Dict:
+
+    async def scrape_page(
+        self, url: str, extract_images: bool = False, platform: str = "unknown"
+    ) -> Dict:
         """Scrape with natural behavior + recovery opt-in."""
         await self._safe_goto(url, platform=platform)
         if self.orchestrator:
@@ -55,7 +63,7 @@ class StealthScraper:
         if extract_images:
             result["images"] = await self.extract_images()
         return result
-    
+
     async def extract_images(self, max_images: int = 10) -> List[Dict]:
         images = await self.page.evaluate(f"""
             () => {{
@@ -65,7 +73,7 @@ class StealthScraper:
             }}
         """)
         return images
-    
+
     async def scrape_amazon_product(self, url: str, platform: str = "amazon") -> Dict:
         await self._safe_goto(url, platform=platform)
         if self.human:

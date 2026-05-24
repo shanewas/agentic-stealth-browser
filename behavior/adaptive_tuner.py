@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 @dataclass
 class BehaviorFeedback:
     """A single feedback event from a browsing session."""
+
     timestamp: float
     blocked: bool
     block_type: str = "none"
@@ -41,10 +42,13 @@ class FeedbackStore:
     """
 
     def __init__(self, store_path: Optional[str] = None):
-        self._store_path = Path(store_path or os.getenv(
-            "STEALTH_FEEDBACK_STORE",
-            str(Path.home() / ".agentic-browser" / "feedback_store.json"),
-        ))
+        self._store_path = Path(
+            store_path
+            or os.getenv(
+                "STEALTH_FEEDBACK_STORE",
+                str(Path.home() / ".agentic-browser" / "feedback_store.json"),
+            )
+        )
         self._events: List[Dict[str, Any]] = []
         self._selector_stats: Dict[str, Dict[str, Dict[str, float]]] = {}
         self._stealth_detections: List[Dict[str, Any]] = []
@@ -62,19 +66,29 @@ class FeedbackStore:
 
     def _save(self) -> None:
         self._store_path.parent.mkdir(parents=True, exist_ok=True)
-        self._store_path.write_text(json.dumps({
-            "events": self._events[-1000:],
-            "selector_stats": self._selector_stats,
-            "stealth_detections": self._stealth_detections[-500:],
-        }, default=str, indent=2))
+        self._store_path.write_text(
+            json.dumps(
+                {
+                    "events": self._events[-1000:],
+                    "selector_stats": self._selector_stats,
+                    "stealth_detections": self._stealth_detections[-500:],
+                },
+                default=str,
+                indent=2,
+            )
+        )
 
-    def record_event(self, event_type: str, domain: str, details: Dict[str, Any]) -> None:
-        self._events.append({
-            "timestamp": time.time(),
-            "type": event_type,
-            "domain": domain,
-            "details": details,
-        })
+    def record_event(
+        self, event_type: str, domain: str, details: Dict[str, Any]
+    ) -> None:
+        self._events.append(
+            {
+                "timestamp": time.time(),
+                "type": event_type,
+                "domain": domain,
+                "details": details,
+            }
+        )
         if len(self._events) > 2000:
             self._events = self._events[-1000:]
         self._save()
@@ -88,18 +102,24 @@ class FeedbackStore:
         self._selector_stats[domain][selector][key] += 1
         self._save()
 
-    def record_stealth_detection(self, domain: str, detection_type: str, bypassed_by: str = "") -> None:
-        self._stealth_detections.append({
-            "timestamp": time.time(),
-            "domain": domain,
-            "detection_type": detection_type,
-            "bypassed_by": bypassed_by,
-        })
+    def record_stealth_detection(
+        self, domain: str, detection_type: str, bypassed_by: str = ""
+    ) -> None:
+        self._stealth_detections.append(
+            {
+                "timestamp": time.time(),
+                "domain": domain,
+                "detection_type": detection_type,
+                "bypassed_by": bypassed_by,
+            }
+        )
         if len(self._stealth_detections) > 500:
             self._stealth_detections = self._stealth_detections[-250:]
         self._save()
 
-    def get_selector_stats(self, domain: str = "") -> Dict[str, Dict[str, Dict[str, float]]]:
+    def get_selector_stats(
+        self, domain: str = ""
+    ) -> Dict[str, Dict[str, Dict[str, float]]]:
         if domain:
             return {domain: self._selector_stats.get(domain, {})}
         return dict(self._selector_stats)
@@ -108,9 +128,13 @@ class FeedbackStore:
         detection_counts: Dict[str, int] = {}
         bypassed_counts: Dict[str, int] = {}
         for d in self._stealth_detections:
-            detection_counts[d["detection_type"]] = detection_counts.get(d["detection_type"], 0) + 1
+            detection_counts[d["detection_type"]] = (
+                detection_counts.get(d["detection_type"], 0) + 1
+            )
             if d.get("bypassed_by"):
-                bypassed_counts[d["bypassed_by"]] = bypassed_counts.get(d["bypassed_by"], 0) + 1
+                bypassed_counts[d["bypassed_by"]] = (
+                    bypassed_counts.get(d["bypassed_by"], 0) + 1
+                )
         return {
             "total_detections": len(self._stealth_detections),
             "by_type": detection_counts,
@@ -121,6 +145,7 @@ class FeedbackStore:
 @dataclass
 class DomainTuningProfile:
     """Per-domain behavior tuning profile with bounded adaptation."""
+
     domain: str
     typing_speed: float = 0.5
     scroll_depth: float = 0.5
@@ -183,7 +208,11 @@ class BehaviorTuner:
         profile = tuner.get_domain_profile("linkedin.com")
     """
 
-    def __init__(self, rng: Optional[random.Random] = None, feedback_store: Optional[FeedbackStore] = None):
+    def __init__(
+        self,
+        rng: Optional[random.Random] = None,
+        feedback_store: Optional[FeedbackStore] = None,
+    ):
         self.rng = rng or random.Random()
         self._feedback_history: List[BehaviorFeedback] = []
         self._current_params: Dict[str, float] = {
@@ -198,14 +227,18 @@ class BehaviorTuner:
         self._domain_profiles: Dict[str, DomainTuningProfile] = {}
         self._feedback_store = feedback_store or FeedbackStore()
 
-    def record_feedback(self, blocked: bool, block_type: str = "none",
-                        platform: str = "unknown",
-                        behavior_params: Optional[Dict[str, float]] = None,
-                        response_time: float = 0.0,
-                        domain: str = "",
-                        recovery_attempts: int = 0,
-                        selector_results: Optional[Dict[str, bool]] = None,
-                        stealth_events: Optional[List[Dict[str, Any]]] = None):
+    def record_feedback(
+        self,
+        blocked: bool,
+        block_type: str = "none",
+        platform: str = "unknown",
+        behavior_params: Optional[Dict[str, float]] = None,
+        response_time: float = 0.0,
+        domain: str = "",
+        recovery_attempts: int = 0,
+        selector_results: Optional[Dict[str, bool]] = None,
+        stealth_events: Optional[List[Dict[str, Any]]] = None,
+    ):
         """Record feedback from a browsing session."""
         feedback = BehaviorFeedback(
             timestamp=time.time(),
@@ -216,7 +249,10 @@ class BehaviorTuner:
             behavior_params=behavior_params or self._current_params.copy(),
             response_time=response_time,
             recovery_attempts=recovery_attempts,
-            selector_success={sel: (1.0 if ok else 0.0) for sel, ok in (selector_results or {}).items()},
+            selector_success={
+                sel: (1.0 if ok else 0.0)
+                for sel, ok in (selector_results or {}).items()
+            },
             stealth_events=stealth_events or [],
         )
         self._feedback_history.append(feedback)
@@ -254,7 +290,13 @@ class BehaviorTuner:
 
         params = feedback.behavior_params or {}
         bounds = DomainTuningProfile.default_bounds()
-        for key in ["typing_speed", "scroll_depth", "mouse_precision", "pause_frequency", "distraction_rate"]:
+        for key in [
+            "typing_speed",
+            "scroll_depth",
+            "mouse_precision",
+            "pause_frequency",
+            "distraction_rate",
+        ]:
             if key in params:
                 current = getattr(profile, key, 0.5)
                 low, high = bounds.get(key, (0.0, 1.0))
@@ -278,7 +320,9 @@ class BehaviorTuner:
         )
         for sel, rate in feedback.selector_success.items():
             self._feedback_store.record_selector_result(
-                feedback.domain, sel, rate >= 0.5,
+                feedback.domain,
+                sel,
+                rate >= 0.5,
             )
         for event in feedback.stealth_events:
             self._feedback_store.record_stealth_detection(
@@ -362,7 +406,9 @@ class BehaviorTuner:
             "distraction_rate": 0.1,
         }
         for key in self._current_params:
-            success_vals = [p.get(key, 0.5) for p in self._successful_params if key in p]
+            success_vals = [
+                p.get(key, 0.5) for p in self._successful_params if key in p
+            ]
             fail_vals = [p.get(key, 0.5) for p in self._failed_params if key in p]
             if not success_vals or not fail_vals:
                 continue

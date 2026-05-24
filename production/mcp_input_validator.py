@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 
 class InputValidationError(Exception):
@@ -78,98 +78,162 @@ class ToolInputSchema:
         return args
 
 
-_PLATFORMS: Set[str] = {"linkedin", "upwork", "instagram", "twitter", "x", "facebook",
-                         "tiktok", "reddit", "youtube", "github", "custom", "unknown"}
+_PLATFORMS: Set[str] = {
+    "linkedin",
+    "upwork",
+    "instagram",
+    "twitter",
+    "x",
+    "facebook",
+    "tiktok",
+    "reddit",
+    "youtube",
+    "github",
+    "custom",
+    "unknown",
+}
 
 MCP_TOOL_SCHEMAS: Dict[str, ToolInputSchema] = {
-    "stealth_launch": ToolInputSchema("stealth_launch", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("headless", bool),
-        ParamRule("debug", bool),
-        ParamRule("debug_cdp", bool),
-        ParamRule("preset", str, max_length=64),
-        ParamRule("region", str, max_length=32),
-        ParamRule("anonymous", bool),
-        ParamRule("ephemeral", bool),
-        ParamRule("light_mode", bool),
-        ParamRule("use_pooled_context", bool),
-    ]),
-    "stealth_navigate": ToolInputSchema("stealth_navigate", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("url", str, required=True, max_length=4096, pattern=r"^https?://"),
-        ParamRule("platform", str, max_length=32, allowed_values=_PLATFORMS),
-        ParamRule("warm_up", bool),
-        ParamRule("rate_limit", bool),
-        ParamRule("domain", str, max_length=256),
-        ParamRule("account", str, max_length=128),
-    ]),
-    "stealth_load_cookies": ToolInputSchema("stealth_load_cookies", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("cookies_path", str, required=True, max_length=4096),
-    ]),
-    "stealth_set_region": ToolInputSchema("stealth_set_region", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("region", str, required=True, max_length=32),
-        ParamRule("relaunch", bool),
-    ]),
-    "stealth_scrape": ToolInputSchema("stealth_scrape", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("url", str, required=True, max_length=4096, pattern=r"^https?://"),
-        ParamRule("extract_images", bool),
-        ParamRule("platform", str, max_length=32, allowed_values=_PLATFORMS),
-    ]),
-    "stealth_status": ToolInputSchema("stealth_status", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("include_debug", bool),
-    ]),
-    "stealth_tabs_list": ToolInputSchema("stealth_tabs_list", [
-        ParamRule("session_name", str, max_length=128),
-    ]),
-    "stealth_tab_snapshot": ToolInputSchema("stealth_tab_snapshot", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("tab_id", str, max_length=64),
-        ParamRule("full_page", bool),
-    ]),
-    "stealth_session_timeline": ToolInputSchema("stealth_session_timeline", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("limit", int, min_value=1, max_value=200),
-        ParamRule("cursor", str, max_length=64),
-        ParamRule("since_ts", str, max_length=64),
-    ]),
-    "stealth_debug_report": ToolInputSchema("stealth_debug_report", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("print_report", bool),
-        ParamRule("limit", int, min_value=1, max_value=100),
-        ParamRule("cursor", str, max_length=64),
-        ParamRule("since_ts", str, max_length=64),
-    ]),
-    "stealth_get_cdp_endpoint": ToolInputSchema("stealth_get_cdp_endpoint", [
-        ParamRule("session_name", str, max_length=128),
-    ]),
-    "stealth_close": ToolInputSchema("stealth_close", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("close_all", bool),
-    ]),
+    "stealth_launch": ToolInputSchema(
+        "stealth_launch",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("headless", bool),
+            ParamRule("debug", bool),
+            ParamRule("debug_cdp", bool),
+            ParamRule("preset", str, max_length=64),
+            ParamRule("region", str, max_length=32),
+            ParamRule("anonymous", bool),
+            ParamRule("ephemeral", bool),
+            ParamRule("light_mode", bool),
+            ParamRule("use_pooled_context", bool),
+        ],
+    ),
+    "stealth_navigate": ToolInputSchema(
+        "stealth_navigate",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule(
+                "url", str, required=True, max_length=4096, pattern=r"^https?://"
+            ),
+            ParamRule("platform", str, max_length=32, allowed_values=_PLATFORMS),
+            ParamRule("warm_up", bool),
+            ParamRule("rate_limit", bool),
+            ParamRule("domain", str, max_length=256),
+            ParamRule("account", str, max_length=128),
+        ],
+    ),
+    "stealth_load_cookies": ToolInputSchema(
+        "stealth_load_cookies",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("cookies_path", str, required=True, max_length=4096),
+        ],
+    ),
+    "stealth_set_region": ToolInputSchema(
+        "stealth_set_region",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("region", str, required=True, max_length=32),
+            ParamRule("relaunch", bool),
+        ],
+    ),
+    "stealth_scrape": ToolInputSchema(
+        "stealth_scrape",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule(
+                "url", str, required=True, max_length=4096, pattern=r"^https?://"
+            ),
+            ParamRule("extract_images", bool),
+            ParamRule("platform", str, max_length=32, allowed_values=_PLATFORMS),
+        ],
+    ),
+    "stealth_status": ToolInputSchema(
+        "stealth_status",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("include_debug", bool),
+        ],
+    ),
+    "stealth_tabs_list": ToolInputSchema(
+        "stealth_tabs_list",
+        [
+            ParamRule("session_name", str, max_length=128),
+        ],
+    ),
+    "stealth_tab_snapshot": ToolInputSchema(
+        "stealth_tab_snapshot",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("tab_id", str, max_length=64),
+            ParamRule("full_page", bool),
+        ],
+    ),
+    "stealth_session_timeline": ToolInputSchema(
+        "stealth_session_timeline",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("limit", int, min_value=1, max_value=200),
+            ParamRule("cursor", str, max_length=64),
+            ParamRule("since_ts", str, max_length=64),
+        ],
+    ),
+    "stealth_debug_report": ToolInputSchema(
+        "stealth_debug_report",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("print_report", bool),
+            ParamRule("limit", int, min_value=1, max_value=100),
+            ParamRule("cursor", str, max_length=64),
+            ParamRule("since_ts", str, max_length=64),
+        ],
+    ),
+    "stealth_get_cdp_endpoint": ToolInputSchema(
+        "stealth_get_cdp_endpoint",
+        [
+            ParamRule("session_name", str, max_length=128),
+        ],
+    ),
+    "stealth_close": ToolInputSchema(
+        "stealth_close",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("close_all", bool),
+        ],
+    ),
     "stealth_capabilities": ToolInputSchema("stealth_capabilities", []),
-    "stealth_teach": ToolInputSchema("stealth_teach", [
-        ParamRule("session_name", str, required=True, max_length=128),
-        ParamRule("workflow_name", str, required=True, max_length=128),
-        ParamRule("description", str, max_length=1024),
-        ParamRule("capture_seconds", int, min_value=1, max_value=600),
-    ]),
-    "stealth_replay": ToolInputSchema("stealth_replay", [
-        ParamRule("session_name", str, max_length=128),
-        ParamRule("filename", str, required=True, max_length=512),
-        ParamRule("variables", dict),
-    ]),
-    "stealth_workflow_list": ToolInputSchema("stealth_workflow_list", [
-        ParamRule("platform", str, max_length=32),
-        ParamRule("pattern", str, max_length=256),
-    ]),
-    "stealth_workflow_delete": ToolInputSchema("stealth_workflow_delete", [
-        ParamRule("filename", str, required=True, max_length=512),
-        ParamRule("confirm", bool, required=True),
-    ]),
+    "stealth_teach": ToolInputSchema(
+        "stealth_teach",
+        [
+            ParamRule("session_name", str, required=True, max_length=128),
+            ParamRule("workflow_name", str, required=True, max_length=128),
+            ParamRule("description", str, max_length=1024),
+            ParamRule("capture_seconds", int, min_value=1, max_value=600),
+        ],
+    ),
+    "stealth_replay": ToolInputSchema(
+        "stealth_replay",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("filename", str, required=True, max_length=512),
+            ParamRule("variables", dict),
+        ],
+    ),
+    "stealth_workflow_list": ToolInputSchema(
+        "stealth_workflow_list",
+        [
+            ParamRule("platform", str, max_length=32),
+            ParamRule("pattern", str, max_length=256),
+        ],
+    ),
+    "stealth_workflow_delete": ToolInputSchema(
+        "stealth_workflow_delete",
+        [
+            ParamRule("filename", str, required=True, max_length=512),
+            ParamRule("confirm", bool, required=True),
+        ],
+    ),
 }
 
 

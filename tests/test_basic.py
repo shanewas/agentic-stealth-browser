@@ -9,7 +9,7 @@ async def test_basic_launch():
     browser = AgentBrowser(session_name="test-session", anonymous=True)
     await browser.launch(headless=True)
     print("✓ Browser launched successfully")
-    
+
     await browser.close()
     print("✓ Browser closed cleanly")
     print("Basic test passed.")

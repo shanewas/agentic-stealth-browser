@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -50,7 +49,9 @@ class _FakeBrowser:
         self._pages = [self._page]
         self._closed = False
 
-    async def launch(self, headless=True, debug=False, debug_cdp=False, preset=None, region=None):
+    async def launch(
+        self, headless=True, debug=False, debug_cdp=False, preset=None, region=None
+    ):
         self.current_preset = preset
         self.current_region = region or "global"
         self.debug = debug
@@ -60,7 +61,15 @@ class _FakeBrowser:
     def page_getter(self):
         return self._page
 
-    async def safe_goto(self, url: str, warm_up=True, platform="unknown", rate_limit=True, domain=None, account=None):
+    async def safe_goto(
+        self,
+        url: str,
+        warm_up=True,
+        platform="unknown",
+        rate_limit=True,
+        domain=None,
+        account=None,
+    ):
         _ = (warm_up, platform, rate_limit, domain, account)
         self._page.url = url
         self._page._title = f"Visited {url}"
@@ -69,7 +78,13 @@ class _FakeBrowser:
     async def get_health_status(self):
         return {"status": "ok", "launched": True, "region": self.current_region}
 
-    async def debug_report(self, print_report: bool = False, limit: int = None, cursor: str = None, since_ts: str = None):
+    async def debug_report(
+        self,
+        print_report: bool = False,
+        limit: int = None,
+        cursor: str = None,
+        since_ts: str = None,
+    ):
         _ = (print_report, limit, cursor, since_ts)
         return {"status": "success", "report": {"ok": True}}
 
@@ -79,7 +94,9 @@ class _FakeBrowser:
             "message": "CDP attach is disabled for this session.",
         }
 
-    def get_replay_sequence(self, limit: int = 30, cursor: str = None, since_ts: str = None):
+    def get_replay_sequence(
+        self, limit: int = 30, cursor: str = None, since_ts: str = None
+    ):
         _ = (cursor, since_ts)
         return {"status": "ok", "sequence": [{"event": "navigate", "ts": 1}]}
 
@@ -246,7 +263,9 @@ async def test_teach_produces_saved_workflow_file(tmp_path, monkeypatch):
     monkeypatch.setattr("production.mcp_server.Path.home", lambda: tmp_path)
     server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
 
-    await _call_tool(server, "stealth_launch", {"session_name": "teach-test"}, msg_id=10)
+    await _call_tool(
+        server, "stealth_launch", {"session_name": "teach-test"}, msg_id=10
+    )
     await _call_tool(
         server,
         "stealth_navigate",
@@ -282,7 +301,9 @@ async def test_replay_loads_and_executes_a_simple_workflow(tmp_path, monkeypatch
     monkeypatch.setattr("production.mcp_server.Path.home", lambda: tmp_path)
     server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
 
-    await _call_tool(server, "stealth_launch", {"session_name": "replay-test"}, msg_id=20)
+    await _call_tool(
+        server, "stealth_launch", {"session_name": "replay-test"}, msg_id=20
+    )
 
     workflow_yaml = """name: simple-test
 description: A simple workflow for replay testing
@@ -318,7 +339,9 @@ steps:
 @pytest.mark.asyncio
 async def test_replay_fails_for_nonexistent_workflow():
     server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
-    await _call_tool(server, "stealth_launch", {"session_name": "replay-test"}, msg_id=30)
+    await _call_tool(
+        server, "stealth_launch", {"session_name": "replay-test"}, msg_id=30
+    )
     resp = await _call_tool(
         server,
         "stealth_replay",
@@ -334,7 +357,9 @@ async def test_replay_fails_for_nonexistent_workflow():
 @pytest.mark.asyncio
 async def test_replay_uses_active_session_when_session_name_omitted():
     server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
-    await _call_tool(server, "stealth_launch", {"session_name": "only-session"}, msg_id=40)
+    await _call_tool(
+        server, "stealth_launch", {"session_name": "only-session"}, msg_id=40
+    )
 
     workflow_yaml = """name: auto-session-test
 steps:

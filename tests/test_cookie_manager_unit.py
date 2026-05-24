@@ -10,6 +10,7 @@ Covers:
 - Encryption/decryption
 - Key rotation
 """
+
 import sys
 from pathlib import Path
 
@@ -17,7 +18,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import json
 import tempfile
 import asyncio
 from datetime import datetime, timezone
@@ -184,7 +184,9 @@ class TestCookieManagerSaveLoad:
     def test_save_and_load_with_encryption(self):
         mgr = CookieManager()
         key = "this-is-a-32-byte-secret-key!!"
-        mgr.cookies = [{"name": "secure_cookie", "value": "secret", "domain": ".example.com"}]
+        mgr.cookies = [
+            {"name": "secure_cookie", "value": "secret", "domain": ".example.com"}
+        ]
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
         try:
@@ -220,7 +222,9 @@ class TestCookieManagerSaveLoad:
         try:
             asyncio.run(mgr.save_cookies_to_file(path, encryption_key=key))
             mgr2 = CookieManager()
-            loaded = asyncio.run(mgr2.load_cookies(path, encryption_key="wrong-key-is-wrong!!"))
+            loaded = asyncio.run(
+                mgr2.load_cookies(path, encryption_key="wrong-key-is-wrong!!")
+            )
             assert loaded["status"] == "error"
         finally:
             Path(path).unlink(missing_ok=True)

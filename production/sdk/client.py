@@ -17,10 +17,9 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -93,11 +92,16 @@ class StealthClient:
 
     async def _lazy_browser_cls(self) -> type:
         from core.agent_browser import AgentBrowser
+
         return AgentBrowser
 
     async def launch(self) -> Dict[str, Any]:
         if self._launched and self._browser is not None:
-            return {"session_name": self._session_name, "launched": True, "status": "already_running"}
+            return {
+                "session_name": self._session_name,
+                "launched": True,
+                "status": "already_running",
+            }
         cls = await self._lazy_browser_cls()
         self._browser = cls(
             session_name=self._session_name,
@@ -150,13 +154,17 @@ class StealthClient:
             "navigated": ok,
         }
 
-    async def scrape(self, url: str, extract_images: bool = False, platform: str = "unknown") -> ClientScrapeResult:
+    async def scrape(
+        self, url: str, extract_images: bool = False, platform: str = "unknown"
+    ) -> ClientScrapeResult:
         if not self._launched:
             await self.launch()
         scraper = getattr(self._browser, "scraper", None)
         if not scraper:
             return ClientScrapeResult(title="", url=str(url))
-        raw = await scraper.scrape_page(str(url), extract_images=extract_images, platform=platform)
+        raw = await scraper.scrape_page(
+            str(url), extract_images=extract_images, platform=platform
+        )
         return ClientScrapeResult(
             title=raw.get("title", ""),
             url=raw.get("url", str(url)),
@@ -184,10 +192,14 @@ class StealthClient:
             metrics=health,
         )
 
-    async def load_cookies(self, cookies_path: str, encryption_key: Optional[Any] = None) -> Dict[str, Any]:
+    async def load_cookies(
+        self, cookies_path: str, encryption_key: Optional[Any] = None
+    ) -> Dict[str, Any]:
         if not self._launched:
             await self.launch()
-        return await self._browser.load_cookies_from_file(str(cookies_path), encryption_key=encryption_key)
+        return await self._browser.load_cookies_from_file(
+            str(cookies_path), encryption_key=encryption_key
+        )
 
     async def set_region(self, region: str, relaunch: bool = False) -> Dict[str, Any]:
         if not self._launched:
@@ -219,10 +231,18 @@ class StealthClient:
         resolved = workflow_path.resolve()
         resolved_root = library_root.resolve()
         if resolved_root not in resolved.parents and resolved != resolved_root:
-            return {"success": False, "error_message": "Path traversal not allowed", "filename": filename}
+            return {
+                "success": False,
+                "error_message": "Path traversal not allowed",
+                "filename": filename,
+            }
 
         if not resolved.exists():
-            return {"success": False, "error_message": f"Workflow file not found: {filename}", "filename": filename}
+            return {
+                "success": False,
+                "error_message": f"Workflow file not found: {filename}",
+                "filename": filename,
+            }
 
         workflow = load_workflow(str(resolved))
         player = WorkflowPlayer(self._browser)
@@ -241,7 +261,9 @@ class StealthClient:
             "summary": result.summary,
         }
 
-    async def list_workflows(self, platform: Optional[str] = None, pattern: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def list_workflows(
+        self, platform: Optional[str] = None, pattern: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         import fnmatch
         import time
 
@@ -259,13 +281,25 @@ class StealthClient:
             platform_name = parts[0] if len(parts) > 1 else "root"
             try:
                 stat = yaml_file.stat()
-                results.append({
-                    "name": yaml_file.stem,
-                    "path": relative_path,
-                    "platform": platform_name,
-                    "size": stat.st_size,
-                    "modified_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat.st_mtime)),
-                })
+                results.append(
+                    {
+                        "name": yaml_file.stem,
+                        "path": relative_path,
+                        "platform": platform_name,
+                        "size": stat.st_size,
+                        "modified_at": time.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(stat.st_mtime)
+                        ),
+                    }
+                )
             except Exception:
-                results.append({"name": yaml_file.stem, "path": relative_path, "platform": platform_name, "size": 0, "modified_at": ""})
+                results.append(
+                    {
+                        "name": yaml_file.stem,
+                        "path": relative_path,
+                        "platform": platform_name,
+                        "size": 0,
+                        "modified_at": "",
+                    }
+                )
         return results

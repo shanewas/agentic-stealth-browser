@@ -9,6 +9,7 @@ Covers:
 - ProxyManager.get_current_proxy_info()
 - ProxyManager._safe_extract_base_user()
 """
+
 import sys
 from pathlib import Path
 
@@ -287,7 +288,10 @@ class TestProxyHealthTracking:
 class TestSafeExtractBaseUser:
     def test_standard_format(self):
         mgr = ProxyManager()
-        assert mgr._safe_extract_base_user("user-realuser-country-us-session-abc") == "realuser"
+        assert (
+            mgr._safe_extract_base_user("user-realuser-country-us-session-abc")
+            == "realuser"
+        )
 
     def test_empty_string(self):
         mgr = ProxyManager()

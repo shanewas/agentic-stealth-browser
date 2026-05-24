@@ -21,44 +21,41 @@ class TestDockerfile:
     def test_dockerfile_uses_non_root_user(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "USER appuser" in content or "USER agent" in content, \
+        assert "USER appuser" in content or "USER agent" in content, (
             "Dockerfile must run as non-root user"
+        )
 
     def test_dockerfile_has_healthcheck(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "HEALTHCHECK" in content, \
-            "Dockerfile must have HEALTHCHECK instruction"
+        assert "HEALTHCHECK" in content, "Dockerfile must have HEALTHCHECK instruction"
 
     def test_dockerfile_has_volumes(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "VOLUME" in content, \
-            "Dockerfile must define VOLUME for persistent data"
+        assert "VOLUME" in content, "Dockerfile must define VOLUME for persistent data"
 
     def test_dockerfile_has_entrypoint(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "ENTRYPOINT" in content, \
-            "Dockerfile must define ENTRYPOINT"
+        assert "ENTRYPOINT" in content, "Dockerfile must define ENTRYPOINT"
 
     def test_dockerfile_installs_project(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "pip install" in content, \
-            "Dockerfile must install the project"
+        assert "pip install" in content, "Dockerfile must install the project"
 
     def test_dockerfile_creates_data_dirs(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "/data" in content, \
-            "Dockerfile must create /data directories"
+        assert "/data" in content, "Dockerfile must create /data directories"
 
     def test_dockerfile_uses_slim_base(self):
         dockerfile = PROJECT_ROOT / "production" / "Dockerfile"
         content = dockerfile.read_text()
-        assert "slim" in content.lower() or "alpine" in content.lower(), \
+        assert "slim" in content.lower() or "alpine" in content.lower(), (
             "Dockerfile should use slim or alpine base image"
+        )
 
 
 class TestDockerIgnore:
@@ -71,20 +68,19 @@ class TestDockerIgnore:
     def test_dockerignore_excludes_git(self):
         dockerignore = PROJECT_ROOT / ".dockerignore"
         content = dockerignore.read_text()
-        assert ".git" in content, \
-            ".dockerignore must exclude .git directory"
+        assert ".git" in content, ".dockerignore must exclude .git directory"
 
     def test_dockerignore_excludes_pycache(self):
         dockerignore = PROJECT_ROOT / ".dockerignore"
         content = dockerignore.read_text()
-        assert "__pycache__" in content, \
-            ".dockerignore must exclude __pycache__"
+        assert "__pycache__" in content, ".dockerignore must exclude __pycache__"
 
     def test_dockerignore_excludes_test_results(self):
         dockerignore = PROJECT_ROOT / ".dockerignore"
         content = dockerignore.read_text()
-        assert "detection_results" in content or "*.json" in content, \
+        assert "detection_results" in content or "*.json" in content, (
             ".dockerignore should exclude test result files"
+        )
 
 
 class TestDockerCompose:
@@ -97,20 +93,17 @@ class TestDockerCompose:
     def test_docker_compose_has_volumes(self):
         compose = PROJECT_ROOT / "production" / "docker-compose.yml"
         content = compose.read_text()
-        assert "volumes:" in content, \
-            "docker-compose.yml must define volumes"
+        assert "volumes:" in content, "docker-compose.yml must define volumes"
 
     def test_docker_compose_has_healthcheck(self):
         compose = PROJECT_ROOT / "production" / "docker-compose.yml"
         content = compose.read_text()
-        assert "healthcheck:" in content, \
-            "docker-compose.yml must define healthcheck"
+        assert "healthcheck:" in content, "docker-compose.yml must define healthcheck"
 
     def test_docker_compose_runs_as_non_root(self):
         compose = PROJECT_ROOT / "production" / "docker-compose.yml"
         content = compose.read_text()
-        assert "user:" in content, \
-            "docker-compose.yml should specify non-root user"
+        assert "user:" in content, "docker-compose.yml should specify non-root user"
 
 
 class TestHealthcheckScript:
@@ -123,11 +116,9 @@ class TestHealthcheckScript:
     def test_healthcheck_script_imports_core(self):
         script = PROJECT_ROOT / "production" / "docker-healthcheck.py"
         content = script.read_text()
-        assert "AgentBrowser" in content, \
-            "Healthcheck script must import AgentBrowser"
+        assert "AgentBrowser" in content, "Healthcheck script must import AgentBrowser"
 
     def test_healthcheck_script_exits_with_code(self):
         script = PROJECT_ROOT / "production" / "docker-healthcheck.py"
         content = script.read_text()
-        assert "sys.exit" in content, \
-            "Healthcheck script must exit with status code"
+        assert "sys.exit" in content, "Healthcheck script must exit with status code"

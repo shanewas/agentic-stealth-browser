@@ -1,6 +1,6 @@
 """Tests for rehearsal mode and pre-save validation in v1.2.0."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -32,7 +32,9 @@ class TestRehearse:
     async def test_rehearse_navigate(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         result = await player.rehearse(workflow)
         assert isinstance(result, RehearsalResult)
@@ -62,7 +64,11 @@ class TestRehearse:
     async def test_rehearse_fill(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="fill", params={"selector": "#input", "value": "hello"})],
+            steps=[
+                WorkflowStep(
+                    type="fill", params={"selector": "#input", "value": "hello"}
+                )
+            ],
         )
         result = await player.rehearse(workflow)
         assert any("would fill" in w.lower() for w in result.warnings)
@@ -70,7 +76,9 @@ class TestRehearse:
     async def test_rehearse_verify(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="verify", params={"selector": "h1", "text": "Hello"})],
+            steps=[
+                WorkflowStep(type="verify", params={"selector": "h1", "text": "Hello"})
+            ],
         )
         result = await player.rehearse(workflow)
         assert any("would verify" in w.lower() for w in result.warnings)
@@ -119,7 +127,9 @@ class TestRehearse:
     async def test_rehearse_scroll(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="scroll", params={"direction": "down", "amount": 500})],
+            steps=[
+                WorkflowStep(type="scroll", params={"direction": "down", "amount": 500})
+            ],
         )
         result = await player.rehearse(workflow)
         assert any("would scroll" in w.lower() for w in result.warnings)
@@ -127,7 +137,11 @@ class TestRehearse:
     async def test_rehearse_select(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="select", params={"selector": "select", "value": "option1"})],
+            steps=[
+                WorkflowStep(
+                    type="select", params={"selector": "select", "value": "option1"}
+                )
+            ],
         )
         result = await player.rehearse(workflow)
         assert any("would select" in w.lower() for w in result.warnings)
@@ -135,7 +149,9 @@ class TestRehearse:
     async def test_rehearse_execute_js(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="execute_js", params={"code": "console.log('hi')"})],
+            steps=[
+                WorkflowStep(type="execute_js", params={"code": "console.log('hi')"})
+            ],
         )
         result = await player.rehearse(workflow)
         assert any("would execute js" in w.lower() for w in result.warnings)
@@ -143,7 +159,9 @@ class TestRehearse:
     async def test_rehearse_execution_time(self, player):
         workflow = Workflow(
             name="test-rehearse",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         result = await player.rehearse(workflow)
         assert result.execution_time > 0
@@ -153,7 +171,9 @@ class TestValidateWorkflowSteps:
     def test_navigate_no_timeout_warns(self):
         workflow = Workflow(
             name="test",
-            steps=[WorkflowStep(type="navigate", params={"url": "https://example.com"})],
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
         )
         warnings = validate_workflow_steps(workflow)
         assert any("no timeout" in w.lower() for w in warnings)
@@ -162,7 +182,9 @@ class TestValidateWorkflowSteps:
         workflow = Workflow(
             name="test",
             steps=[
-                WorkflowStep(type="fill", params={"selector": "#input", "value": "hello"}),
+                WorkflowStep(
+                    type="fill", params={"selector": "#input", "value": "hello"}
+                ),
                 WorkflowStep(type="click", params={"selector": "#btn"}),
             ],
         )
@@ -194,7 +216,12 @@ class TestValidateWorkflowSteps:
         assert any("literal" in w.lower() for w in warnings)
 
     def test_large_workflow_warns(self):
-        steps = [WorkflowStep(type="navigate", params={"url": "https://example.com", "timeout": 10000}) for _ in range(25)]
+        steps = [
+            WorkflowStep(
+                type="navigate", params={"url": "https://example.com", "timeout": 10000}
+            )
+            for _ in range(25)
+        ]
         workflow = Workflow(name="large", steps=steps)
         warnings = validate_workflow_steps(workflow)
         assert any("smaller" in w.lower() for w in warnings)
@@ -219,7 +246,10 @@ class TestValidateWorkflowSteps:
         workflow = Workflow(
             name="test",
             steps=[
-                WorkflowStep(type="navigate", params={"url": "https://example.com", "timeout": 30000}),
+                WorkflowStep(
+                    type="navigate",
+                    params={"url": "https://example.com", "timeout": 30000},
+                ),
                 WorkflowStep(type="verify", params={"selector": "h1", "text": "Hello"}),
             ],
         )

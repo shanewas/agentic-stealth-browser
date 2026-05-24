@@ -10,7 +10,11 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from stealth.advanced_stealth import get_stealth_script, StealthConfig, get_behavior_script
+from stealth.advanced_stealth import (
+    get_stealth_script,
+    StealthConfig,
+    get_behavior_script,
+)
 from stealth.profiles import DeviceProfile, Persona, get_persona, list_personas
 from stealth.tls_fingerprint import get_tls_manager
 from stealth.headers import get_extra_http_headers
@@ -206,5 +210,9 @@ class TestHeaders:
         # Should have some Chrome-specific headers
         assert len(headers) > 0
         # Check for common Chrome headers
-        chrome_keys = [k for k in headers if "sec" in k.lower() or "chrome" in k.lower() or "user" in k.lower()]
+        chrome_keys = [
+            k
+            for k in headers
+            if "sec" in k.lower() or "chrome" in k.lower() or "user" in k.lower()
+        ]
         assert len(chrome_keys) > 0 or len(headers) > 0  # At least some headers exist

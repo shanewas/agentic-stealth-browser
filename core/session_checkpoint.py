@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 @dataclass
 class CheckpointMetadata:
     """Metadata about a checkpoint."""
+
     version: str = "1.0"
     created_at: float = 0.0
     account_id: str = ""
@@ -72,6 +73,7 @@ class CheckpointMetadata:
 @dataclass
 class SessionCheckpoint:
     """Complete session state for checkpointing."""
+
     metadata: CheckpointMetadata
     cookies: List[Dict[str, Any]] = field(default_factory=list)
     local_storage: Dict[str, str] = field(default_factory=dict)
@@ -228,7 +230,9 @@ class SessionManager:
             custom_data=custom_data,
         )
 
-    def save_checkpoint(self, checkpoint: SessionCheckpoint, filename: Optional[str] = None) -> Path:
+    def save_checkpoint(
+        self, checkpoint: SessionCheckpoint, filename: Optional[str] = None
+    ) -> Path:
         """Save checkpoint to disk."""
         if filename is None:
             filename = f"{checkpoint.metadata.account_id}_{int(checkpoint.metadata.created_at)}.json"

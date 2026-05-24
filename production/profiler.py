@@ -111,10 +111,7 @@ class Profiler:
                 self._metrics.record_time(name, elapsed)
 
     def get_summary(self) -> dict:
-        return {
-            name: ctx.summary()
-            for name, ctx in sorted(self._profiles.items())
-        }
+        return {name: ctx.summary() for name, ctx in sorted(self._profiles.items())}
 
 
 def timing_decorator(profiler: Optional[Profiler] = None, name: Optional[str] = None):
