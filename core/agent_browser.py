@@ -610,6 +610,7 @@ class AgentBrowser:
                     context_opts[k] = v
             self.browser = await pool.create_context(**context_opts)
             self.browser_context = self.browser
+        else:
             # Classic (default, fully backward compatible): per-instance persistent context + own playwright
             pw = await async_playwright().start()
             self._pw = pw

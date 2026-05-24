@@ -195,6 +195,14 @@ async def _cmd_scrape(args: argparse.Namespace) -> int:
         return 2
 
 
+async def _cmd_dashboard(args: argparse.Namespace) -> int:
+    """Start the Hermes single-user browser dashboard."""
+    from production.hermes_dashboard import run_dashboard
+
+    run_dashboard(host=args.host, port=args.port, password=args.password)
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="stealth-browser",
@@ -287,6 +295,18 @@ def main() -> None:
         "--max-length", type=int, default=None, help="Truncate output to N characters"
     )
     sc.set_defaults(func=_cmd_scrape)
+
+    dash = subparsers.add_parser(
+        "dashboard", help="Start the Hermes Browser Dashboard"
+    )
+    dash.add_argument("--host", default="127.0.0.1")
+    dash.add_argument("--port", type=int, default=8443)
+    dash.add_argument(
+        "--password",
+        default=None,
+        help="Dashboard password (defaults to HERMES_DASHBOARD_PASSWORD or change-me)",
+    )
+    dash.set_defaults(func=_cmd_dashboard)
 
     args = parser.parse_args()
     if hasattr(args, "func"):
