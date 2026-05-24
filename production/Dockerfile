@@ -77,8 +77,8 @@ VOLUME ["/data/sessions", "/data/logs", "/data/screenshots", "/data/cookies", "/
 # Run as non-root
 USER appuser
 
-# Entrypoint for flexible command execution
-ENTRYPOINT ["python", "-m", "production.mcp_server"]
+# Flexible entrypoint — override with `docker run --entrypoint` for custom commands
+ENTRYPOINT []
 
-# Default command
-CMD []
+# Default: run MCP server
+CMD ["python", "-m", "production.mcp_server"]

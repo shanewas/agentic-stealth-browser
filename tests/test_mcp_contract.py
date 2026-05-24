@@ -126,42 +126,39 @@ def test_tls_profile_selection_contract():
     assert any("disable-blink" in str(a) for a in args)
 
 
-def test_health_status_contract_shape():
+@pytest.mark.asyncio
+async def test_health_status_contract_shape():
     """Critical testing gap: MCP/CLI health status return shape contract (#281) + preset wiring"""
-
-    async def _run():
-        # Use ephemeral anonymous browser (no real net if possible, but launch needs pw)
-        b = AgentBrowser(
-            session_name="health-contract-test", anonymous=True, ephemeral=True
-        )
-        await b.launch(headless=True, preset="linkedin_2026", region="us", debug=False)
-        try:
-            health = await b.get_health_status()
-            # Contract shape assertions (what MCP and CLI rely on)
-            assert isinstance(health, dict)
-            assert "status" in health
-            assert "launched" in health
-            assert "preset" in health
-            assert health.get("preset") == "linkedin_2026"
-            assert "region" in health
-            assert "tls_profile" in health
-            assert "proxy" in health
-            assert "cookies" in health
-            assert "recovery" in health
-            assert "block_rate_pct" in health
-            assert "account_state" in health
-            assert "metrics_sample" in health
-            # Also test apply_preset shape
-            pres = await b.apply_preset("amazon_2026")
-            assert pres["status"] in ("success", "error")
-            # debug_report shape
-            dr = await b.debug_report()
-            assert dr["status"] == "success"
-            assert "report" in dr
-        finally:
-            await b.close()
-
-    asyncio.run(_run())
+    # Use ephemeral anonymous browser (no real net if possible, but launch needs pw)
+    b = AgentBrowser(
+        session_name="health-contract-test", anonymous=True, ephemeral=True
+    )
+    await b.launch(headless=True, preset="linkedin_2026", region="us", debug=False)
+    try:
+        health = await b.get_health_status()
+        # Contract shape assertions (what MCP and CLI rely on)
+        assert isinstance(health, dict)
+        assert "status" in health
+        assert "launched" in health
+        assert "preset" in health
+        assert health.get("preset") == "linkedin_2026"
+        assert "region" in health
+        assert "tls_profile" in health
+        assert "proxy" in health
+        assert "cookies" in health
+        assert "recovery" in health
+        assert "block_rate_pct" in health
+        assert "account_state" in health
+        assert "metrics_sample" in health
+        # Also test apply_preset shape
+        pres = await b.apply_preset("amazon_2026")
+        assert pres["status"] in ("success", "error")
+        # debug_report shape
+        dr = await b.debug_report()
+        assert dr["status"] == "success"
+        assert "report" in dr
+    finally:
+        await b.close()
 
 
 if __name__ == "__main__":
