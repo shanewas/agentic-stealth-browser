@@ -20,7 +20,13 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from workflows.player import WorkflowPlayer
-from workflows.schema import Workflow, WorkflowStep, load_workflow, validate_workflow, workflow_to_yaml_str
+from workflows.schema import (
+    Workflow,
+    WorkflowStep,
+    load_workflow,
+    validate_workflow,
+    workflow_to_yaml_str,
+)
 
 
 DEFAULT_STORAGE_ROOT = Path.home() / ".agentic-browser" / "hermes_dashboard"
@@ -36,7 +42,9 @@ class DashboardSettings:
     cookie_name: str = "hermes_dashboard_session"
     cookie_secure: bool = False
     idle_timeout_seconds: int = 30 * 60
-    allowed_origins: List[str] = field(default_factory=lambda: ["http://127.0.0.1:8443", "http://localhost:8443"])
+    allowed_origins: List[str] = field(
+        default_factory=lambda: ["http://127.0.0.1:8443", "http://localhost:8443"]
+    )
 
 
 @dataclass
@@ -62,21 +70,30 @@ class ActivityStream:
         self.max_events = max_events
         self._events: List[ActivityEvent] = []
 
-    def append(self, source: str, event: str, message: str, **details: Any) -> ActivityEvent:
-        item = ActivityEvent(source=source, event=event, message=message, details=details)
+    def append(
+        self, source: str, event: str, message: str, **details: Any
+    ) -> ActivityEvent:
+        item = ActivityEvent(
+            source=source, event=event, message=message, details=details
+        )
         self._events.append(item)
         if len(self._events) > self.max_events:
             self._events = self._events[-self.max_events :]
         return item
 
-    def list(self, limit: int = 100, source: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(
+        self, limit: int = 100, source: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         events = self._events
         if source:
             events = [e for e in events if e.source == source]
         return [e.to_dict() for e in events[-limit:]]
 
     def export(self) -> Dict[str, Any]:
-        return {"events": [e.to_dict() for e in self._events], "count": len(self._events)}
+        return {
+            "events": [e.to_dict() for e in self._events],
+            "count": len(self._events),
+        }
 
 
 class DashboardBackendAdapter:
@@ -95,7 +112,9 @@ class DashboardBackendAdapter:
         }
 
     async def launch(self, profile: str, headless: bool = True) -> None:
-        await self.manager._launch_browser(profile=profile, backend=self.name, headless=headless)
+        await self.manager._launch_browser(
+            profile=profile, backend=self.name, headless=headless
+        )
 
     async def close(self) -> None:
         await self.manager._close_browser()
@@ -121,7 +140,9 @@ class DashboardBackendAdapter:
             await page.click(selector)
             return
         if page and hasattr(page, "evaluate"):
-            await page.evaluate(f"document.querySelector({json.dumps(selector)}).click()")
+            await page.evaluate(
+                f"document.querySelector({json.dumps(selector)}).click()"
+            )
             return
         raise RuntimeError("Active backend cannot click")
 
@@ -135,7 +156,9 @@ class DashboardBackendAdapter:
             await page.fill(selector, value)
             return
         if page and hasattr(page, "evaluate"):
-            await page.evaluate(f"document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}")
+            await page.evaluate(
+                f"document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}"
+            )
             return
         raise RuntimeError("Active backend cannot fill")
 
@@ -168,7 +191,9 @@ class CDPBridgeAdapter(DashboardBackendAdapter):
     name = "cdp-bridge"
 
     async def launch(self, profile: str, headless: bool = True) -> None:
-        await self.manager._launch_browser(profile=profile, backend=self.name, headless=headless, debug_cdp=True)
+        await self.manager._launch_browser(
+            profile=profile, backend=self.name, headless=headless, debug_cdp=True
+        )
 
     @property
     def capabilities(self) -> Dict[str, Any]:
@@ -185,7 +210,12 @@ class DashboardRecorder:
         self.steps: List[WorkflowStep] = []
         self.metadata: Dict[str, Any] = {}
 
-    def start(self, name: str, description: str = "", metadata: Optional[Dict[str, Any]] = None) -> None:
+    def start(
+        self,
+        name: str,
+        description: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.active = True
         self.name = name
         self.description = description
@@ -194,7 +224,12 @@ class DashboardRecorder:
 
     def stop(self) -> Workflow:
         self.active = False
-        return Workflow(name=self.name, description=self.description, steps=list(self.steps), metadata=dict(self.metadata))
+        return Workflow(
+            name=self.name,
+            description=self.description,
+            steps=list(self.steps),
+            metadata=dict(self.metadata),
+        )
 
     def record(self, step_type: str, **params: Any) -> None:
         if self.active:
@@ -237,7 +272,9 @@ class BrowserRuntimeManager:
 
         return AgentBrowser
 
-    async def _launch_browser(self, profile: str, backend: str, headless: bool = True, debug_cdp: bool = False) -> None:
+    async def _launch_browser(
+        self, profile: str, backend: str, headless: bool = True, debug_cdp: bool = False
+    ) -> None:
         await self._close_browser()
         cls = self._get_agent_browser_cls()
         self.profile_root.joinpath(profile).mkdir(parents=True, exist_ok=True)
@@ -248,7 +285,13 @@ class BrowserRuntimeManager:
         await self.browser.launch(**launch_kwargs)
         self.active_profile = profile
         self.active_backend = backend
-        self.activity.append("system", "browser_started", f"Started {backend}", profile=profile, debug_cdp=debug_cdp)
+        self.activity.append(
+            "system",
+            "browser_started",
+            f"Started {backend}",
+            profile=profile,
+            debug_cdp=debug_cdp,
+        )
 
     async def _close_browser(self) -> None:
         if self.browser and hasattr(self.browser, "close"):
@@ -266,7 +309,12 @@ class BrowserRuntimeManager:
             return browser.page_getter()
         return getattr(browser, "page", None)
 
-    async def start(self, profile: str = "default", backend: str = "playwright-mcp", headless: bool = True) -> Dict[str, Any]:
+    async def start(
+        self,
+        profile: str = "default",
+        backend: str = "playwright-mcp",
+        headless: bool = True,
+    ) -> Dict[str, Any]:
         self._ensure_backend(backend)
         await self.adapters[backend].launch(profile=profile, headless=headless)
         return await self.status()
@@ -279,14 +327,22 @@ class BrowserRuntimeManager:
     async def restart(self) -> Dict[str, Any]:
         profile, backend = self.active_profile, self.active_backend
         await self.start(profile=profile, backend=backend)
-        self.activity.append("system", "browser_restarted", "Browser restarted", profile=profile, backend=backend)
+        self.activity.append(
+            "system",
+            "browser_restarted",
+            "Browser restarted",
+            profile=profile,
+            backend=backend,
+        )
         return await self.status()
 
     async def switch_backend(self, backend: str) -> Dict[str, Any]:
         self._ensure_backend(backend)
         warning = "Switch relaunches the managed browser while preserving the active profile name."
         await self.start(profile=self.active_profile, backend=backend)
-        self.activity.append("system", "backend_switched", f"Switched to {backend}", warning=warning)
+        self.activity.append(
+            "system", "backend_switched", f"Switched to {backend}", warning=warning
+        )
         status = await self.status()
         status["warning"] = warning
         return status
@@ -313,7 +369,9 @@ class BrowserRuntimeManager:
             "title": title,
             "cdp": cdp,
             "live_view_url": devtools_url_from_cdp(cdp),
-            "capabilities": {name: adapter.capabilities for name, adapter in self.adapters.items()},
+            "capabilities": {
+                name: adapter.capabilities for name, adapter in self.adapters.items()
+            },
             "intervention": self.intervention,
         }
 
@@ -339,7 +397,9 @@ class BrowserRuntimeManager:
         if mode not in {"agent", "human", "shared"}:
             raise ValueError("mode must be agent, human, or shared")
         self.control_mode = mode
-        self.activity.append("system", "control_mode", f"Control mode set to {mode}", mode=mode)
+        self.activity.append(
+            "system", "control_mode", f"Control mode set to {mode}", mode=mode
+        )
         return {"control_mode": mode}
 
     def pause(self, reason: str = "manual") -> Dict[str, Any]:
@@ -355,20 +415,40 @@ class BrowserRuntimeManager:
 
     def request_intervention(self, reason: str, message: str = "") -> Dict[str, Any]:
         self.execution_state = "waiting_for_human"
-        self.intervention = {"reason": reason, "message": message, "requested_at": time.time()}
-        self.activity.append("system", "intervention_requested", message or reason, reason=reason)
-        return {"execution_state": self.execution_state, "intervention": self.intervention}
+        self.intervention = {
+            "reason": reason,
+            "message": message,
+            "requested_at": time.time(),
+        }
+        self.activity.append(
+            "system", "intervention_requested", message or reason, reason=reason
+        )
+        return {
+            "execution_state": self.execution_state,
+            "intervention": self.intervention,
+        }
 
     def resolve_intervention(self, note: str = "") -> Dict[str, Any]:
         previous = self.intervention
         self.intervention = None
         self.execution_state = "resuming"
-        self.activity.append("human", "intervention_resolved", note or "Intervention resolved", previous=previous or {})
+        self.activity.append(
+            "human",
+            "intervention_resolved",
+            note or "Intervention resolved",
+            previous=previous or {},
+        )
         return {"execution_state": self.execution_state, "resolved": True}
 
     def start_recording(self, name: str, description: str = "") -> Dict[str, Any]:
-        self.recorder.start(name=name, description=description, metadata={"profile": self.active_profile, "backend": self.active_backend})
-        self.activity.append("system", "recording_started", f"Recording {name}", workflow=name)
+        self.recorder.start(
+            name=name,
+            description=description,
+            metadata={"profile": self.active_profile, "backend": self.active_backend},
+        )
+        self.activity.append(
+            "system", "recording_started", f"Recording {name}", workflow=name
+        )
         return {"recording": True, "workflow": name}
 
     def save_recording(self) -> Dict[str, Any]:
@@ -378,10 +458,22 @@ class BrowserRuntimeManager:
             raise ValueError("; ".join(validation.errors))
         path = self.workflow_root / f"{safe_name(workflow.name)}.yaml"
         path.write_text(workflow_to_yaml_str(workflow), encoding="utf-8")
-        self.activity.append("system", "workflow_saved", f"Saved workflow {workflow.name}", path=str(path), steps=len(workflow.steps))
-        return {"workflow": workflow.name, "path": str(path), "steps": len(workflow.steps)}
+        self.activity.append(
+            "system",
+            "workflow_saved",
+            f"Saved workflow {workflow.name}",
+            path=str(path),
+            steps=len(workflow.steps),
+        )
+        return {
+            "workflow": workflow.name,
+            "path": str(path),
+            "steps": len(workflow.steps),
+        }
 
-    async def replay_workflow(self, workflow_path: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def replay_workflow(
+        self, workflow_path: str, variables: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         self.execution_state = "running"
         path = self._resolve_workflow_path(workflow_path)
         workflow = load_workflow(str(path))
@@ -396,13 +488,21 @@ class BrowserRuntimeManager:
             "error_message": result.error_message,
             "checkpoint": result.checkpoint,
         }
-        self.activity.append("agent", "workflow_replayed", f"Replayed {workflow.name}", **payload)
+        self.activity.append(
+            "agent", "workflow_replayed", f"Replayed {workflow.name}", **payload
+        )
         return payload
 
     def list_workflows(self) -> List[Dict[str, Any]]:
         items = []
         for path in sorted(self.workflow_root.glob("*.yaml")):
-            items.append({"name": path.stem, "path": str(path), "modified_at": path.stat().st_mtime})
+            items.append(
+                {
+                    "name": path.stem,
+                    "path": str(path),
+                    "modified_at": path.stat().st_mtime,
+                }
+            )
         return items
 
     def list_profiles(self) -> List[Dict[str, Any]]:
@@ -410,9 +510,13 @@ class BrowserRuntimeManager:
         profiles = sorted(p.name for p in self.profile_root.iterdir() if p.is_dir())
         if "default" not in profiles:
             profiles.insert(0, "default")
-        return [{"name": name, "active": name == self.active_profile} for name in profiles]
+        return [
+            {"name": name, "active": name == self.active_profile} for name in profiles
+        ]
 
-    def create_schedule(self, workflow_path: str, profile: str, interval_seconds: int) -> Dict[str, Any]:
+    def create_schedule(
+        self, workflow_path: str, profile: str, interval_seconds: int
+    ) -> Dict[str, Any]:
         schedule = {
             "id": secrets.token_hex(6),
             "workflow_path": workflow_path,
@@ -422,16 +526,25 @@ class BrowserRuntimeManager:
             "last_result": None,
         }
         self.schedules.append(schedule)
-        self.activity.append("system", "schedule_created", "Scheduled workflow", schedule_id=schedule["id"])
+        self.activity.append(
+            "system",
+            "schedule_created",
+            "Scheduled workflow",
+            schedule_id=schedule["id"],
+        )
         return schedule
 
-    async def run_due_schedules_once(self, now: Optional[float] = None) -> List[Dict[str, Any]]:
+    async def run_due_schedules_once(
+        self, now: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
         now = now or time.time()
         results = []
         for schedule in self.schedules:
             if schedule["next_run_at"] <= now:
                 if self.active_profile != schedule["profile"] or not self.browser:
-                    await self.start(profile=schedule["profile"], backend=self.active_backend)
+                    await self.start(
+                        profile=schedule["profile"], backend=self.active_backend
+                    )
                 result = await self.replay_workflow(schedule["workflow_path"])
                 schedule["last_result"] = result
                 schedule["next_run_at"] = now + schedule["interval_seconds"]
@@ -456,7 +569,9 @@ class BrowserRuntimeManager:
 
 
 def safe_name(value: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value.strip())
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in value.strip()
+    )
     return cleaned.strip("-") or "workflow"
 
 
@@ -486,14 +601,22 @@ class SessionAuth:
         return {"session_id": session_id, "signed": self.sign(session_id), "csrf": csrf}
 
     def sign(self, value: str) -> str:
-        sig = hmac.new(self.settings.secret_key.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+        sig = hmac.new(
+            self.settings.secret_key.encode("utf-8"),
+            value.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
         return f"{value}.{sig}"
 
     def unsign(self, signed: str) -> Optional[str]:
         if "." not in signed:
             return None
         value, sig = signed.rsplit(".", 1)
-        expected = hmac.new(self.settings.secret_key.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+        expected = hmac.new(
+            self.settings.secret_key.encode("utf-8"),
+            value.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
         return value if hmac.compare_digest(sig, expected) else None
 
     def get_session(self, signed: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -653,7 +776,10 @@ def create_app(
     async def api_start(request: Request):
         session = current_session(request)
         data = await require_csrf(request, session)
-        return await manager.start(profile=data.get("profile", "default"), backend=data.get("backend", manager.active_backend))
+        return await manager.start(
+            profile=data.get("profile", "default"),
+            backend=data.get("backend", manager.active_backend),
+        )
 
     @app.post("/api/browser/stop")
     async def api_stop(request: Request):
@@ -683,7 +809,9 @@ def create_app(
     async def api_fill(request: Request):
         session = current_session(request)
         data = await require_csrf(request, session)
-        return await manager.fill(str(data.get("selector") or ""), str(data.get("value") or ""))
+        return await manager.fill(
+            str(data.get("selector") or ""), str(data.get("value") or "")
+        )
 
     @app.post("/api/backend/switch")
     async def api_switch(request: Request):
@@ -713,7 +841,9 @@ def create_app(
     async def api_intervention_request(request: Request):
         session = current_session(request)
         data = await require_csrf(request, session)
-        return manager.request_intervention(str(data.get("reason") or "manual_review"), str(data.get("message") or ""))
+        return manager.request_intervention(
+            str(data.get("reason") or "manual_review"), str(data.get("message") or "")
+        )
 
     @app.post("/api/intervention/resolve")
     async def api_intervention_resolve(request: Request):
@@ -725,7 +855,10 @@ def create_app(
     async def api_record_start(request: Request):
         session = current_session(request)
         data = await require_csrf(request, session)
-        return manager.start_recording(str(data.get("name") or "dashboard-demo"), str(data.get("description") or ""))
+        return manager.start_recording(
+            str(data.get("name") or "dashboard-demo"),
+            str(data.get("description") or ""),
+        )
 
     @app.post("/api/workflows/record/save")
     async def api_record_save(request: Request):
@@ -742,7 +875,9 @@ def create_app(
     async def api_replay(request: Request):
         session = current_session(request)
         data = await require_csrf(request, session)
-        return await manager.replay_workflow(str(data.get("path") or ""), dict(data.get("variables") or {}))
+        return await manager.replay_workflow(
+            str(data.get("path") or ""), dict(data.get("variables") or {})
+        )
 
     @app.get("/api/profiles")
     async def api_profiles(request: Request):
@@ -770,11 +905,17 @@ def create_app(
     return app
 
 
-def run_dashboard(host: str = "127.0.0.1", port: int = 8443, password: Optional[str] = None) -> None:
+def run_dashboard(
+    host: str = "127.0.0.1", port: int = 8443, password: Optional[str] = None
+) -> None:
     import os
 
     import uvicorn
 
-    settings = DashboardSettings(host=host, port=port, password=password or os.getenv("HERMES_DASHBOARD_PASSWORD", "change-me"))
+    settings = DashboardSettings(
+        host=host,
+        port=port,
+        password=password or os.getenv("HERMES_DASHBOARD_PASSWORD", "change-me"),
+    )
     app = create_app(settings=settings)
     uvicorn.run(app, host=host, port=port)

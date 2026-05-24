@@ -296,9 +296,7 @@ def main() -> None:
     )
     sc.set_defaults(func=_cmd_scrape)
 
-    dash = subparsers.add_parser(
-        "dashboard", help="Start the Hermes Browser Dashboard"
-    )
+    dash = subparsers.add_parser("dashboard", help="Start the Hermes Browser Dashboard")
     dash.add_argument("--host", default="127.0.0.1")
     dash.add_argument("--port", type=int, default=8443)
     dash.add_argument(

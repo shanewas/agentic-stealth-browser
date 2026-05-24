@@ -83,7 +83,9 @@ class _FakeBrowser:
 
 @pytest.mark.asyncio
 async def test_runtime_manager_start_status_and_backend_switch(tmp_path):
-    manager = BrowserRuntimeManager(agent_browser_cls=_FakeBrowser, storage_root=tmp_path)
+    manager = BrowserRuntimeManager(
+        agent_browser_cls=_FakeBrowser, storage_root=tmp_path
+    )
 
     status = await manager.start(profile="linkedin-work", backend="playwright-mcp")
     assert status["running"] is True
@@ -97,7 +99,9 @@ async def test_runtime_manager_start_status_and_backend_switch(tmp_path):
 
 @pytest.mark.asyncio
 async def test_record_save_and_replay_workflow(tmp_path):
-    manager = BrowserRuntimeManager(agent_browser_cls=_FakeBrowser, storage_root=tmp_path)
+    manager = BrowserRuntimeManager(
+        agent_browser_cls=_FakeBrowser, storage_root=tmp_path
+    )
     await manager.start(profile="demo", backend="playwright-mcp")
 
     manager.start_recording("five-step-demo")
@@ -117,7 +121,9 @@ async def test_record_save_and_replay_workflow(tmp_path):
 
 
 def test_human_intervention_state_and_timeline(tmp_path):
-    manager = BrowserRuntimeManager(agent_browser_cls=_FakeBrowser, storage_root=tmp_path)
+    manager = BrowserRuntimeManager(
+        agent_browser_cls=_FakeBrowser, storage_root=tmp_path
+    )
 
     waiting = manager.request_intervention("captcha", "Solve challenge")
     assert waiting["execution_state"] == "waiting_for_human"
@@ -132,15 +138,23 @@ def test_human_intervention_state_and_timeline(tmp_path):
 
 def test_devtools_url_from_cdp_endpoint():
     url = devtools_url_from_cdp(
-        {"status": "enabled", "ws_endpoint": "ws://127.0.0.1:9222/devtools/browser/fake"}
+        {
+            "status": "enabled",
+            "ws_endpoint": "ws://127.0.0.1:9222/devtools/browser/fake",
+        }
     )
-    assert url == "http://127.0.0.1:9222/devtools/inspector.html?ws=127.0.0.1:9222/devtools/browser/fake"
+    assert (
+        url
+        == "http://127.0.0.1:9222/devtools/inspector.html?ws=127.0.0.1:9222/devtools/browser/fake"
+    )
 
 
 def test_dashboard_requires_auth_and_csrf(tmp_path):
     from fastapi.testclient import TestClient
 
-    manager = BrowserRuntimeManager(agent_browser_cls=_FakeBrowser, storage_root=tmp_path)
+    manager = BrowserRuntimeManager(
+        agent_browser_cls=_FakeBrowser, storage_root=tmp_path
+    )
     app = create_app(
         manager=manager,
         settings=DashboardSettings(password="secret", secret_key="test-secret"),
@@ -167,13 +181,17 @@ def test_dashboard_requires_auth_and_csrf(tmp_path):
 
 @pytest.mark.asyncio
 async def test_schedule_runs_workflow_on_named_profile(tmp_path):
-    manager = BrowserRuntimeManager(agent_browser_cls=_FakeBrowser, storage_root=tmp_path)
+    manager = BrowserRuntimeManager(
+        agent_browser_cls=_FakeBrowser, storage_root=tmp_path
+    )
     await manager.start(profile="default", backend="playwright-mcp")
     manager.start_recording("scheduled-demo")
     await manager.navigate("https://example.com")
     saved = manager.save_recording()
 
-    schedule = manager.create_schedule(saved["path"], profile="scheduled-profile", interval_seconds=1)
+    schedule = manager.create_schedule(
+        saved["path"], profile="scheduled-profile", interval_seconds=1
+    )
     schedule["next_run_at"] = 0
     results = await manager.run_due_schedules_once(now=10)
 
