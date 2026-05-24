@@ -201,6 +201,7 @@ class PersonaRotator:
         self._transition_days: float = 0.0
         self._traits: Dict[str, PersonaTrait] = {}
         self._started_at: float = time.time()
+        self._simulated_days_active: float = 0.0
         self._evolution_log: List[Dict[str, Any]] = []
 
     @property
@@ -209,7 +210,8 @@ class PersonaRotator:
 
     @property
     def days_active(self) -> float:
-        return (time.time() - self._started_at) / 86400.0
+        wall_clock_days = (time.time() - self._started_at) / 86400.0
+        return self._simulated_days_active + wall_clock_days
 
     def set_current_persona(self, persona_name: str):
         """Set the current persona from templates or custom profile."""
@@ -247,6 +249,9 @@ class PersonaRotator:
 
     def evolve(self, days_elapsed: float = 1.0):
         """Evolve all traits over the given time period."""
+        if days_elapsed > 0:
+            self._simulated_days_active += days_elapsed
+
         for trait in self._traits.values():
             trait.evolve(days_elapsed)
 

@@ -11,6 +11,13 @@ from workflows.selector_generator import SelectorGenerator
 from workflows.variable_resolver import VariableResolver
 
 
+MIN_RECORDED_DURATION_SECONDS = 1e-9
+
+
+def _elapsed_since(start_time: float) -> float:
+    return max(time.monotonic() - start_time, MIN_RECORDED_DURATION_SECONDS)
+
+
 @dataclass
 class ExecutionResult:
     success: bool
@@ -109,7 +116,7 @@ class WorkflowPlayer:
 
             errors = validate_step_params(step_type, params)
             if errors:
-                elapsed = time.monotonic() - start_time
+                elapsed = _elapsed_since(start_time)
                 return ExecutionResult(
                     success=False,
                     steps_executed=steps_executed,
@@ -210,7 +217,7 @@ class WorkflowPlayer:
                 screenshot_path = await self._take_step_screenshot(step_type, i)
                 if screenshot_path:
                     screenshots.append(screenshot_path)
-                elapsed = time.monotonic() - start_time
+                elapsed = _elapsed_since(start_time)
                 return ExecutionResult(
                     success=False,
                     steps_executed=steps_executed,
@@ -226,7 +233,7 @@ class WorkflowPlayer:
                     auto_healed_selectors=auto_healed_selectors,
                 )
 
-        elapsed = time.monotonic() - start_time
+        elapsed = _elapsed_since(start_time)
         return ExecutionResult(
             success=True,
             steps_executed=steps_executed,
@@ -404,7 +411,7 @@ class WorkflowPlayer:
                     f"Step {i} ({step_type}): unknown step type in rehearsal"
                 )
 
-        elapsed = time.monotonic() - start_time
+        elapsed = _elapsed_since(start_time)
         return RehearsalResult(
             success=len(warnings) > 0 or True,
             total_steps=len(resolved_workflow.steps),
