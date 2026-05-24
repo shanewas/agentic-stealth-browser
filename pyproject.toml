@@ -31,6 +31,9 @@ dependencies = [
     "aiohttp",
     "cryptography",
     "pyyaml",
+    "fastapi",
+    "jinja2",
+    "uvicorn",
 ]
 
 [project.optional-dependencies]

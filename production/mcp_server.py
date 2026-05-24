@@ -1238,7 +1238,7 @@ class StealthMCPServer:
         workflows = []
         for yaml_file in sorted(search_root.rglob("*.yaml")):
             relative_path = yaml_file.relative_to(self._workflow_library_root)
-            filename_str = str(relative_path)
+            filename_str = relative_path.as_posix()
 
             if pattern and not fnmatch.fnmatch(filename_str, pattern):
                 continue
