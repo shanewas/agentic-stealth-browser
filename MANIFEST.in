@@ -2,8 +2,7 @@ include LICENSE
 include README.md
 include CHANGELOG.md
 include .env.example
-include docs/THREAT_MODEL.md
-include docs/using-as-library.md
+
 recursive-include stealth *.js *.json
 recursive-include production Dockerfile docker-healthcheck.py
 recursive-include examples *.md

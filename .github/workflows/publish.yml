@@ -1,0 +1,69 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + verify, skip upload to PyPI"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC trusted publishing (no PyPI token needed)
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build distribution packages
+        run: python -m build
+
+      - name: Verify package metadata
+        run: |
+          python -m pip install dist/*.whl
+          python -c "from core.agent_browser import AgentBrowser; from production.cli import main; print('Import OK')"
+
+      - name: Store dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 5
+
+  publish:
+    name: Upload to PyPI
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: >
+      !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/agentic-stealth-browser
+    permissions:
+      id-token: write  # OIDC must be re-declared per job that uses it
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

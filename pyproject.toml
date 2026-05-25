@@ -7,7 +7,7 @@ name = "agentic-stealth-browser"
 version = "2.2.0"
 description = "Production-grade, human-mimicking browser automation framework for autonomous agents. Survives modern anti-bot systems."
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.10"
 authors = [
     {name = "Shane W", email = "shanewas@users.noreply.github.com"},
