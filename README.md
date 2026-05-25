@@ -8,6 +8,8 @@
 
 Python framework for browser automation that looks human. Handles Cloudflare, LinkedIn, Amazon, and other anti-bot systems. **v2.0.0 GA** — SDK, orchestration, security governance, adaptive stealth, plugins.
 
+> **Note**: All user-facing documentation has been consolidated into this README. The `docs/` folder (containing ADRs, RFCs and design fragments) has been removed. Historical documents remain available in git history.
+
 ## Why This Exists
 
 Standard `page.goto()` / `page.click()` gets detected instantly. This solves it with:
