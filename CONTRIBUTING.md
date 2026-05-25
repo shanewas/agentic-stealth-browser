@@ -177,7 +177,7 @@ agentic-stealth-browser/
 ├── ai/
 │   └── ai_hooks.py           # AI integration hooks
 ├── tests/                    # Test suite
-├── docs/                     # Documentation
+# (documentation lives in README.md and git history)
 └── mcp_security.py           # MCP security hardening
 ```
 
@@ -189,7 +189,7 @@ agentic-stealth-browser/
 
 1. Add the patch to `stealth/advanced_stealth.py`
 2. Add tests to `tests/test_stealth_modules.py`
-3. Update `docs/STEALTH_LIMITATIONS.md` if applicable
+3. Update relevant sections in README.md if behavior changes
 
 ### New Platform Preset
 
@@ -201,7 +201,7 @@ agentic-stealth-browser/
 
 1. Update `PLATFORM_STRATEGIES` in `recovery/anti_block_orchestrator.py`
 2. Add tests to `tests/test_recovery_phase1.py`
-3. Document in `docs/RATE_LIMITING_BACKOFF.md`
+3. Document rate limiting behavior changes in README.md or relevant code comments
 
 ### New Human Behavior
 
