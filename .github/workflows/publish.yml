@@ -60,7 +60,7 @@ jobs:
     permissions:
       id-token: write  # OIDC must be re-declared per job that uses it
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
