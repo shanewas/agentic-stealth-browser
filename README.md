@@ -2,13 +2,60 @@
 
 [![CI](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml/badge.svg)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://pypi.org/project/agentic-stealth-browser/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/agentic-stealth-browser.svg)](https://pypi.org/project/agentic-stealth-browser/)
 [![Tests](https://img.shields.io/badge/tests-880%2B%20passing-brightgreen)](tests/)
 
-Python framework for browser automation that looks human. Handles Cloudflare, LinkedIn, Amazon, and other anti-bot systems. **v2.0.0 GA** — SDK, orchestration, security governance, adaptive stealth, plugins.
+**Production-grade stealth browser automation** that looks human. Handles Cloudflare, LinkedIn, Amazon, and other anti-bot systems.
 
-> **Note**: All user-facing documentation has been consolidated into this README. The `docs/` folder (containing ADRs, RFCs and design fragments) has been removed. Historical documents remain available in git history.
+> **Documentation**: This README is the complete, up-to-date user guide. The previous `docs/` folder has been removed. Historical design documents (ADRs, RFCs) are still available in git history.
+
+## Installation
+
+### From PyPI (Recommended)
+
+```bash
+pip install agentic-stealth-browser
+playwright install --with-deps chromium
+```
+
+### For Development / Contributing
+
+```bash
+git clone https://github.com/shanewas/agentic-stealth-browser.git
+cd agentic-stealth-browser
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+playwright install --with-deps chromium
+```
+
+## Quick Start
+
+### CLI (easiest)
+
+```bash
+# Health check + stealth fingerprint test
+stealth-browser health --preset linkedin_2026 --region us
+
+# Start the operator dashboard
+agentic-stealth-browser dashboard
+```
+
+### Python SDK
+
+```python
+from core.agent_browser import AgentBrowser
+
+async with AgentBrowser(session_name="my-session") as browser:
+    await browser.launch(headless=True)
+    await browser.safe_goto("https://example.com")
+    # ... use stealth navigation, human behavior, recovery, etc.
+```
+
+See the full usage guide below for MCP server, dashboard, workflows, and production deployment.
+
+For release history, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Why This Exists
 
@@ -18,63 +65,6 @@ Standard `page.goto()` / `page.click()` gets detected instantly. This solves it 
 - **Human behavior** — Bézier mouse curves, natural typing, distraction simulation
 - **Auto recovery** — detects CAPTCHAs, rate limits, blocks and recovers automatically
 - **Workflow Teach/Replay** — record real browser actions via CDP, replay as YAML
-
-## Installation
-
-### Local Development / Laptop
-
-```bash
-# 1. Clone
-git clone https://github.com/shanewas/agentic-stealth-browser.git
-cd agentic-stealth-browser
-
-# 2. Python environment (3.11+ recommended)
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-
-# 3. Install in editable mode + browser binaries
-pip install -e ".[dev]"
-playwright install --with-deps chromium
-```
-
-Run the CLI:
-
-```bash
-stealth-browser --help
-stealth-browser health --preset linkedin_2026 --region us
-```
-
-### Production / VPS (Ubuntu/Debian example)
-
-```bash
-# System deps
-sudo apt update && sudo apt install -y python3.11 python3.11-venv python3-pip git
-
-# Clone to /opt
-sudo git clone https://github.com/shanewas/agentic-stealth-browser.git /opt/agentic-stealth-browser
-cd /opt/agentic-stealth-browser
-
-# Create dedicated user
-sudo useradd -r -s /bin/false -d /opt/agentic-stealth-browser stealth || true
-sudo chown -R stealth:stealth /opt/agentic-stealth-browser
-
-# As the stealth user (or sudo -u stealth)
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-playwright install --with-deps chromium
-```
-
-Create a systemd unit for the dashboard (see below) or the MCP server.
-
-### Docker (quick)
-
-```bash
-docker build -t agentic-stealth-browser -f production/Dockerfile .
-docker run -it --rm agentic-stealth-browser
-```
-
-See `production/docker-compose.yml` and `production/Dockerfile` for volumes, healthchecks, and non-root execution.
 
 ## Local vs VPS Usage
 
