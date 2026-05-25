@@ -7,6 +7,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/agentic-stealth-browser.svg)](https://pypi.org/project/agentic-stealth-browser/)
 [![Tests](https://img.shields.io/badge/tests-880%2B%20passing-brightgreen)](tests/)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/shanewas)
 
 <p align="center">
   <img src="assets/hn-demo.gif" alt="Agentic Stealth Browser Demo" width="90%">
