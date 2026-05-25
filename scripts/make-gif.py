@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate a demo GIF showing terminal output for Show HN."""
 
+import os
 import subprocess
-import sys
 
 # Paths
 REPO = "/root/agentic-stealth-browser"
@@ -40,7 +40,6 @@ send "exit\\r"
 expect eof
 """
 
-import os
 os.chdir(REPO)
 
 # Write expect script
@@ -57,7 +56,7 @@ result = subprocess.run(
     env={**os.environ, "output": cast_file},
     capture_output=True,
     text=True,
-    timeout=60
+    timeout=60,
 )
 print("STDOUT:", result.stdout[-500:] if result.stdout else "")
 print("STDERR:", result.stderr[-500:] if result.stderr else "")
@@ -68,7 +67,9 @@ if os.path.exists(cast_file):
     # Convert to GIF
     result2 = subprocess.run(
         ["/tmp/agg", cast_file, f"{REPO}/assets/hn-demo.gif"],
-        capture_output=True, text=True, timeout=30
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     print("agg:", result2.stdout, result2.stderr)
     if os.path.exists(f"{REPO}/assets/hn-demo.gif"):

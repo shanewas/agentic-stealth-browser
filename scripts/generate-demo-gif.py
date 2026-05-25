@@ -6,7 +6,9 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 # Ensure Pillow is available
-subprocess.run([sys.executable, "-m", "pip", "install", "Pillow", "-q"], capture_output=True)
+subprocess.run(
+    [sys.executable, "-m", "pip", "install", "Pillow", "-q"], capture_output=True
+)
 
 WIDTH = 900
 HEIGHT = 520
@@ -48,7 +50,12 @@ def terminal_frame(lines, prompt="$"):
 
     # Draw terminal title bar
     draw.rectangle([(0, 0), (WIDTH, 28)], fill=(20, 20, 20))
-    draw.text((10, 6), "Terminal — agentic-stealth-browser demo", fill=(150, 150, 150), font=font)
+    draw.text(
+        (10, 6),
+        "Terminal — agentic-stealth-browser demo",
+        fill=(150, 150, 150),
+        font=font,
+    )
     # Close/minimize/maximize dots
     for i, c in enumerate([(255, 95, 87), (255, 189, 46), (39, 201, 63)]):
         draw.ellipse([(WIDTH - 80 + i * 25, 9), (WIDTH - 72 + i * 25, 17)], fill=c)
@@ -81,85 +88,108 @@ def make_gif(output_path):
     # Build the timeline of terminal output
     timeline = [
         # Frame 1: Clean terminal
-        ([("$ pip install dist/agentic_stealth_browser-2.1.1-py3-none-any.whl", GREEN)], 800),
-
+        (
+            [
+                (
+                    "$ pip install dist/agentic_stealth_browser-2.1.1-py3-none-any.whl",
+                    GREEN,
+                )
+            ],
+            800,
+        ),
         # Frame 2: pip install output
-        ([
-            ("$ pip install dist/agentic_stealth_browser-2.1.1-py3-none-any.whl", GREEN),
-            "Processing agentic_stealth_browser-2.1.1-py3-none-any.whl",
-            "Collecting playwright>=1.30",
-            "Collecting aiohttp>=3.8",
-            "Collecting cryptography>=3.4",
-            "Collecting pyyaml>=5.4",
-            "Collecting fastapi>=0.100",
-            "  Downloading fastapi-0.136.3-py3-none-any.whl (72 kB)",
-            "  Downloading aiohttp-3.13.5-cp311-cp311-manylinux_2_17_x86_64.whl (1.2 MB)",
-            "  Downloading cryptography-48.0.0-cp311-cp311-manylinux_2_28_x86_64.whl (4.7 MB)",
-            "Installing collected packages: ...",
-            ("✓ Successfully installed agentic-stealth-browser-2.1.1", GREEN),
-        ], 1000),
-
+        (
+            [
+                (
+                    "$ pip install dist/agentic_stealth_browser-2.1.1-py3-none-any.whl",
+                    GREEN,
+                ),
+                "Processing agentic_stealth_browser-2.1.1-py3-none-any.whl",
+                "Collecting playwright>=1.30",
+                "Collecting aiohttp>=3.8",
+                "Collecting cryptography>=3.4",
+                "Collecting pyyaml>=5.4",
+                "Collecting fastapi>=0.100",
+                "  Downloading fastapi-0.136.3-py3-none-any.whl (72 kB)",
+                "  Downloading aiohttp-3.13.5-cp311-cp311-manylinux_2_17_x86_64.whl (1.2 MB)",
+                "  Downloading cryptography-48.0.0-cp311-cp311-manylinux_2_28_x86_64.whl (4.7 MB)",
+                "Installing collected packages: ...",
+                ("✓ Successfully installed agentic-stealth-browser-2.1.1", GREEN),
+            ],
+            1000,
+        ),
         # Frame 3: Run demo
         ([("$ python3 scripts/hn-demo.py", GREEN)], 600),
-
         # Frame 4: Demo output
-        ([
-            ("$ python3 scripts/hn-demo.py", GREEN),
-            "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
-            "│                                                         │",
-            ("│  ✓  core.agent_browser loaded                        │", GREEN),
-            ("│  ✓  production.cli loaded                            │", GREEN),
-            ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
-            "│                                                         │",
-            "│  Launching headless browser...                           │",
-        ], 500),
-
+        (
+            [
+                ("$ python3 scripts/hn-demo.py", GREEN),
+                "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
+                "│                                                         │",
+                ("│  ✓  core.agent_browser loaded                        │", GREEN),
+                ("│  ✓  production.cli loaded                            │", GREEN),
+                ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
+                "│                                                         │",
+                "│  Launching headless browser...                           │",
+            ],
+            500,
+        ),
         # Frame 5: Browser launching
-        ([
-            ("$ python3 scripts/hn-demo.py", GREEN),
-            "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
-            "│                                                         │",
-            ("│  ✓  core.agent_browser loaded                        │", GREEN),
-            ("│  ✓  production.cli loaded                            │", GREEN),
-            ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
-            "│                                                         │",
-            ("│  Launching headless browser...                           │", YELLOW),
-            "│  ✓  Browser launched (Chromium, Japan region)          │",
-        ], 800),
-
+        (
+            [
+                ("$ python3 scripts/hn-demo.py", GREEN),
+                "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
+                "│                                                         │",
+                ("│  ✓  core.agent_browser loaded                        │", GREEN),
+                ("│  ✓  production.cli loaded                            │", GREEN),
+                ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
+                "│                                                         │",
+                (
+                    "│  Launching headless browser...                           │",
+                    YELLOW,
+                ),
+                "│  ✓  Browser launched (Chromium, Japan region)          │",
+            ],
+            800,
+        ),
         # Frame 6: Navigating
-        ([
-            ("$ python3 scripts/hn-demo.py", GREEN),
-            "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
-            "│                                                         │",
-            ("│  ✓  core.agent_browser loaded                        │", GREEN),
-            ("│  ✓  production.cli loaded                            │", GREEN),
-            ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
-            "│                                                         │",
-            "│  Launching headless browser...                           │",
-            ("│  ✓  Browser launched (Chromium, Japan region)          │", GREEN),
-            ("│  ✓  bot.sannysoft.com — page loaded                    │", GREEN),
-        ], 1000),
-
+        (
+            [
+                ("$ python3 scripts/hn-demo.py", GREEN),
+                "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
+                "│                                                         │",
+                ("│  ✓  core.agent_browser loaded                        │", GREEN),
+                ("│  ✓  production.cli loaded                            │", GREEN),
+                ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
+                "│                                                         │",
+                "│  Launching headless browser...                           │",
+                ("│  ✓  Browser launched (Chromium, Japan region)          │", GREEN),
+                ("│  ✓  bot.sannysoft.com — page loaded                    │", GREEN),
+            ],
+            1000,
+        ),
         # Frame 7: Final success
-        ([
-            ("$ python3 scripts/hn-demo.py", GREEN),
-            "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
-            "│                                                         │",
-            ("│  ✓  core.agent_browser loaded                        │", GREEN),
-            ("│  ✓  production.cli loaded                            │", GREEN),
-            ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
-            "│                                                         │",
-            "│  Launching headless browser...                           │",
-            ("│  ✓  Browser launched (Chromium, Japan region)          │", GREEN),
-            ("│  ✓  bot.sannysoft.com — page loaded                    │", GREEN),
-            ("│  ✓  Navigation + recovery chain operational            │", GREEN),
-            "│                                                         │",
-            ("│  ✓  All systems operational. Ready to deploy.           │", GREEN),
-            "╰─────────────────────────────────────────────────────────╯",
-            "",
-            ("Agentic Stealth Browser v2.1.1 — ready for Show HN 🚀", CYAN),
-        ], 3000),
+        (
+            [
+                ("$ python3 scripts/hn-demo.py", GREEN),
+                "╭─ Agentic Stealth Browser — Quick Demo ───────────────────╮",
+                "│                                                         │",
+                ("│  ✓  core.agent_browser loaded                        │", GREEN),
+                ("│  ✓  production.cli loaded                            │", GREEN),
+                ("│  ✓  TLS stealth script loaded (Japan region)          │", GREEN),
+                "│                                                         │",
+                "│  Launching headless browser...                           │",
+                ("│  ✓  Browser launched (Chromium, Japan region)          │", GREEN),
+                ("│  ✓  bot.sannysoft.com — page loaded                    │", GREEN),
+                ("│  ✓  Navigation + recovery chain operational            │", GREEN),
+                "│                                                         │",
+                ("│  ✓  All systems operational. Ready to deploy.           │", GREEN),
+                "╰─────────────────────────────────────────────────────────╯",
+                "",
+                ("Agentic Stealth Browser v2.1.1 — ready for Show HN 🚀", CYAN),
+            ],
+            3000,
+        ),
     ]
 
     for lines, duration in timeline:
@@ -175,7 +205,9 @@ def make_gif(output_path):
         loop=0,
         optimize=True,
     )
-    print(f"GIF created: {output_path} ({len(frames)} frames, {sum(durations)}ms total)")
+    print(
+        f"GIF created: {output_path} ({len(frames)} frames, {sum(durations)}ms total)"
+    )
 
 
 if __name__ == "__main__":

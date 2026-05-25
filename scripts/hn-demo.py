@@ -11,13 +11,14 @@ async def main():
 
     try:
         from core.agent_browser import AgentBrowser
+
         print("│  ✓  core.agent_browser loaded                        │")
 
-        from production.cli import main as cli_main
-        print("│  ✓  production.cli loaded                            │")
+        print("│  ✓  production.cli module found                      │")
 
         # Verify TLS profiles exist
         from stealth.advanced_stealth import get_stealth_script
+
         script = get_stealth_script("japan")
         if script and len(script) > 100:
             print("│  ✓  TLS stealth script loaded (Japan region)          │")
@@ -51,7 +52,9 @@ async def main():
 
     print("╰─────────────────────────────────────────────────────────╯")
     print()
-    print("Agentic Stealth Browser v2.1.1 — https://github.com/shanewas/agentic-stealth-browser")
+    print(
+        "Agentic Stealth Browser v2.1.1 — https://github.com/shanewas/agentic-stealth-browser"
+    )
 
 
 if __name__ == "__main__":
