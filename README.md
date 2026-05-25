@@ -17,20 +17,151 @@ Standard `page.goto()` / `page.click()` gets detected instantly. This solves it 
 - **Auto recovery** — detects CAPTCHAs, rate limits, blocks and recovers automatically
 - **Workflow Teach/Replay** — record real browser actions via CDP, replay as YAML
 
-## Quick Start
+## Installation
+
+### Local Development / Laptop
 
 ```bash
-pip install agentic-stealth-browser
+# 1. Clone
+git clone https://github.com/shanewas/agentic-stealth-browser.git
+cd agentic-stealth-browser
+
+# 2. Python environment (3.11+ recommended)
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# 3. Install in editable mode + browser binaries
+pip install -e ".[dev]"
 playwright install --with-deps chromium
 ```
 
-```python
-from core.agent_browser import AgentBrowser
+Run the CLI:
 
-async with AgentBrowser(session_name="demo") as browser:
-    await browser.launch(headless=True)
-    await browser.safe_goto("https://example.com")
+```bash
+stealth-browser --help
+stealth-browser health --preset linkedin_2026 --region us
 ```
+
+### Production / VPS (Ubuntu/Debian example)
+
+```bash
+# System deps
+sudo apt update && sudo apt install -y python3.11 python3.11-venv python3-pip git
+
+# Clone to /opt
+sudo git clone https://github.com/shanewas/agentic-stealth-browser.git /opt/agentic-stealth-browser
+cd /opt/agentic-stealth-browser
+
+# Create dedicated user
+sudo useradd -r -s /bin/false -d /opt/agentic-stealth-browser stealth || true
+sudo chown -R stealth:stealth /opt/agentic-stealth-browser
+
+# As the stealth user (or sudo -u stealth)
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+playwright install --with-deps chromium
+```
+
+Create a systemd unit for the dashboard (see below) or the MCP server.
+
+### Docker (quick)
+
+```bash
+docker build -t agentic-stealth-browser -f production/Dockerfile .
+docker run -it --rm agentic-stealth-browser
+```
+
+See `production/docker-compose.yml` and `production/Dockerfile` for volumes, healthchecks, and non-root execution.
+
+## Local vs VPS Usage
+
+### Local (Developer / Daily Driver)
+
+Use this when running on your laptop for development, testing stealth, or pairing with Claude Desktop / Cursor / Windsurf.
+
+- Default binding is `127.0.0.1:8443` (safe).
+- Great for visual debugging with the dashboard.
+- Use the MCP server for agent clients on the same machine.
+
+### VPS / Production / Headless Server (Always-on Automation)
+
+Use this for 24/7 LinkedIn automation, scraping fleets, account warming, etc.
+
+**Key rules for VPS:**
+- Never expose the dashboard directly on the public internet.
+- Always run behind HTTPS (Caddy, Nginx, Cloudflare Tunnel, or Tailscale).
+- Use a dedicated low-privilege user (`stealth`).
+- Persist `~/.agentic-browser/` (or mounted volume) for cookies, profiles, and workflows.
+- Strong random password for the dashboard.
+
+**Recommended production setup:**
+1. Systemd service for the dashboard or MCP server.
+2. Reverse proxy (Caddy is easiest) for HTTPS.
+3. (Optional but recommended) Cloudflare Tunnel or Tailscale so you only reach the dashboard from your IP / team.
+
+Example systemd service (`/etc/systemd/system/hermes-dashboard.service`):
+
+```ini
+[Unit]
+Description=Hermes Stealth Browser Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=stealth
+WorkingDirectory=/opt/agentic-stealth-browser
+Environment=HERMES_DASHBOARD_PASSWORD=REPLACE_WITH_VERY_LONG_RANDOM_STRING
+ExecStart=/opt/agentic-stealth-browser/.venv/bin/agentic-stealth-browser dashboard --host 127.0.0.1 --port 8443
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now hermes-dashboard
+journalctl -u hermes-dashboard -f
+```
+
+**HTTPS + Reverse Proxy (Caddy example — simplest)**
+
+```
+your-stealth.example.com {
+    reverse_proxy localhost:8443
+}
+```
+
+For Nginx or more advanced `cookie_secure + security headers`, here is a minimal production-hardened pattern:
+
+**Nginx snippet (HTTPS termination)**
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name stealth.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8443;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+After putting Nginx/Caddy in front, update the dashboard launch to use secure cookies (recommended):
+
+```bash
+HERMES_DASHBOARD_COOKIE_SECURE=true agentic-stealth-browser dashboard ...
+```
+
+(You can also set it via the `DashboardSettings` class if running the Python API directly.)
 
 ## MCP + Dashboard Quick Start
 
@@ -65,14 +196,26 @@ Common MCP flow:
 7. stealth_close       -> close the session
 ```
 
-For a human-agent shared browser console, start the Hermes dashboard:
+### Hermes Operator Dashboard (Recommended for Human-in-the-Loop)
+
+The dashboard has been completely revamped with a clean, dark, Grok/X-inspired design (deep zinc palette, blue accents, modern cards, real-time polling, modals, live activity, workflow management, and intervention flows).
 
 ```bash
-export HERMES_DASHBOARD_PASSWORD="replace-me"
+export HERMES_DASHBOARD_PASSWORD="a-strong-unique-password"
 agentic-stealth-browser dashboard --host 127.0.0.1 --port 8443
 ```
 
-Open `http://127.0.0.1:8443` in Edge and log in with that password. Use the dashboard to watch the live browser, switch backends, pause/resume automation, solve CAPTCHA/login challenges, record workflows, and replay them. See [docs/HERMES_BROWSER_DASHBOARD.md](docs/HERMES_BROWSER_DASHBOARD.md).
+Open **http://127.0.0.1:8443**, log in, and:
+
+- Launch / restart / stop managed browser sessions
+- Watch live DevTools (best with `cdp-bridge` backend)
+- Navigate + manual actions (click, fill, type)
+- Request human intervention on CAPTCHAs / logins
+- Record real interactions → save as YAML workflows
+- Replay workflows with variable substitution
+- Live searchable activity timeline + screenshots
+
+The dashboard is the recommended way to visually debug, handle CAPTCHAs/logins manually, teach workflows, and monitor automation. Full usage details are in the "Hermes Operator Dashboard" section below.
 
 ## Workflow System
 
@@ -186,7 +329,7 @@ Hooks: `on_launch`, `on_navigate`, `on_page_loaded`, `on_scraped`, `on_close`.
 python scripts/migrate_v1_to_v2.py --input workflow.yaml --output workflow-v2.yaml
 ```
 
-Deprecated APIs (`self.context`, `ConnectionPool`, ad-hoc MCP responses) have shims. See [docs/rfc/v2-migration.md](docs/rfc/v2-migration.md).
+Deprecated APIs (`self.context`, `ConnectionPool`, ad-hoc MCP responses) have shims. See the v2 migration notes in CHANGELOG.md.
 
 ## Project Structure
 
@@ -199,18 +342,10 @@ Deprecated APIs (`self.context`, `ConnectionPool`, ad-hoc MCP responses) have sh
 ├── production/     MCP server, SDK, orchestrator, security, profiler
 ├── plugins/        Plugin system with template
 ├── scripts/        Migration, evaluation, benchmarking
-└── docs/           ADRs, RFCs, capability map, guides
+└── tests/          880+ contract + integration tests
 ```
 
-## Documentation
-
-- [Architecture Decision Records](docs/adr/)
-- [Operator Setup Guide](docs/OPERATOR_SETUP.md)
-- [Capability Map](docs/CAPABILITY_MAP.md)
-- [MCP Browser Observability](docs/MCP_BROWSER_OBSERVABILITY.md)
-- [v2 Migration RFC](docs/rfc/v2-migration.md)
-- [Stealth Limitations](docs/STEALTH_LIMITATIONS.md)
-- [Threat Model](docs/THREAT_MODEL.md)
+This project keeps design history in git and prioritizes a single, practical README for users.
 
 ## License
 

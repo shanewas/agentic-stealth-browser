@@ -135,6 +135,6 @@ def generate_deprecation_report() -> Dict[str, Any]:
                 "removal": "v2.1.0",
             },
         ],
-        "migration_guide_url": "docs/rfc/v2-migration.md",
+        "migration_guide_url": "See CHANGELOG.md and scripts/migrate_v1_to_v2.py",
         "migration_script": "scripts/migrate_v1_to_v2.py",
     }
