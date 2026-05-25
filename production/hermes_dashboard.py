@@ -1659,6 +1659,7 @@ def create_app(
     @app.get("/login", response_class=HTMLResponse)
     async def login_page() -> str:
         from jinja2 import Template as JTemplate
+
         return JTemplate(LOGIN_TEMPLATE).render()
 
     @app.post("/login")
@@ -1693,6 +1694,7 @@ def create_app(
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         from jinja2 import Template as JTemplate
+
         # Render the rich self-contained dashboard shell. CSRF is embedded via meta tag.
         # The frontend JS hydrates all state via polling.
         return JTemplate(DASHBOARD_TEMPLATE).render(csrf=session["csrf"])
