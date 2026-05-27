@@ -250,6 +250,7 @@ class AgentBrowser:
         self.use_pooled_context: bool = use_pooled_context  # #57/#48/#47 scalability: when True, launch uses shared browser pool instead of per-instance launch_persistent_context
         self._using_pool: bool = False
         self._pooled_ctx_id: Optional[int] = None  # track for release
+        self._browser_process = None  # set after launch for PID tracking
 
         # #136: Tool-level rate limiter for public API surface (MCP tool calls)
         if rate_limits is not None:
@@ -635,6 +636,14 @@ class AgentBrowser:
                     lp_kwargs[k] = v
             self.browser = await pw.chromium.launch_persistent_context(**lp_kwargs)
             self.browser_context = self.browser
+
+            # Capture browser subprocess PID for external lifecycle management
+            try:
+                pw_browser_obj = self.browser.browser  # BrowserContext -> Browser
+                if pw_browser_obj is not None:
+                    self._browser_process = pw_browser_obj.process
+            except Exception:
+                self._browser_process = None
 
             # #377: discover CDP WS endpoint if enabled (uses Chrome's DevToolsActivePort + /json/version; stdlib only)
             if getattr(self, "debug_cdp", False):

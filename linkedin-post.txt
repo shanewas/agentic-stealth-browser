@@ -1,0 +1,16 @@
+You write a Playwright script, hit a protected site, and get blocked before your code even runs. Not because it's broken — because the site checked your TLS handshake, your WebGL renderer, your AudioContext, and whether `navigator.webdriver` still exists. Python's default TLS fingerprint gives it away every single time.
+
+I built an open-source library for this. Agentic Stealth Browser — still Python, still Playwright under the hood. The difference is there's a stealth layer that runs before the page loads:
+
+- TLS handshake is region-spoofed (Japan, US, EU, Korea) instead of Python's default
+- JS patches strip automation flags before first paint
+- Mouse movements and typing speed look human, not robotic
+- Auto-recovery when a site still manages to block you
+
+Tested against bot.sannysoft.com, pixelscan.net, CreepJS — all pass in headless mode. v2.1.1 on PyPI, ~880 tests.
+
+The tradeoff is real though: it's heavier than a plain Playwright script. More complexity, slower startup. Worth it if you're trying to reach anything behind Cloudflare or LinkedIn.
+
+https://github.com/shanewas/agentic-stealth-browser
+
+What sites are you getting blocked on? Trying to figure out what to cover next.
