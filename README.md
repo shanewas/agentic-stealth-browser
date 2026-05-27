@@ -6,7 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/agentic-stealth-browser.svg)](https://pypi.org/project/agentic-stealth-browser/)
-[![Tests](https://img.shields.io/badge/tests-880%2B%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-890%2B%20passing-brightgreen)](tests/)
+[![GitHub Stars](https://img.shields.io/github/stars/shanewas/agentic-stealth-browser?style=flat&logo=github)](https://github.com/shanewas/agentic-stealth-browser)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/shanewas)
 
 <p align="center">
@@ -111,18 +112,28 @@ Then: `stealth_launch` → `stealth_navigate` → `stealth_scrape` → `stealth_
 
 ---
 
+## New in v2.3.0
+
+- **Show HN launch** — README overhaul, demo GIF, streamlined community onboarding
+- **Buy Me A Coffee** — sponsor the project directly
+- **PID tracking** — `AgentBrowser._browser_process` for external process monitoring
+- **PyPI publish automation** — OIDC trusted publishing on every release tag
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+
+---
+
 ## Full Documentation
 
-- **Workflow System** — record real browser actions via CDP, replay as YAML (13 step types)
-- **Operator Dashboard** — Grok/X-inspired dark UI, live browser view, CAPTCHA solving, workflow recording
-- **Orchestrator** — queue, schedule, chain workflows with domain-aware concurrency
-- **Security** — input validation, session isolation, policy engine, approval gates
-- **SDK** — `StealthClient` async API without MCP
-- **Plugins** — lifecycle hooks for custom behavior
-- **VPS Deployment** — systemd, Caddy reverse proxy, Cloudflare Tunnel patterns
-- **Migration v1 → v2** — deprecation shims, migration guide, script
+- **[Operator Dashboard](production/hermes_dashboard.py)** — Grok/X-inspired dark UI, live browser view, CAPTCHA solving, workflow recording
+- **[Workflow Orchestrator](production/workflow_orchestrator.py)** — queue, schedule, chain workflows with domain-aware concurrency
+- **[Security](production/)** — input validation, session isolation, policy engine, approval gates
+- **[SDK](production/sdk/)** — `StealthClient` async API without MCP
+- **[Plugins](plugins/)** — lifecycle hooks for custom behavior
+- **[VPS Deployment](scripts/setup_rbb.sh)** — systemd, Caddy reverse proxy, Cloudflare Tunnel patterns
+- **[Migration v1 → v2](scripts/migrate_v1_to_v2.py)** — deprecation shims, migration guide, script
 
-See sections below for each topic. For release history: [CHANGELOG.md](CHANGELOG.md).
+Additional references: [CHANGELOG.md](CHANGELOG.md) · [Workflow Library](workflows/library/) · [Migration Guide](scripts/migrate_v1_to_v2.py)
 
 ---
 
@@ -137,7 +148,7 @@ See sections below for each topic. For release history: [CHANGELOG.md](CHANGELOG
 ├── production/     MCP server, SDK, orchestrator, security, profiler
 ├── plugins/        Plugin system with template
 ├── scripts/        Migration, evaluation, benchmarking
-└── tests/          880+ contract + integration tests
+└── tests/          890+ contract + integration tests
 ```
 
 ## License
