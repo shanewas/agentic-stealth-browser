@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.3.0] — Show HN & Community Launch (2026-05-28)
+
+### Added
+- **Show HN preparation**: Complete README overhaul with demo GIF, streamlined onboarding, and community-facing tone. (#HN)
+- **Buy Me A Coffee badge**: Support link in README for community sponsorship. (#badge)
+- **`_browser_process` exposure**: External PID tracking via `AgentBrowser._browser_process`, enabling process-level monitoring and recovery. (#pid)
+
+### Changed
+- Full README rewrite for PyPI + HN audience (pip-first install path, Quick Start with CLI + Python SDK + MCP, reduced wall-of-text, more code examples).
+- Demo GIF (`assets/hn-demo.gif`) showing end-to-end stealth browser flow.
+- Various lint fixes for demo scripts.
+
+### Fixed
+- Stray temp files cleaned from repo root.
+- Ruff formatting applied across all Python sources.
+
+## [2.1.1] — PyPI & Docs Consolidation (2026-05-27)
+
+### Added
+- **PyPI publish workflow** (`.github/workflows/pypi-publish.yml`): OIDC trusted publishing for automated release deployment. (#pypi)
+- **PyPI release readiness**: README polished for pip-first consumption, badges and metadata tuned for PyPI listing.
+
+### Changed
+- **Docs consolidation**: `docs/` folder removed, all documentation consolidated into README.md for a single source of truth. Content preserved (THREAT_MODEL, STEALTH_LIMITATIONS, ADRs, etc. remain accessible via GitHub blob links).
+- ruff formatting applied across dashboard codebase.
+
 ## [2.1.0] — Hermes Browser Dashboard (2026-05-30)
 
 ### Added
@@ -272,8 +298,11 @@ See the full v0.9.0 milestone and the stacked PRs #383/#384/#385 for implementat
 
 ---
 
-[unreleased]: https://github.com/shanewas/agentic-stealth-browser/compare/v0.9.0...HEAD
-[1.0.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v1.0.0
+[unreleased]: https://github.com/shanewas/agentic-stealth-browser/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.3.0
+[2.1.1]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.1.1
+[2.1.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.1.0
+[2.0.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.0.0
 [0.9.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v0.9.0
 [0.2.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v0.2.0
 [0.1.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v0.1.0
