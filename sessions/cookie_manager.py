@@ -9,7 +9,10 @@ Phase 8 P1 #82: added optional at-rest encryption + integrity protection for coo
 
 import json
 import hmac
+import hashlib
 import logging
+import os
+import secrets
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -48,31 +51,30 @@ def _validate_path(path: str, must_exist_parent: bool = True) -> Path:
     return resolved
 
 
-_INTEGRITY_SALT = b"agentic-stealth-browser-integrity-v1"
-
-
-def _compute_hmac(key: str, data: bytes, session_name: str = "") -> str:
+def _compute_hmac(key: str, data: bytes, session_name: str = "", salt: bytes = None) -> str:
     """Compute HMAC-SHA256 integrity hash for cookie/bundle data.
 
     When *key* is provided (non-empty), it is used directly as the HMAC key
     so that integrity is tied to the same secret used for encryption.
-    When *key* is empty / not provided, the HMAC key is derived from a
-    hardcoded application salt combined with *session_name* so that plaintext
-    files still carry a tamper-evident signature.
+    When *key* is empty / not provided, the HMAC key is derived using PBKDF2
+    from *session_name* with the provided *salt* so that plaintext files
+    still carry a tamper-evident signature.
     """
     if key:
         hmac_key = key.encode("utf-8") if isinstance(key, str) else key
     else:
-        hmac_key = _INTEGRITY_SALT + session_name.encode("utf-8")
+        if salt is None:
+            raise ValueError("salt is required when no encryption key is provided")
+        hmac_key = hashlib.pbkdf2_hmac("sha256", session_name.encode("utf-8"), salt, 100000)
     return hmac.new(hmac_key, data, "sha256").hexdigest()
 
 
 def _verify_hmac(
-    key: str, data: bytes, expected_hex: str, session_name: str = ""
+    key: str, data: bytes, expected_hex: str, session_name: str = "", salt: bytes = None
 ) -> bool:
     """Recompute and compare HMAC; returns True iff the digest matches."""
     return hmac.compare_digest(
-        _compute_hmac(key, data, session_name=session_name), expected_hex
+        _compute_hmac(key, data, session_name=session_name, salt=salt), expected_hex
     )
 
 
@@ -123,17 +125,19 @@ class CookieManager:
 
     Encryption key requirements:
         When providing an encryption_key to _get_cipher(), encrypt_data(), decrypt_data(),
-        or any save/load method, the key must be at least 16 characters long to ensure
+        or any save/load method, the key must be at least 32 characters long to ensure
         adequate entropy for derived Fernet keys. Shorter keys raise ValueError.
         Pass None to disable encryption (backward compatible).
     """
 
-    _MIN_KEY_LENGTH = _MIN_KEY_LENGTH
+    _MIN_KEY_LENGTH = 32
 
-    def __init__(self, browser_context=None):
+    def __init__(self, browser_context=None, hmac_salt: bytes = None):
         self.browser_context = browser_context
         self.cookies: List[Dict] = []
         self.last_refresh: Optional[datetime] = None
+        # Cryptographically random salt for HMAC key derivation when no encryption key is provided
+        self._hmac_salt = hmac_salt if hmac_salt is not None else secrets.token_bytes(32)
 
     def _get_cipher(self, key: Optional[str]) -> Optional["Fernet"]:
         """Return Fernet cipher for optional encryption (supports raw secret or fernet key).
@@ -147,11 +151,6 @@ class CookieManager:
             raise ValueError(
                 f"Encryption key too short (minimum {self._MIN_KEY_LENGTH} characters). "
                 "Use a strong, unique passphrase."
-            )
-        if len(key) < 32:
-            logger.warning(
-                "Encryption key is shorter than 32 characters; "
-                "derived key may have reduced entropy. Use a longer passphrase for better security."
             )
         try:
             k = key.encode() if isinstance(key, str) else key
@@ -266,14 +265,23 @@ class CookieManager:
                     )
 
             # Integrity check for plaintext payloads (#111)
+            # Extract stored salt (new format) or fall back to instance salt (legacy)
+            stored_salt_hex = data.get("_hmac_salt") if isinstance(data, dict) else None
+            if stored_salt_hex:
+                try:
+                    loaded_salt = bytes.fromhex(stored_salt_hex)
+                except Exception:
+                    loaded_salt = self._hmac_salt
+            else:
+                loaded_salt = self._hmac_salt
             if (
                 isinstance(data, dict)
                 and not data.get("encrypted")
                 and "integrity" in data
             ):
                 stored_hmac = data["integrity"]
-                # Build canonical payload without the integrity field
-                payload_copy = {k: v for k, v in data.items() if k != "integrity"}
+                # Build canonical payload without the integrity and salt fields
+                payload_copy = {k: v for k, v in data.items() if k not in ("integrity", "_hmac_salt")}
                 raw = json.dumps(
                     payload_copy, separators=(",", ":"), sort_keys=True
                 ).encode("utf-8")
@@ -286,7 +294,7 @@ class CookieManager:
                         else ""
                     )
                 if not _verify_hmac(
-                    encryption_key or "", raw, stored_hmac, session_name=verify_name
+                    encryption_key or "", raw, stored_hmac, session_name=verify_name, salt=loaded_salt
                 ):
                     return {
                         "status": "integrity_error",
@@ -589,6 +597,7 @@ class CookieManager:
                 }
                 with open(path, "w") as f:
                     json.dump(payload, f, indent=2)
+                os.chmod(path, 0o600)
                 return {
                     "status": "success",
                     "saved": len(self.cookies),
@@ -607,9 +616,13 @@ class CookieManager:
                     session_name=self.session_name
                     if hasattr(self, "session_name")
                     else "",
+                    salt=self._hmac_salt,
                 )
+                # Store salt so load can verify without needing the same instance
+                payload["_hmac_salt"] = self._hmac_salt.hex()
                 with open(path, "w") as f:
                     json.dump(payload, f, indent=2)
+                os.chmod(path, 0o600)
                 return {
                     "status": "success",
                     "saved": len(self.cookies),
@@ -700,6 +713,7 @@ class CookieManager:
                 }
                 with open(validated_bundle_path, "w") as f:
                     json.dump(payload, f, indent=2)
+                os.chmod(validated_bundle_path, 0o600)
                 return {
                     "status": "success",
                     "bundle": str(validated_bundle_path),
@@ -712,10 +726,13 @@ class CookieManager:
                     "utf-8"
                 )
                 bundle["integrity"] = _compute_hmac(
-                    encryption_key or "", raw, session_name=session_name
+                    encryption_key or "", raw, session_name=session_name, salt=self._hmac_salt
                 )
+                # Store salt so load can verify without needing the same instance
+                bundle["_hmac_salt"] = self._hmac_salt.hex()
                 with open(validated_bundle_path, "w") as f:
                     json.dump(bundle, f, indent=2)
+                os.chmod(validated_bundle_path, 0o600)
                 return {
                     "status": "success",
                     "bundle": str(validated_bundle_path),
@@ -784,9 +801,19 @@ class CookieManager:
                 }
 
         # Integrity check for plaintext bundles (#73)
+        # Extract stored salt (new format) or fall back to instance salt (legacy)
+        stored_salt_hex = data.get("_hmac_salt") if isinstance(data, dict) else None
+        if stored_salt_hex:
+            try:
+                verify_salt = bytes.fromhex(stored_salt_hex)
+            except Exception:
+                verify_salt = self._hmac_salt
+        else:
+            verify_salt = self._hmac_salt
         if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
             stored_hmac = data["integrity"]
-            payload_copy = {k: v for k, v in data.items() if k != "integrity"}
+            # Build canonical payload without integrity and salt fields
+            payload_copy = {k: v for k, v in data.items() if k not in ("integrity", "_hmac_salt")}
             raw = json.dumps(
                 payload_copy, separators=(",", ":"), sort_keys=True
             ).encode("utf-8")
@@ -795,7 +822,7 @@ class CookieManager:
             bundle_meta = bundle.get("meta", {}) if isinstance(bundle, dict) else {}
             verify_name = bundle_meta.get("name", "") or target_session_name or ""
             if not _verify_hmac(
-                encryption_key or "", raw, stored_hmac, session_name=verify_name
+                encryption_key or "", raw, stored_hmac, session_name=verify_name, salt=verify_salt
             ):
                 return {
                     "status": "integrity_error",
@@ -993,12 +1020,3 @@ class SessionOrchestrator:
             path = f"{out_dir}/{name}_bundle.json"
             results[name] = await self.cm.export_session_bundle(name, path)
         return results
-
-
-# P1 #82 cookie security (additive note + stub for encryption in follow-up)
-# Recommended: implement Fernet save/load using existing "cryptography" dep.
-async def _save_cookies_secure_stub(self, path, key=None):
-    return {
-        "status": "todo",
-        "note": "Implement full encrypted save per #82 (see agent_browser save_cookies_to_file entrypoint)",
-    }

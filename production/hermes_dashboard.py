@@ -1891,4 +1891,14 @@ def run_dashboard(
         password=password or os.getenv("HERMES_DASHBOARD_PASSWORD", "change-me"),
     )
     app = create_app(settings=settings)
-    uvicorn.run(app, host=host, port=port)
+
+    # Run uvicorn in a subprocess to avoid asyncio.Runner conflicts when
+    # embedded in a process that already has a running event loop.
+    import multiprocessing
+
+    def _start_server():
+        uvicorn.run(app, host=host, port=port, loop="asyncio")
+
+    p = multiprocessing.Process(target=_start_server, daemon=True)
+    p.start()
+    p.join()

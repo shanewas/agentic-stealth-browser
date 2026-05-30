@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import os
+import socket
 import sys
 import time
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -45,6 +48,77 @@ class ToolError(Exception):
         self.error_code = error_code
         self.message = message
         self.details = details or {}
+
+
+# ----------------------------------------------------------------------------- #
+# SSRF protection – reject URLs that resolve to private / loopback addresses.  #
+# ----------------------------------------------------------------------------- #
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),      # loopback (includes 127.0.0.1)
+    ipaddress.ip_network("::1/128"),           # IPv6 loopback
+    ipaddress.ip_network("0.0.0.0/8"),         # current network
+    ipaddress.ip_network("10.0.0.0/8"),       # private (RFC 1918)
+    ipaddress.ip_network("172.16.0.0/12"),     # private (RFC 1918)
+    ipaddress.ip_network("192.168.0.0/16"),   # private (RFC 1918)
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local (includes 169.254.169.254)
+]
+
+
+def is_url_safe(url: str) -> bool:
+    """
+    Return True when the URL is safe to navigate / scrape.
+
+    A URL is considered unsafe when its resolved IP address falls inside any of
+    the blocked private ranges (loopback, RFC-1918, link‑local) or resolves to
+    ``localhost``.
+    """
+    def _ip_blocked(ip_str: str) -> bool:
+        """Return True when the string represents a blocked IP or IP network."""
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            for network in _BLOCKED_NETWORKS:
+                if ip in network:
+                    return True
+        except ValueError:
+            pass
+        return False
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.hostname
+
+        # Fallback for URLs that urlparse can't extract a hostname from
+        # (e.g. bare IPv6 literals like http://::1/).
+        if not host:
+            host = url.split("://", 1)[-1].split("/")[0].split("?")[0].rstrip("/")
+            if not host:
+                return True
+
+        # If the hostname is already a literal IP address, check it directly.
+        if _ip_blocked(host):
+            return False
+
+        # Resolve hostname via DNS for hostnames that aren't blocked literals
+        addr_info = socket.getaddrinfo(host, None)
+        if not addr_info:
+            return True                                 # unresolvable – let it pass
+
+        for family, _, _, _, sockaddr in addr_info:
+            if family == socket.AF_INET:
+                ip = ipaddress.ip_address(sockaddr[0])
+            elif family == socket.AF_INET6:
+                ip = ipaddress.ip_address(sockaddr[0])
+            else:
+                continue                                 # unknown – skip
+            for network in _BLOCKED_NETWORKS:
+                if ip in network:
+                    return False
+    except Exception:
+        # On any resolution error we fail open so that valid external URLs are
+        # not accidentally blocked by transient DNS issues.
+        pass
+    return True
 
 
 @dataclass
@@ -768,6 +842,11 @@ class StealthMCPServer:
         url = args.get("url")
         if not url:
             raise ToolError("MCP_VALIDATION_ERROR", "url is required")
+        if not is_url_safe(str(url)):
+            raise ToolError(
+                "MCP_SSRF_BLOCKED",
+                "URL resolves to a private or blocked address",
+            )
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         platform = str(args.get("platform") or "unknown")
         warm_up = bool(args.get("warm_up", True))
@@ -854,6 +933,11 @@ class StealthMCPServer:
         url = args.get("url")
         if not url:
             raise ToolError("MCP_VALIDATION_ERROR", "url is required")
+        if not is_url_safe(str(url)):
+            raise ToolError(
+                "MCP_SSRF_BLOCKED",
+                "URL resolves to a private or blocked address",
+            )
         session_name, browser = await self._resolve_browser(args.get("session_name"))
         extract_images = bool(args.get("extract_images", False))
         platform = str(args.get("platform") or "unknown")

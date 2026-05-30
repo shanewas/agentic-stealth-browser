@@ -215,12 +215,6 @@ class AuditLogger:
         Redaction is mandatory by default (opt-in to disable via AGENTIC_STEALTH_NO_REDACT
         env var, intended ONLY for local debugging).
         """
-        if os.getenv("AGENTIC_STEALTH_NO_REDACT", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        ):
-            return details if isinstance(details, dict) else details
         SENSITIVE_KEYS = frozenset(
             [
                 "password",

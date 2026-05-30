@@ -183,7 +183,7 @@ class TestCookieManagerSaveLoad:
 
     def test_save_and_load_with_encryption(self):
         mgr = CookieManager()
-        key = "this-is-a-32-byte-secret-key!!"
+        key = "this-is-a-32-byte-secret-key-xx!"
         mgr.cookies = [
             {"name": "secure_cookie", "value": "secret", "domain": ".example.com"}
         ]
@@ -201,7 +201,7 @@ class TestCookieManagerSaveLoad:
 
     def test_encrypted_file_fails_without_key(self):
         mgr = CookieManager()
-        key = "this-is-a-32-byte-secret-key!!"
+        key = "this-is-a-32-byte-secret-key-xx!"
         mgr.cookies = [{"name": "x", "value": "y"}]
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
@@ -215,7 +215,7 @@ class TestCookieManagerSaveLoad:
 
     def test_encrypted_file_fails_with_wrong_key(self):
         mgr = CookieManager()
-        key = "this-is-a-32-byte-secret-key!!"
+        key = "this-is-a-32-byte-secret-key-xx!"
         mgr.cookies = [{"name": "x", "value": "y"}]
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
@@ -265,7 +265,7 @@ class TestCookieManagerClear:
 class TestEncryptDecrypt:
     def test_encrypt_decrypt_roundtrip(self):
         mgr = CookieManager()
-        key = "this-is-a-32-byte-secret-key!!"
+        key = "this-is-a-32-byte-secret-key-xx!"
         plain = b"hello world"
         token = mgr.encrypt_data(plain, key)
         assert token is not None
@@ -275,8 +275,8 @@ class TestEncryptDecrypt:
 
     def test_decrypt_with_wrong_key(self):
         mgr = CookieManager()
-        key1 = "key1-is-a-32-byte-secret!!!!!"
-        key2 = "key2-is-a-32-byte-secret!!!!!"
+        key1 = "key1-is-a-32-byte-secret-!!!!aby"
+        key2 = "key2-is-a-32-byte-secret!!!!!aby"
         token = mgr.encrypt_data(b"data", key1)
         result = mgr.decrypt_data(token, key2)
         assert result is None
@@ -287,15 +287,15 @@ class TestEncryptDecrypt:
 
     def test_key_rotation_try_decrypt(self):
         mgr = CookieManager()
-        key_old = "old-key-is-a-32-byte-secret!!"
-        key_new = "new-key-is-a-32-byte-secret!!"
+        key_old = "old-key-is-a-32-byte-secret-!!ab"
+        key_new = "new-key-is-a-32-byte-secret-!!ab"
         token = mgr.encrypt_data(b"rotated-data", key_old)
         result = mgr._try_decrypt_with_keys(token, [key_new, key_old])
         assert result == b"rotated-data"
 
     def test_key_rotation_all_fail(self):
         mgr = CookieManager()
-        key_old = "old-key-is-a-32-byte-secret!!"
+        key_old = "old-key-is-a-32-byte-secret-!!ab"
         token = mgr.encrypt_data(b"data", key_old)
-        result = mgr._try_decrypt_with_keys(token, ["wrong-key-is-a-32-char-key!!"])
+        result = mgr._try_decrypt_with_keys(token, ["wrong-key-is-a-32-char-key-xx!ab"])
         assert result is None

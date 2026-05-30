@@ -90,9 +90,9 @@ class ProxyConfig:
 
         d = asdict(self)
         d["password"] = "***REDACTED***"
-        # Mask most of the username, keep first 3 chars
-        if d.get("username") and len(d["username"]) > 3:
-            d["username"] = d["username"][:3] + "***"
+        # Fully redact username
+        if d.get("username"):
+            d["username"] = "***REDACTED***"
         return d
 
 
@@ -289,12 +289,12 @@ class ProxyManager:
         }
 
     def get_curl_proxy_string(self) -> str:
-        """Return curl-compatible proxy string"""
+        """Return curl-compatible proxy string (credentials redacted for safety)."""
         if not self.current_config:
             return ""
 
         cfg = self.current_config
-        return f"socks5://{cfg.username}:{cfg.password}@{cfg.host}:{cfg.port}"
+        return f"socks5://***REDACTED***:***REDACTED***@{cfg.host}:{cfg.port}"
 
     async def test_proxy_connection(self, timeout: int = 10) -> Dict:
         """Test if the current proxy configuration actually works."""
@@ -324,7 +324,7 @@ class ProxyManager:
         except Exception as e:
             return {
                 "status": "error",
-                "message": str(e),
+                "message": "Proxy connection failed",
                 "provider": cfg.provider,
                 "tier": getattr(cfg, "tier", "unknown"),
             }
