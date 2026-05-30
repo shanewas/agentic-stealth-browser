@@ -509,6 +509,7 @@ class AgentBrowser:
             "--disable-blink-features=AutomationControlled",
             "--disable-features=IsolateOrigins,site-per-process",
             "--no-sandbox",
+            "--headless=new",  # Chrome 112+ new headless: uses real rendering pipeline, much better fingerprint than old headless
         ]
         all_args = list(set(base_args + tls_args))
 
@@ -598,7 +599,9 @@ class AgentBrowser:
                 "timezone_id": tz,
                 "extra_http_headers": extra_headers,
                 "proxy": launch_proxy,
-                # browser-level args (tls/no-sandbox etc) applied at shared launch time
+                # headless is NOT set here — it's applied via --headless=new in all_args
+                # at shared browser launch time (see _BrowserPool.ensure_browser).
+                # Adding headless=True to context_opts here would be a layering error.
             }
             # #143: merge user-provided custom launch/context options safely (non-overriding critical keys)
             custom = getattr(self, "_custom_launch_options", {}) or {}

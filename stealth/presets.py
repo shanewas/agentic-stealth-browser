@@ -127,6 +127,28 @@ GENERAL_HIGH_STEALTH = PlatformPreset(
     notes="Use as baseline then specialize. Combine with region switching for geo-targeted sites (JP/KR/EU presets).",
 )
 
+REDDIT = PlatformPreset(
+    name="reddit",
+    description="Reddit-specific hardening: conservative TLS, heavy behavior, longer warm-up, no webdriver signals.",
+    tls_region=Region.US,  # US TLS to match reddit's primary infrastructure
+    behavior_intensity="heavy",
+    warm_up="heavy",
+    recovery_max_retries=5,
+    recovery_base_backoff=40,  # longer backoff for Reddit's aggressive rate limits
+    locale="en-US",
+    timezone_id="America/New_York",
+    notes=(
+        "Reddit uses aggressive WAF + rate limiting. Key survival tips:\n"
+        "1. Warm up heavily before first request (60s+ of idle + scroll simulation on reddit.com)\n"
+        "2. Use --headless=new (Chrome 112+ new headless mode) — much better TLS/UDP fingerprint\n"
+        "3. Load cookies from a real logged-in session — Reddit is extremely hostile to new accounts\n"
+        "4. Never rapid-submit (posts/comments) — space 30+ seconds between actions\n"
+        "5. Rotate session every 10-15 navigations to avoid 'too many requests'\n"
+        "6. If blocked, wait 5+ minutes before retry with new session"
+    ),
+    extra_patches=["conservative_mouse_jitter", "reddit_rate_guard"],
+)
+
 # #277: minimal viable stealth light preset (speed-first)
 LIGHT_STEALTH = PlatformPreset(
     name="light_stealth",
@@ -155,6 +177,8 @@ PRESETS: Dict[str, PlatformPreset] = {
     "general": GENERAL_HIGH_STEALTH,
     "high_stealth": GENERAL_HIGH_STEALTH,
     "default": GENERAL_HIGH_STEALTH,
+    "reddit": REDDIT,
+    "reddit_preset": REDDIT,
     # #277 light preset aliases
     "light": LIGHT_STEALTH,
     "light_stealth": LIGHT_STEALTH,
