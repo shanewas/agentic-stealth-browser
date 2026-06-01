@@ -312,3 +312,66 @@ async def test_attach_over_cdp_stealth_not_requested(remote_chromium):
     assert info["stealth_error"] is None
     await ab.close()
     assert proc.returncode is None
+
+
+# ---------------------------------------------------------------------------
+# TeardownMode enum (#439)
+# ---------------------------------------------------------------------------
+
+
+def test_teardown_mode_enum_exists():  # noqa: not async — but pytestmark is async-mode global
+    """The TeardownMode enum is exported from core.agent_browser."""
+    from core.agent_browser import TeardownMode
+
+    assert TeardownMode.LAUNCHED.value == "launched"
+    assert TeardownMode.POOLED.value == "pooled"
+    assert TeardownMode.ATTACHED_OWNED_CTX.value == "attached_owned_ctx"
+    assert TeardownMode.ATTACHED_ADOPTED_CTX.value == "attached_adopted_ctx"
+
+
+async def test_teardown_mode_init_is_none():
+    """Fresh AgentBrowser has _teardown_mode = None (no browser yet)."""
+    ab = AgentBrowser(session_name="t-init", anonymous=True, ephemeral=True)
+    assert ab._teardown_mode is None
+    await ab.close()  # should be a no-op
+    assert ab._teardown_mode is None
+
+
+async def test_teardown_mode_set_to_attached_owned(remote_chromium):
+    """attach_over_cdp(new_context=True) sets ATTACHED_OWNED_CTX."""
+    from core.agent_browser import TeardownMode
+
+    port, proc = remote_chromium
+    ab = AgentBrowser(session_name="t-owned", anonymous=True, ephemeral=True)
+    await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
+    assert ab._teardown_mode == TeardownMode.ATTACHED_OWNED_CTX
+    await ab.close()
+    assert ab._teardown_mode is None  # reset on close
+    assert proc.returncode is None
+
+
+async def test_teardown_mode_set_to_attached_adopted(remote_chromium):
+    """attach_over_cdp(adopt existing) sets ATTACHED_ADOPTED_CTX."""
+    from core.agent_browser import TeardownMode
+
+    port, proc = remote_chromium
+    # First call with new_context=True so the remote has ≥1 context
+    ab_setup = AgentBrowser(
+        session_name="t-setup", anonymous=True, ephemeral=True
+    )
+    await ab_setup.attach_over_cdp(
+        f"http://127.0.0.1:{port}", new_context=True
+    )
+    # Don't close — leave the context alive. Now adopt it from a new instance.
+    ab_adopt = AgentBrowser(
+        session_name="t-adopt", anonymous=True, ephemeral=True
+    )
+    await ab_adopt.attach_over_cdp(
+        f"http://127.0.0.1:{port}", new_context=False, context_index=0
+    )
+    assert ab_adopt._teardown_mode == TeardownMode.ATTACHED_ADOPTED_CTX
+    # Clean up — close should NOT kill the adopted context
+    await ab_adopt.close()
+    await ab_setup.close()
+    assert proc.returncode is None  # external browser still alive
+

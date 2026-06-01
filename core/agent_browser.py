@@ -4,6 +4,7 @@ Combines stealth, human behavior, and session management
 """
 
 import asyncio
+import enum
 import random
 import time
 import os  # for env vars in launch (also used by other methods)
@@ -50,6 +51,27 @@ class StealthBrowserError(Exception):
     """Base exception for all Agentic Stealth Browser library errors (DX #249)."""
 
     pass
+
+
+class TeardownMode(enum.Enum):
+    """State machine for how close() should release resources (#439).
+
+    Set by launch() / launch_pooled() / attach_over_cdp() exactly once.
+    Read by close() exactly once.
+
+    Lifecycle:
+        __init__ → None (no browser)
+        launch() → LAUNCHED
+        launch() with use_pooled_context=True → POOLED
+        attach_over_cdp(new_context=True) → ATTACHED_OWNED_CTX
+        attach_over_cdp(adopt existing) → ATTACHED_ADOPTED_CTX
+        close() → dispatches on this value, then None
+    """
+
+    LAUNCHED = "launched"  # Owns the browser process — close it
+    POOLED = "pooled"  # Borrowed a context from _BrowserPool — release, don't kill
+    ATTACHED_OWNED_CTX = "attached_owned_ctx"  # Attached + created a new context
+    ATTACHED_ADOPTED_CTX = "attached_adopted_ctx"  # Attached + adopted user's context
 
 
 class LaunchError(StealthBrowserError):
@@ -251,6 +273,9 @@ class AgentBrowser:
         self._using_pool: bool = False
         self._pooled_ctx_id: Optional[int] = None  # track for release
         self._browser_process = None  # set after launch for PID tracking
+
+        # #439: TeardownMode state machine — None means "no browser to tear down"
+        self._teardown_mode: Optional["TeardownMode"] = None
 
         # #136: Tool-level rate limiter for public API surface (MCP tool calls)
         if rate_limits is not None:
@@ -585,6 +610,8 @@ class AgentBrowser:
 
         self._using_pool = bool(getattr(self, "use_pooled_context", False))
         if self._using_pool:
+            # #439: pooled path borrows a context from the shared pool.
+            self._teardown_mode = TeardownMode.POOLED
             # Scalability path: single shared Chromium + many cheap contexts. No per-instance user_data persistence.
             user_data = Path(self.session["user_data_dir"])
             user_data.mkdir(
@@ -954,6 +981,9 @@ class AgentBrowser:
                 for k, v in (custom or {}).items():
                     if k not in ("user_data_dir",):
                         lp_kwargs[k] = v
+                # #439: mark teardown mode BEFORE the actual launch so any
+                # partial-failure cleanup in close() knows what to do.
+                self._teardown_mode = TeardownMode.LAUNCHED
                 self.browser = await self._pw.chromium.launch_persistent_context(
                     **lp_kwargs
                 )
@@ -2193,6 +2223,7 @@ class AgentBrowser:
         self._remote_browser = remote_browser
         self._attached_cdp_url = normalised
         self._attached = True
+        # #439: attach path — will be refined to OWNED or ADOPTED below.
 
         # Pick or create the context we will drive.
         existing_contexts = list(remote_browser.contexts)
@@ -2201,6 +2232,8 @@ class AgentBrowser:
             ctx_opts = dict(context_options or {})
             ctx = await remote_browser.new_context(**ctx_opts)
             self._attached_context_is_ours = True
+            # #439: we own the context, but not the browser process
+            self._teardown_mode = TeardownMode.ATTACHED_OWNED_CTX
             adopted_index = "new"
         else:
             if context_index < 0 or context_index >= len(existing_contexts):
@@ -2210,6 +2243,8 @@ class AgentBrowser:
                 )
             ctx = existing_contexts[context_index]
             self._attached_context_is_ours = False
+            # #439: we adopted a user-owned context — do NOT close it on teardown
+            self._teardown_mode = TeardownMode.ATTACHED_ADOPTED_CTX
             adopted_index = context_index
 
         self.browser = ctx  # AgentBrowser treats `browser` as the active context
@@ -2297,36 +2332,49 @@ class AgentBrowser:
 
             if self.browser:
                 try:
-                    if getattr(self, "_attached", False):
-                        # Only close the context if WE created it; never close
-                        # a user context we merely adopted.
-                        if getattr(self, "_attached_context_is_ours", False):
-                            try:
-                                await self.browser.close()
-                            except Exception:
-                                pass
-                        # Disconnect from the remote browser without killing it.
+                    # #439: dispatch on TeardownMode enum instead of scattered
+                    # getattr flag checks. Each branch is responsible for
+                    # exactly the teardown it owns.
+                    mode = self._teardown_mode
+                    if mode == TeardownMode.ATTACHED_OWNED_CTX:
+                        # We created the context → close it.
+                        try:
+                            await self.browser.close()
+                        except Exception:
+                            pass
+                        # Then disconnect from the remote browser without killing it.
                         remote = getattr(self, "_remote_browser", None)
                         if remote is not None:
                             try:
-                                await (
-                                    remote.close()
-                                )  # PW: disconnects CDP, leaves Chrome alive
+                                await remote.close()
                             except Exception:
                                 pass
                             self._remote_browser = None
-                    elif getattr(self, "_using_pool", False) and getattr(
+                    elif mode == TeardownMode.ATTACHED_ADOPTED_CTX:
+                        # Adopted user context → NEVER close it. Just disconnect.
+                        remote = getattr(self, "_remote_browser", None)
+                        if remote is not None:
+                            try:
+                                await remote.close()
+                            except Exception:
+                                pass
+                            self._remote_browser = None
+                    elif mode == TeardownMode.POOLED and getattr(
                         self, "_pool", None
                     ):
+                        # Borrowed a context from the pool → release it back.
                         await self._pool.release_context(self.browser)
-                    else:
+                    elif mode == TeardownMode.LAUNCHED:
+                        # We launched the browser process → close it.
                         await self.browser.close()
+                    # mode is None → no browser was ever set up; no-op
                 except Exception:
                     pass
                 self.browser = None
                 self.browser_context = None
                 self.context = None
                 self._pooled_ctx_id = None
+                self._teardown_mode = None  # reset for potential re-use
 
             if getattr(self, "_using_pool", False):
                 # do not shutdown shared pool here; individual close only releases its ctx
