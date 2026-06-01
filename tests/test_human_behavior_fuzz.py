@@ -26,9 +26,15 @@ class MockPage:
         self._url = "https://example.com"
         self._title = "Example Domain"
         self._calls = []
+        self.mouse = self.Mouse(self)
+        self.keyboard = self.Keyboard(self)
 
-    async def evaluate(self, js):
-        self._calls.append(("evaluate", js))
+    async def evaluate(self, js, arg=None):
+        # Real Playwright: page.evaluate(js, arg) — the JS source can take a single
+        # argument; the Python side passes a JSON-serializable value. MockPage
+        # ignores both, but must accept the second arg so the call doesn't raise
+        # TypeError and force the JS-batch path to fall back to slow per-CDP calls.
+        self._calls.append(("evaluate", js, arg))
         return {"x": self._mouse_pos[0], "y": self._mouse_pos[1]}
 
     async def mouse_move(self, x, y):
@@ -65,14 +71,6 @@ class MockPage:
 
         async def type(self, text, **kwargs):
             self._page._calls.append(("keyboard.type", text, kwargs))
-
-    def __init__(self):
-        self._mouse_pos = (500, 400)
-        self._url = "https://example.com"
-        self._title = "Example Domain"
-        self._calls = []
-        self.mouse = self.Mouse(self)
-        self.keyboard = self.Keyboard(self)
 
     async def query_selector(self, selector):
         self._calls.append(("query_selector", selector))

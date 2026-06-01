@@ -664,7 +664,13 @@ class HumanBehavior:
                 pause = self.rng.uniform(2.0, 5.0)
             else:
                 pause = self.rng.uniform(1.2, 3.8) * max(0.6, min(1.8, content_factor))
-            await asyncio.sleep(pause)
+            # Cap pause to remaining budget — without this, a single "slow" or
+            # "re-read" iteration can blow through `scaled` (especially with high
+            # content_factor) and the test suite (or a CI budget) never returns.
+            remaining = end_time - time.monotonic()
+            pause = min(pause, max(0.0, remaining))
+            if pause > 0:
+                await asyncio.sleep(pause)
 
             if self.rng.random() < 0.18:
                 await self.page.mouse.wheel(0, -self.rng.randint(40, 90))
