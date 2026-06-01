@@ -177,9 +177,7 @@ async def remote_chromium(tmp_path):
 async def test_attach_over_cdp_live_new_context(remote_chromium):
     port, proc = remote_chromium
     ab = AgentBrowser(session_name="t-attach", anonymous=True, ephemeral=True)
-    info = await ab.attach_over_cdp(
-        f"http://127.0.0.1:{port}", new_context=True
-    )
+    info = await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
 
     assert info["stealth_applied"] is True
     assert info["adopted_context_index"] == "new"
