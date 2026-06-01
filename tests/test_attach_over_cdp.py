@@ -88,9 +88,7 @@ async def test_mcp_attach_blocks_link_local_ipv6():
     """Link-local IPv6 is rejected by is_loopback_host."""
     server = StealthMCPServer()
     with pytest.raises(ToolError) as ei:
-        await server._tool_stealth_attach_over_cdp(
-            {"cdp_url": "http://[fe80::1]:9222"}
-        )
+        await server._tool_stealth_attach_over_cdp({"cdp_url": "http://[fe80::1]:9222"})
     assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
 
 
@@ -319,7 +317,7 @@ async def test_attach_over_cdp_stealth_not_requested(remote_chromium):
 # ---------------------------------------------------------------------------
 
 
-def test_teardown_mode_enum_exists():  # noqa: not async — but pytestmark is async-mode global
+def test_teardown_mode_enum_exists():
     """The TeardownMode enum is exported from core.agent_browser."""
     from core.agent_browser import TeardownMode
 
@@ -356,16 +354,10 @@ async def test_teardown_mode_set_to_attached_adopted(remote_chromium):
 
     port, proc = remote_chromium
     # First call with new_context=True so the remote has ≥1 context
-    ab_setup = AgentBrowser(
-        session_name="t-setup", anonymous=True, ephemeral=True
-    )
-    await ab_setup.attach_over_cdp(
-        f"http://127.0.0.1:{port}", new_context=True
-    )
+    ab_setup = AgentBrowser(session_name="t-setup", anonymous=True, ephemeral=True)
+    await ab_setup.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
     # Don't close — leave the context alive. Now adopt it from a new instance.
-    ab_adopt = AgentBrowser(
-        session_name="t-adopt", anonymous=True, ephemeral=True
-    )
+    ab_adopt = AgentBrowser(session_name="t-adopt", anonymous=True, ephemeral=True)
     await ab_adopt.attach_over_cdp(
         f"http://127.0.0.1:{port}", new_context=False, context_index=0
     )
@@ -374,4 +366,3 @@ async def test_teardown_mode_set_to_attached_adopted(remote_chromium):
     await ab_adopt.close()
     await ab_setup.close()
     assert proc.returncode is None  # external browser still alive
-
