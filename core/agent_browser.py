@@ -2218,15 +2218,29 @@ class AgentBrowser:
 
         # Stealth layer: init scripts apply to future pages (and re-apply on every
         # navigation in existing pages). Launch-time tricks are unavailable.
+        stealth_installed = False
+        stealth_error: Optional[str] = None
         if apply_stealth:
             session_name = (self.session or {}).get("name", "default-session")
             fp_seed = f"agentic-{session_name}-canvas-v4"
             stealth_script = get_stealth_script(fingerprint_seed=fp_seed)
             try:
                 await ctx.add_init_script(stealth_script)
-            except Exception:
-                # Non-fatal: caller still gets a working attached context
-                pass
+                stealth_installed = True
+            except Exception as e:
+                # Non-fatal: caller still gets a working attached context, but
+                # the failure is surfaced in the return payload so callers
+                # can log/alert rather than silently believing stealth is on.
+                stealth_error = f"{type(e).__name__}: {e}"
+                _logger = getattr(self, "logger", None)
+                if _logger is not None:
+                    try:
+                        _logger.warning(
+                            "attach_over_cdp: stealth init script install failed: %s",
+                            stealth_error,
+                        )
+                    except Exception:
+                        pass
 
         # Reuse the first existing page when adopting, else open a fresh one.
         try:
@@ -2247,7 +2261,9 @@ class AgentBrowser:
             "browser_version": browser_version,
             "context_count": len(existing_contexts),
             "adopted_context_index": adopted_index,
-            "stealth_applied": bool(apply_stealth),
+            "stealth_applied": stealth_installed,
+            "stealth_requested": bool(apply_stealth),
+            "stealth_error": stealth_error,
             "degradation": [
                 "tls_ja3_ja4_fingerprint_not_applied (process-level)",
                 "launch_args_and_user_data_dir_not_applied (process-level)",

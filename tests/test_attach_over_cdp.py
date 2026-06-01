@@ -236,6 +236,8 @@ async def test_attach_over_cdp_live_new_context(remote_chromium):
     info = await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
 
     assert info["stealth_applied"] is True
+    assert info["stealth_requested"] is True
+    assert info["stealth_error"] is None
     assert info["adopted_context_index"] == "new"
     assert "degradation" in info and isinstance(info["degradation"], list)
     assert ab.browser is not None and ab.page is not None
@@ -256,5 +258,57 @@ async def test_attach_over_cdp_live_new_context(remote_chromium):
     ab2 = AgentBrowser(session_name="t-reattach", anonymous=True, ephemeral=True)
     info2 = await ab2.attach_over_cdp(f"127.0.0.1:{port}", new_context=True)
     assert info2["cdp_url"].startswith("http://")
+    assert info2["stealth_requested"] is True
     await ab2.close()
+    assert proc.returncode is None
+
+
+async def test_attach_over_cdp_reports_stealth_install_failure(
+    remote_chromium, monkeypatch
+):
+    """When add_init_script raises, the return payload surfaces the failure.
+
+    We monkeypatch the method on BrowserContext to simulate a Playwright-level
+    rejection (e.g. invalid script syntax, large payload, etc.). The attach
+    must still succeed — but stealth_applied must be False and stealth_error
+    must be populated.
+    """
+    from playwright.async_api import BrowserContext
+
+    port, proc = remote_chromium
+
+    async def boom(self, script):
+        raise RuntimeError("simulated add_init_script rejection")
+
+    monkeypatch.setattr(BrowserContext, "add_init_script", boom)
+
+    ab = AgentBrowser(session_name="t-stealth-fail", anonymous=True, ephemeral=True)
+    info = await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
+
+    # Stealth was REQUESTED but the install FAILED
+    assert info["stealth_requested"] is True
+    assert info["stealth_applied"] is False
+    assert info["stealth_error"] is not None
+    assert "simulated add_init_script rejection" in info["stealth_error"]
+
+    # The attached context is still usable (we got a page)
+    assert ab.browser is not None and ab.page is not None
+
+    await ab.close()
+    # The external browser is still alive
+    await asyncio.sleep(0.3)
+    assert proc.returncode is None
+
+
+async def test_attach_over_cdp_stealth_not_requested(remote_chromium):
+    """When apply_stealth=False, stealth_applied is False but no error is set."""
+    port, proc = remote_chromium
+    ab = AgentBrowser(session_name="t-no-stealth", anonymous=True, ephemeral=True)
+    info = await ab.attach_over_cdp(
+        f"http://127.0.0.1:{port}", new_context=True, apply_stealth=False
+    )
+    assert info["stealth_applied"] is False
+    assert info["stealth_requested"] is False
+    assert info["stealth_error"] is None
+    await ab.close()
     assert proc.returncode is None
