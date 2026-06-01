@@ -91,6 +91,25 @@ async with AgentBrowser(
 
 Then: `stealth_launch` → `stealth_navigate` → `stealth_scrape` → `stealth_close`.
 
+### Attach to an existing browser (WSL → Windows, container → host)
+
+Instead of launching a new Chromium, you can attach to a Chrome you already
+have running with `--remote-debugging-port=9222`:
+
+```python
+async with AgentBrowser(session_name="attached") as browser:
+    await browser.attach_over_cdp(
+        "http://127.0.0.1:9222",   # or the Windows host IP from WSL
+        new_context=True,           # don't disturb the user's tabs
+    )
+    await browser.safe_goto("https://bot.sannysoft.com")
+    # close() will NOT terminate the external browser
+```
+
+See [docs/ATTACH_OVER_CDP.md](docs/ATTACH_OVER_CDP.md) for the WSL→Windows
+walkthrough, the MCP `stealth_attach_over_cdp` tool, and the stealth
+degradation matrix (init-script stealth still applies; TLS/JA3 does not).
+
 ---
 
 ## Key Features

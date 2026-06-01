@@ -195,6 +195,19 @@ MCP_TOOL_SCHEMAS: Dict[str, ToolInputSchema] = {
             ParamRule("session_name", str, max_length=128),
         ],
     ),
+    "stealth_attach_over_cdp": ToolInputSchema(
+        "stealth_attach_over_cdp",
+        [
+            ParamRule("session_name", str, max_length=128),
+            ParamRule("cdp_url", str, required=True, max_length=512),
+            ParamRule("new_context", bool),
+            ParamRule("context_index", int, min_value=0, max_value=128),
+            ParamRule("apply_stealth", bool),
+            ParamRule("allow_remote", bool),
+            ParamRule("anonymous", bool),
+            ParamRule("ephemeral", bool),
+        ],
+    ),
     "stealth_close": ToolInputSchema(
         "stealth_close",
         [

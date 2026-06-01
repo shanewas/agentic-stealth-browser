@@ -2107,10 +2107,169 @@ class AgentBrowser:
         except Exception:
             return False
 
+    async def attach_over_cdp(
+        self,
+        cdp_url: str,
+        *,
+        new_context: bool = False,
+        context_index: int = 0,
+        apply_stealth: bool = True,
+        context_options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Attach to an already-running browser exposing a CDP endpoint.
+
+        Complement to ``debug_cdp=True`` on launch (which *exposes* a CDP endpoint):
+        this method lets AgentBrowser *consume* an existing endpoint instead of
+        spawning its own Chromium. Primary use case: drive the user's real
+        desktop browser (e.g. Chrome on the Windows host from inside WSL) while
+        still getting the runtime stealth layer.
+
+        Args:
+            cdp_url: HTTP or WS URL of the remote Chrome DevTools endpoint.
+                Examples: ``http://127.0.0.1:9222``, ``http://192.168.1.10:9222``,
+                ``ws://host:9222/devtools/browser/<id>``. Plain ``host:port`` is
+                accepted and normalised to ``http://host:port``.
+            new_context: If True, create a fresh empty BrowserContext on the
+                attached browser instead of adopting an existing one. Recommended
+                when you do NOT want to disturb the user's open tabs/cookies.
+            context_index: Which existing context to adopt when ``new_context``
+                is False. Defaults to 0 (the user's primary context).
+            apply_stealth: When True (default) inject the init-script stealth
+                layer on the chosen context so subsequently created pages get
+                navigator/canvas/WebGL/audio patches. Existing already-open
+                pages will only receive patches on their next navigation.
+            context_options: Extra kwargs forwarded to ``browser.new_context``
+                when ``new_context=True``. Ignored otherwise.
+
+        Returns:
+            Dict with attach metadata: cdp_url, browser_version, context_count,
+            adopted_context_index (or ``"new"``), stealth_applied, and a
+            ``degradation`` list enumerating which stealth layers do NOT apply
+            in attach mode (TLS/JA3 fingerprint, launch-time process args,
+            persistent user-data-dir profile, regional preset) — these are
+            tied to *launching* the browser process and cannot be retrofitted
+            onto an external Chrome.
+
+        Security: attach mode grants full control over the target browser,
+        including the user's cookies and authenticated sessions when adopting
+        an existing context. Only point at trusted endpoints you own; never
+        expose a remote-debugging port to the public internet.
+
+        Teardown: ``close()`` will NOT terminate the externally-launched
+        browser. It only closes the context (if created by us) and releases
+        the Playwright connection.
+        """
+        if self.browser is not None:
+            raise RuntimeError(
+                "AgentBrowser already has an active browser/context. "
+                "Call close() before attach_over_cdp(), or use a fresh instance."
+            )
+        if not cdp_url or not isinstance(cdp_url, str):
+            raise ValueError("cdp_url must be a non-empty string")
+
+        # Normalise bare host:port to http:// form (Playwright accepts http or ws)
+        normalised = cdp_url.strip()
+        if not normalised.startswith(("http://", "https://", "ws://", "wss://")):
+            normalised = f"http://{normalised}"
+
+        if getattr(self, "_pw", None) is None:
+            self._pw = await async_playwright().start()
+
+        # Connect — Playwright will resolve the WS endpoint from /json/version
+        # automatically when given an http:// base URL.
+        try:
+            remote_browser = await self._pw.chromium.connect_over_cdp(normalised)
+        except Exception as e:
+            # Best-effort PW cleanup so a retry on the same instance works.
+            try:
+                await self._pw.stop()
+            except Exception:
+                pass
+            self._pw = None
+            raise RuntimeError(
+                f"attach_over_cdp: failed to connect to {normalised}: {e}"
+            ) from e
+
+        self._remote_browser = remote_browser
+        self._attached_cdp_url = normalised
+        self._attached = True
+
+        # Pick or create the context we will drive.
+        existing_contexts = list(remote_browser.contexts)
+        adopted_index: Any
+        if new_context or not existing_contexts:
+            ctx_opts = dict(context_options or {})
+            ctx = await remote_browser.new_context(**ctx_opts)
+            self._attached_context_is_ours = True
+            adopted_index = "new"
+        else:
+            if context_index < 0 or context_index >= len(existing_contexts):
+                raise IndexError(
+                    f"context_index {context_index} out of range "
+                    f"(remote browser has {len(existing_contexts)} contexts)"
+                )
+            ctx = existing_contexts[context_index]
+            self._attached_context_is_ours = False
+            adopted_index = context_index
+
+        self.browser = ctx  # AgentBrowser treats `browser` as the active context
+        self.browser_context = ctx
+        self.context = ctx
+
+        # Stealth layer: init scripts apply to future pages (and re-apply on every
+        # navigation in existing pages). Launch-time tricks are unavailable.
+        if apply_stealth:
+            session_name = (self.session or {}).get("name", "default-session")
+            fp_seed = f"agentic-{session_name}-canvas-v4"
+            stealth_script = get_stealth_script(fingerprint_seed=fp_seed)
+            try:
+                await ctx.add_init_script(stealth_script)
+            except Exception:
+                # Non-fatal: caller still gets a working attached context
+                pass
+
+        # Reuse the first existing page when adopting, else open a fresh one.
+        try:
+            pages = list(ctx.pages)
+            self.page = pages[0] if pages and not new_context else await ctx.new_page()
+        except Exception:
+            self.page = await ctx.new_page()
+
+        # Best-effort version probe (non-fatal)
+        browser_version = "unknown"
+        try:
+            browser_version = remote_browser.version  # property on PW Browser
+        except Exception:
+            pass
+
+        return {
+            "cdp_url": normalised,
+            "browser_version": browser_version,
+            "context_count": len(existing_contexts),
+            "adopted_context_index": adopted_index,
+            "stealth_applied": bool(apply_stealth),
+            "degradation": [
+                "tls_ja3_ja4_fingerprint_not_applied (process-level)",
+                "launch_args_and_user_data_dir_not_applied (process-level)",
+                "regional_preset_tls_profile_not_applied (process-level)",
+                "already_open_pages_only_patched_on_next_navigation",
+            ],
+            "warning": (
+                "SECURITY: attach_over_cdp grants full control of the remote "
+                "browser including any authenticated user sessions. Only attach "
+                "to endpoints you own. Never expose the remote-debugging port "
+                "to untrusted networks."
+            ),
+        }
+
     async def close(self):
         """Close the browser, page, and underlying Playwright instance.
 
         This method is idempotent and safe to call multiple times.
+
+        Attach mode (after ``attach_over_cdp``): the externally-launched browser
+        process is preserved. Only contexts/pages created by this AgentBrowser
+        are closed; adopted user contexts are left untouched.
         """
         try:
             if self.page:
@@ -2122,7 +2281,23 @@ class AgentBrowser:
 
             if self.browser:
                 try:
-                    if getattr(self, "_using_pool", False) and getattr(
+                    if getattr(self, "_attached", False):
+                        # Only close the context if WE created it; never close
+                        # a user context we merely adopted.
+                        if getattr(self, "_attached_context_is_ours", False):
+                            try:
+                                await self.browser.close()
+                            except Exception:
+                                pass
+                        # Disconnect from the remote browser without killing it.
+                        remote = getattr(self, "_remote_browser", None)
+                        if remote is not None:
+                            try:
+                                await remote.close()  # PW: disconnects CDP, leaves Chrome alive
+                            except Exception:
+                                pass
+                            self._remote_browser = None
+                    elif getattr(self, "_using_pool", False) and getattr(
                         self, "_pool", None
                     ):
                         await self._pool.release_context(self.browser)
