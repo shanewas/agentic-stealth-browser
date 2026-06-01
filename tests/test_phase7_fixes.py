@@ -45,12 +45,24 @@ async def test_bug05_rate_limiter_records_after_wait():
     domain_limiter.last_request.pop("phase7.test", None)
 
     w1 = await domain_limiter.wait_if_needed("phase7.test")
-    w2 = await domain_limiter.wait_if_needed("phase7.test")
-
+    # Without #116 fix: a second call within the same minute hits the per-minute
+    # branch and would block for ~60s. The test was hanging in CI. The fix is to
+    # verify the WINDOW CONTENT, not the actual wait — assert w1 was 0 (no wait
+    # on the first call) and that the request was recorded, which is what BUG-05
+    # actually cares about. Use the cooldown path with a 0.05s cooldown to also
+    # exercise the waited branch in a way that's fast enough for tests.
     assert w1 == 0.0
-    assert w2 > 0  # we had to wait
-    # After the #116 off-by-one fix + prior BUG-05 recording: exactly the waited request is recorded cleanly (no lingering expired entries)
     assert len(domain_limiter.request_times["phase7.test"]) >= 1
+
+    # Now verify the waited branch is exercised (and quick): use a tiny cooldown
+    domain_limiter.set_limit(
+        "phase7.test", RateLimitConfig(requests_per_minute=60, cooldown_seconds=1)
+    )
+    w2 = await domain_limiter.wait_if_needed("phase7.test")
+    # Cooldown path: just-waited request IS recorded (BUG-05 core)
+    assert w2 > 0
+    assert w2 < 1.5  # bounded by cooldown_seconds
+    assert len(domain_limiter.request_times["phase7.test"]) >= 2
     # Window contains precisely the current request after re-clean on waited path
     print("✓ BUG-05/#116: rate limiter records after wait cleanly (no off-by-one)")
 
@@ -219,7 +231,14 @@ async def test_rate_limiter_concurrent_smoke():
     from production.rate_limiter import DomainRateLimiter, RateLimitConfig
 
     lim = DomainRateLimiter()
-    lim.set_limit("phase8.smoke", RateLimitConfig(50, 0))
+    # RateLimitConfig field order: requests_per_minute, requests_per_hour, cooldown_seconds, max_retries.
+    # Old code used positional (50, 0) — but the second arg is requests_per_hour, not cooldown_seconds.
+    # Cooldown default is 60s, so 8 concurrent calls would each see time_since_last < 60
+    # and sleep 60s → test timeout. Pass cooldown_seconds=0 explicitly.
+    lim.set_limit(
+        "phase8.smoke",
+        RateLimitConfig(requests_per_minute=50, cooldown_seconds=0),
+    )
     lim.request_times["phase8.smoke"].clear()
 
     async def hit():

@@ -2359,9 +2359,7 @@ class AgentBrowser:
                             except Exception:
                                 pass
                             self._remote_browser = None
-                    elif mode == TeardownMode.POOLED and getattr(
-                        self, "_pool", None
-                    ):
+                    elif mode == TeardownMode.POOLED and getattr(self, "_pool", None):
                         # Borrowed a context from the pool → release it back.
                         await self._pool.release_context(self.browser)
                     elif mode == TeardownMode.LAUNCHED:
