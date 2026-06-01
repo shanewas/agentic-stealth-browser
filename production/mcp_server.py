@@ -55,13 +55,13 @@ class ToolError(Exception):
 # ----------------------------------------------------------------------------- #
 
 _BLOCKED_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),      # loopback (includes 127.0.0.1)
-    ipaddress.ip_network("::1/128"),           # IPv6 loopback
-    ipaddress.ip_network("0.0.0.0/8"),         # current network
-    ipaddress.ip_network("10.0.0.0/8"),       # private (RFC 1918)
-    ipaddress.ip_network("172.16.0.0/12"),     # private (RFC 1918)
-    ipaddress.ip_network("192.168.0.0/16"),   # private (RFC 1918)
-    ipaddress.ip_network("169.254.0.0/16"),   # link-local (includes 169.254.169.254)
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback (includes 127.0.0.1)
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("0.0.0.0/8"),  # current network
+    ipaddress.ip_network("10.0.0.0/8"),  # private (RFC 1918)
+    ipaddress.ip_network("172.16.0.0/12"),  # private (RFC 1918)
+    ipaddress.ip_network("192.168.0.0/16"),  # private (RFC 1918)
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local (includes 169.254.169.254)
 ]
 
 
@@ -73,6 +73,7 @@ def is_url_safe(url: str) -> bool:
     the blocked private ranges (loopback, RFC-1918, link‑local) or resolves to
     ``localhost``.
     """
+
     def _ip_blocked(ip_str: str) -> bool:
         """Return True when the string represents a blocked IP or IP network."""
         try:
@@ -102,7 +103,7 @@ def is_url_safe(url: str) -> bool:
         # Resolve hostname via DNS for hostnames that aren't blocked literals
         addr_info = socket.getaddrinfo(host, None)
         if not addr_info:
-            return True                                 # unresolvable – let it pass
+            return True  # unresolvable – let it pass
 
         for family, _, _, _, sockaddr in addr_info:
             if family == socket.AF_INET:
@@ -110,7 +111,7 @@ def is_url_safe(url: str) -> bool:
             elif family == socket.AF_INET6:
                 ip = ipaddress.ip_address(sockaddr[0])
             else:
-                continue                                 # unknown – skip
+                continue  # unknown – skip
             for network in _BLOCKED_NETWORKS:
                 if ip in network:
                     return False
@@ -1188,7 +1189,9 @@ class StealthMCPServer:
             try:
                 is_loopback = ipaddress.ip_address(host).is_loopback
             except ValueError:
-                is_loopback = False  # hostname — not loopback unless literal "localhost"
+                is_loopback = (
+                    False  # hostname — not loopback unless literal "localhost"
+                )
 
         if not is_loopback and not allow_remote:
             raise ToolError(

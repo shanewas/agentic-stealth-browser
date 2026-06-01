@@ -2293,7 +2293,9 @@ class AgentBrowser:
                         remote = getattr(self, "_remote_browser", None)
                         if remote is not None:
                             try:
-                                await remote.close()  # PW: disconnects CDP, leaves Chrome alive
+                                await (
+                                    remote.close()
+                                )  # PW: disconnects CDP, leaves Chrome alive
                             except Exception:
                                 pass
                             self._remote_browser = None

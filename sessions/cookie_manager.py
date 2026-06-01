@@ -51,7 +51,9 @@ def _validate_path(path: str, must_exist_parent: bool = True) -> Path:
     return resolved
 
 
-def _compute_hmac(key: str, data: bytes, session_name: str = "", salt: bytes = None) -> str:
+def _compute_hmac(
+    key: str, data: bytes, session_name: str = "", salt: bytes = None
+) -> str:
     """Compute HMAC-SHA256 integrity hash for cookie/bundle data.
 
     When *key* is provided (non-empty), it is used directly as the HMAC key
@@ -65,7 +67,9 @@ def _compute_hmac(key: str, data: bytes, session_name: str = "", salt: bytes = N
     else:
         if salt is None:
             raise ValueError("salt is required when no encryption key is provided")
-        hmac_key = hashlib.pbkdf2_hmac("sha256", session_name.encode("utf-8"), salt, 100000)
+        hmac_key = hashlib.pbkdf2_hmac(
+            "sha256", session_name.encode("utf-8"), salt, 100000
+        )
     return hmac.new(hmac_key, data, "sha256").hexdigest()
 
 
@@ -137,7 +141,9 @@ class CookieManager:
         self.cookies: List[Dict] = []
         self.last_refresh: Optional[datetime] = None
         # Cryptographically random salt for HMAC key derivation when no encryption key is provided
-        self._hmac_salt = hmac_salt if hmac_salt is not None else secrets.token_bytes(32)
+        self._hmac_salt = (
+            hmac_salt if hmac_salt is not None else secrets.token_bytes(32)
+        )
 
     def _get_cipher(self, key: Optional[str]) -> Optional["Fernet"]:
         """Return Fernet cipher for optional encryption (supports raw secret or fernet key).
@@ -281,7 +287,11 @@ class CookieManager:
             ):
                 stored_hmac = data["integrity"]
                 # Build canonical payload without the integrity and salt fields
-                payload_copy = {k: v for k, v in data.items() if k not in ("integrity", "_hmac_salt")}
+                payload_copy = {
+                    k: v
+                    for k, v in data.items()
+                    if k not in ("integrity", "_hmac_salt")
+                }
                 raw = json.dumps(
                     payload_copy, separators=(",", ":"), sort_keys=True
                 ).encode("utf-8")
@@ -294,7 +304,11 @@ class CookieManager:
                         else ""
                     )
                 if not _verify_hmac(
-                    encryption_key or "", raw, stored_hmac, session_name=verify_name, salt=loaded_salt
+                    encryption_key or "",
+                    raw,
+                    stored_hmac,
+                    session_name=verify_name,
+                    salt=loaded_salt,
                 ):
                     return {
                         "status": "integrity_error",
@@ -726,7 +740,10 @@ class CookieManager:
                     "utf-8"
                 )
                 bundle["integrity"] = _compute_hmac(
-                    encryption_key or "", raw, session_name=session_name, salt=self._hmac_salt
+                    encryption_key or "",
+                    raw,
+                    session_name=session_name,
+                    salt=self._hmac_salt,
                 )
                 # Store salt so load can verify without needing the same instance
                 bundle["_hmac_salt"] = self._hmac_salt.hex()
@@ -813,7 +830,9 @@ class CookieManager:
         if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
             stored_hmac = data["integrity"]
             # Build canonical payload without integrity and salt fields
-            payload_copy = {k: v for k, v in data.items() if k not in ("integrity", "_hmac_salt")}
+            payload_copy = {
+                k: v for k, v in data.items() if k not in ("integrity", "_hmac_salt")
+            }
             raw = json.dumps(
                 payload_copy, separators=(",", ":"), sort_keys=True
             ).encode("utf-8")
@@ -822,7 +841,11 @@ class CookieManager:
             bundle_meta = bundle.get("meta", {}) if isinstance(bundle, dict) else {}
             verify_name = bundle_meta.get("name", "") or target_session_name or ""
             if not _verify_hmac(
-                encryption_key or "", raw, stored_hmac, session_name=verify_name, salt=verify_salt
+                encryption_key or "",
+                raw,
+                stored_hmac,
+                session_name=verify_name,
+                salt=verify_salt,
             ):
                 return {
                     "status": "integrity_error",
