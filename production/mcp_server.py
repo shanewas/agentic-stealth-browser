@@ -55,13 +55,13 @@ class ToolError(Exception):
 # ----------------------------------------------------------------------------- #
 
 _BLOCKED_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),      # loopback (includes 127.0.0.1)
-    ipaddress.ip_network("::1/128"),           # IPv6 loopback
-    ipaddress.ip_network("0.0.0.0/8"),         # current network
-    ipaddress.ip_network("10.0.0.0/8"),       # private (RFC 1918)
-    ipaddress.ip_network("172.16.0.0/12"),     # private (RFC 1918)
-    ipaddress.ip_network("192.168.0.0/16"),   # private (RFC 1918)
-    ipaddress.ip_network("169.254.0.0/16"),   # link-local (includes 169.254.169.254)
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback (includes 127.0.0.1)
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("0.0.0.0/8"),  # current network
+    ipaddress.ip_network("10.0.0.0/8"),  # private (RFC 1918)
+    ipaddress.ip_network("172.16.0.0/12"),  # private (RFC 1918)
+    ipaddress.ip_network("192.168.0.0/16"),  # private (RFC 1918)
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local (includes 169.254.169.254)
 ]
 
 
@@ -73,6 +73,7 @@ def is_url_safe(url: str) -> bool:
     the blocked private ranges (loopback, RFC-1918, link‑local) or resolves to
     ``localhost``.
     """
+
     def _ip_blocked(ip_str: str) -> bool:
         """Return True when the string represents a blocked IP or IP network."""
         try:
@@ -102,7 +103,7 @@ def is_url_safe(url: str) -> bool:
         # Resolve hostname via DNS for hostnames that aren't blocked literals
         addr_info = socket.getaddrinfo(host, None)
         if not addr_info:
-            return True                                 # unresolvable – let it pass
+            return True  # unresolvable – let it pass
 
         for family, _, _, _, sockaddr in addr_info:
             if family == socket.AF_INET:
@@ -110,7 +111,7 @@ def is_url_safe(url: str) -> bool:
             elif family == socket.AF_INET6:
                 ip = ipaddress.ip_address(sockaddr[0])
             else:
-                continue                                 # unknown – skip
+                continue  # unknown – skip
             for network in _BLOCKED_NETWORKS:
                 if ip in network:
                     return False
@@ -477,6 +478,45 @@ class StealthMCPServer:
                     "additionalProperties": False,
                 },
                 handler=self._tool_stealth_get_cdp_endpoint,
+            ),
+            ToolSpec(
+                name="stealth_attach_over_cdp",
+                description=(
+                    "Attach a stealth session to an EXISTING browser exposing a CDP endpoint "
+                    "(e.g. Chrome launched with --remote-debugging-port=9222). Complements debug_cdp launch. "
+                    "Primary use: drive a desktop browser from a different host (e.g. WSL→Windows). "
+                    "By default only localhost endpoints are allowed; set allow_remote=true for non-loopback hosts. "
+                    "Stealth init scripts (navigator/canvas/WebGL/audio) are injected on the chosen context; "
+                    "launch-time stealth (TLS/JA3 profile, regional preset, user-data-dir) is NOT applied — "
+                    "those require AgentBrowser to launch the process. close() leaves the external browser alive."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "session_name": {"type": "string"},
+                        "cdp_url": {
+                            "type": "string",
+                            "description": "http://host:port, ws://..., or bare host:port. /json/version is auto-resolved.",
+                        },
+                        "new_context": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Create a fresh context instead of adopting context_index. Recommended to avoid disturbing user tabs/cookies.",
+                        },
+                        "context_index": {"type": "integer", "default": 0},
+                        "apply_stealth": {"type": "boolean", "default": True},
+                        "allow_remote": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Required to allow non-loopback CDP hosts. Off by default for safety.",
+                        },
+                        "anonymous": {"type": "boolean", "default": True},
+                        "ephemeral": {"type": "boolean", "default": False},
+                    },
+                    "required": ["cdp_url"],
+                    "additionalProperties": False,
+                },
+                handler=self._tool_stealth_attach_over_cdp,
             ),
             ToolSpec(
                 name="stealth_close",
@@ -1119,6 +1159,82 @@ class StealthMCPServer:
         payload = self._tool_ok_payload({"session_name": session_name, "cdp": cdp})
         # use guard for uniformity (though typically tiny)
         return self._guard_observability_payload(payload, "stealth_get_cdp_endpoint")
+
+    async def _tool_stealth_attach_over_cdp(
+        self, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        cdp_url = args.get("cdp_url")
+        if not cdp_url or not isinstance(cdp_url, str):
+            raise ToolError("MCP_VALIDATION_ERROR", "cdp_url is required")
+
+        # Host safety gate: by default only loopback hosts are allowed.
+        # Operator must explicitly set allow_remote=True to attach to a
+        # non-loopback endpoint (e.g. Windows host from WSL).
+        allow_remote = bool(args.get("allow_remote", False))
+        host_to_check = cdp_url.strip()
+        if not host_to_check.startswith(("http://", "https://", "ws://", "wss://")):
+            host_to_check = f"http://{host_to_check}"
+        try:
+            parsed = urllib.parse.urlparse(host_to_check)
+            host = (parsed.hostname or "").lower()
+        except Exception:
+            raise ToolError("MCP_VALIDATION_ERROR", "cdp_url is not a valid URL")
+        if not host:
+            raise ToolError("MCP_VALIDATION_ERROR", "cdp_url has no host component")
+
+        is_loopback = False
+        if host in ("localhost", "127.0.0.1", "::1"):
+            is_loopback = True
+        else:
+            try:
+                is_loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                is_loopback = (
+                    False  # hostname — not loopback unless literal "localhost"
+                )
+
+        if not is_loopback and not allow_remote:
+            raise ToolError(
+                "MCP_REMOTE_CDP_BLOCKED",
+                f"cdp_url host '{host}' is not loopback. "
+                "Set allow_remote=true to attach to a remote browser. "
+                "Only attach to endpoints you own and trust.",
+            )
+
+        session_name = str(args.get("session_name") or "default")
+        if session_name in self._sessions:
+            try:
+                await self._sessions[session_name].close()
+            except Exception:
+                pass
+            finally:
+                self._sessions.pop(session_name, None)
+
+        AgentBrowser = self._get_agent_browser_cls()
+        browser = AgentBrowser(
+            session_name=session_name,
+            anonymous=bool(args.get("anonymous", True)),
+            ephemeral=bool(args.get("ephemeral", False)),
+        )
+        attach_info = await browser.attach_over_cdp(
+            cdp_url=cdp_url,
+            new_context=bool(args.get("new_context", False)),
+            context_index=int(args.get("context_index", 0)),
+            apply_stealth=bool(args.get("apply_stealth", True)),
+        )
+
+        self._sessions[session_name] = browser
+        self._active_session = session_name
+
+        payload = self._tool_ok_payload(
+            {
+                "session_name": session_name,
+                "attached": True,
+                "attach": attach_info,
+                "loopback": is_loopback,
+            }
+        )
+        return self._guard_observability_payload(payload, "stealth_attach_over_cdp")
 
     async def _tool_stealth_close(self, args: Dict[str, Any]) -> Dict[str, Any]:
         close_all = bool(args.get("close_all", False))

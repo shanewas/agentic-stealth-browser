@@ -321,7 +321,7 @@ class ProxyManager:
                         "session": cfg.session_name,
                         "tier": cfg.tier,
                     }
-        except Exception as e:
+        except Exception:
             return {
                 "status": "error",
                 "message": "Proxy connection failed",

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`AgentBrowser.attach_over_cdp(cdp_url, ...)`**: connect to an already-running
+  browser exposed via Chrome DevTools Protocol (e.g. Chrome launched with
+  `--remote-debugging-port=9222`) instead of spawning a new Chromium. Complements
+  the existing `debug_cdp=True` launch flag — that one *exposes* an endpoint, this
+  one *consumes* one. Primary use case: drive a real desktop browser from a
+  different host (WSL → Windows, container → host, dev box → remote display).
+  Runtime stealth init scripts (navigator/canvas/WebGL/audio patches) are still
+  injected on the chosen context; launch-time stealth (TLS/JA3, regional preset,
+  user-data-dir) is unavailable in attach mode and listed in the return payload's
+  `degradation` field. `close()` disconnects without terminating the external
+  browser. (#attach-cdp)
+- **MCP tool `stealth_attach_over_cdp`**: surfaces `attach_over_cdp` through the
+  MCP server. Defaults to loopback-only; non-loopback hosts require explicit
+  `allow_remote=true` and raise `MCP_REMOTE_CDP_BLOCKED` otherwise. (#attach-cdp)
+
 ## [2.3.0] — Show HN & Community Launch (2026-05-28)
 
 ### Added
