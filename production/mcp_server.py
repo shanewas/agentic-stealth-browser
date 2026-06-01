@@ -1234,24 +1234,28 @@ class StealthMCPServer:
         if not host:
             raise ToolError("MCP_VALIDATION_ERROR", "cdp_url has no host component")
 
-        is_loopback = False
-        if host in ("localhost", "127.0.0.1", "::1"):
-            is_loopback = True
-        else:
-            try:
-                is_loopback = ipaddress.ip_address(host).is_loopback
-            except ValueError:
-                is_loopback = (
-                    False  # hostname — not loopback unless literal "localhost"
+        # Two-layer host safety gate (#438, #441):
+        #   Layer 1 — is the host loopback? If yes, no allow_remote needed.
+        #   Layer 2 — if not loopback, allow_remote=true is required AND
+        #             the host must pass is_url_safe (rejects RFC-1918,
+        #             link-local IPv4/IPv6, cloud-metadata).
+        is_loopback = is_loopback_host(host_to_check)
+        if not is_loopback:
+            if not allow_remote:
+                raise ToolError(
+                    "MCP_REMOTE_CDP_BLOCKED",
+                    f"cdp_url host '{host}' is not loopback. "
+                    "Set allow_remote=true to attach to a remote browser. "
+                    "Only attach to endpoints you own and trust.",
                 )
-
-        if not is_loopback and not allow_remote:
-            raise ToolError(
-                "MCP_REMOTE_CDP_BLOCKED",
-                f"cdp_url host '{host}' is not loopback. "
-                "Set allow_remote=true to attach to a remote browser. "
-                "Only attach to endpoints you own and trust.",
-            )
+            if not is_url_safe(host_to_check):
+                raise ToolError(
+                    "MCP_REMOTE_CDP_BLOCKED",
+                    f"cdp_url host '{host}' resolves to a blocked network "
+                    "(RFC-1918, link-local, or cloud-metadata). "
+                    "Even with allow_remote=true, these are always rejected. "
+                    "Only attach to endpoints you own and trust.",
+                )
 
         session_name = str(args.get("session_name") or "default")
         if session_name in self._sessions:

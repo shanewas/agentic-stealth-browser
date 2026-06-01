@@ -70,6 +70,62 @@ async def test_mcp_attach_rejects_url_without_host():
 
 
 # ---------------------------------------------------------------------------
+# Two-layer safety gate (#438, #441): loopback helper + is_url_safe helper
+# ---------------------------------------------------------------------------
+
+
+async def test_mcp_attach_blocks_rfc1918_even_with_allow_remote():
+    """Even with allow_remote=true, RFC-1918 hosts are rejected by is_url_safe."""
+    server = StealthMCPServer()
+    with pytest.raises(ToolError) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://10.0.0.5:9222", "allow_remote": True}
+        )
+    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+
+
+async def test_mcp_attach_blocks_link_local_ipv6():
+    """Link-local IPv6 is rejected by is_loopback_host."""
+    server = StealthMCPServer()
+    with pytest.raises(ToolError) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://[fe80::1]:9222"}
+        )
+    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+
+
+async def test_mcp_attach_blocks_link_local_ipv6_even_with_allow_remote():
+    """Link-local IPv6 is also rejected by is_url_safe's fe80::/10 block."""
+    server = StealthMCPServer()
+    with pytest.raises(ToolError) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://[fe80::1]:9222", "allow_remote": True}
+        )
+    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+
+
+async def test_mcp_attach_allows_loopback_literal():
+    """127.0.0.1 with allow_remote unset passes the gate (no real connection test).
+
+    We can't actually connect to a real Chromium, so the call raises
+    RuntimeError from inside attach_over_cdp AFTER the gate passes.
+    Crucially, it does NOT raise ToolError(MCP_REMOTE_CDP_BLOCKED) — the
+    gate is the only thing this test is verifying.
+    """
+    server = StealthMCPServer()
+    with pytest.raises(Exception) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://127.0.0.1:1"}  # port 1: nothing listening
+        )
+    # Gate passed → no MCP_REMOTE_CDP_BLOCKED ToolError
+    if isinstance(ei.value, ToolError):
+        assert ei.value.error_code != "MCP_REMOTE_CDP_BLOCKED", (
+            f"Gate should have passed for loopback literal, got {ei.value.error_code}"
+        )
+    # Otherwise it's a RuntimeError from connect_over_cdp — also expected
+
+
+# ---------------------------------------------------------------------------
 # Integration: attach to a real Chromium and verify teardown does not kill it
 # ---------------------------------------------------------------------------
 
