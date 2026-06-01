@@ -62,6 +62,7 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("172.16.0.0/12"),  # private (RFC 1918)
     ipaddress.ip_network("192.168.0.0/16"),  # private (RFC 1918)
     ipaddress.ip_network("169.254.0.0/16"),  # link-local (includes 169.254.169.254)
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
 ]
 
 
@@ -120,6 +121,57 @@ def is_url_safe(url: str) -> bool:
         # not accidentally blocked by transient DNS issues.
         pass
     return True
+
+
+def is_loopback_host(url: str) -> bool:
+    """Return True when the URL's host is a loopback address.
+
+    Use this for the CDP attach gate: we want the operator to be able to
+    attach to a browser on the same machine (``localhost`` / ``127.0.0.1`` /
+    ``::1``) even when the broader ``is_url_safe`` check rejects those same
+    addresses for outbound navigation. The attach gate is followed by a
+    second ``is_url_safe`` check so that link-local / RFC-1918 hosts are
+    still rejected for ``allow_remote=true`` paths.
+
+    Loopback means:
+      * literal "localhost", OR
+      * IPv4 in 127.0.0.0/8, OR
+      * IPv6 ::1/128, OR
+      * a hostname that resolves (via :func:`socket.getaddrinfo`) to any IP
+        in the loopback ranges above.
+
+    Anything else — RFC-1918, link-local, public IPs, or unresolvable
+    hostnames that are not "localhost" — returns False.
+    """
+    normalised = url.strip()
+    if not normalised.startswith(("http://", "https://", "ws://", "wss://")):
+        normalised = f"http://{normalised}"
+    try:
+        parsed = urllib.parse.urlparse(normalised)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in ("localhost",):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback
+    except ValueError:
+        pass
+    # Hostname — try DNS.
+    try:
+        for family, _, _, _, sockaddr in socket.getaddrinfo(host, None):
+            if family == socket.AF_INET:
+                if ipaddress.ip_address(sockaddr[0]).is_loopback:
+                    return True
+            elif family == socket.AF_INET6:
+                if ipaddress.ip_address(sockaddr[0]).is_loopback:
+                    return True
+    except Exception:
+        return False
+    return False
 
 
 @dataclass
