@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.0] — Attach-Mode Hardening (2026-06-01)
+
+### Fixed
+- **#438** `stealth_attach_over_cdp` loopback gate reused `is_url_safe` — DNS rebinding / hostname→private-IP bypass closed. Replaces string match with full RFC-1918 + link-local + cloud-metadata check. The gate is now a two-layer check: `is_loopback_host` first, then `is_url_safe` only when `allow_remote=true` (so even explicitly-allowed remote hosts can't be RFC-1918 or link-local).
+- **#441** Link-local IPv6 (`fe80::/10`) added to `_BLOCKED_NETWORKS`. Side-effect of #438's refactor — `is_url_safe` now rejects IPv6 link-local the same way it rejects IPv4 `169.254.0.0/16`.
+- **#440** `add_init_script` install failure now surfaces in the return payload as `stealth_applied: false` + `stealth_error: "<ExceptionType>: <message>"`. Previously silent. New `stealth_requested` field distinguishes caller intent from actual install result.
+- **#439** `AgentBrowser.close()` teardown logic now uses a typed `TeardownMode` enum (`LAUNCHED | POOLED | ATTACHED_OWNED_CTX | ATTACHED_ADOPTED_CTX`) instead of 3 scattered `getattr` flag checks. Each branch owns exactly one teardown. Easier to reason about, easier to extend.
+
+### Added
+- **`is_loopback_host(url: str) -> bool`** helper in `production/mcp_server.py` — literal/IP/DNS loopback check. Used by the attach loopback gate.
+- **6 new tests in `tests/test_mcp_url_safety.py`** covering loopback literal, `localhost`, bare `host:port` normalization, RFC-1918 rejection, link-local IPv6 rejection.
+- **4 new tests in `tests/test_attach_over_cdp.py`** covering the two-layer gate (RFC-1918, link-local IPv6, with/without `allow_remote=true`).
+- **4 new tests in `tests/test_attach_over_cdp.py`** for `TeardownMode` enum and stealth-failure surface (monkeypatched `add_init_script` rejection).
+
+### Changed
+- `production/mcp_server.py`: new `is_loopback_host` helper. `_BLOCKED_NETWORKS` extended with `fe80::/10`. `_tool_stealth_attach_over_cdp` rewritten as a two-layer gate.
+- `core/agent_browser.py`: new `TeardownMode` enum. `close()` branches on the enum. `attach_over_cdp` return dict now includes `stealth_requested` and `stealth_error` fields.
+- `pyproject.toml`: `version` bumped 2.3.0 → 2.4.0.
+
+### Test coverage
+- 22/22 pass in `tests/test_attach_over_cdp.py` + `tests/test_mcp_url_safety.py`
+- No new regressions in the unit-test suite (3 pre-existing failures on master — `test_human_behavior_fuzz` MockPage signature mismatch + `test_phase7_fixes` merge conflict — both unrelated to this release)
+
+### Closes
+- #438, #439, #440, #441
+
+---
+
 ## [Unreleased]
 
 ### Added

@@ -70,6 +70,62 @@ async def test_mcp_attach_rejects_url_without_host():
 
 
 # ---------------------------------------------------------------------------
+# Two-layer safety gate (#438, #441): loopback helper + is_url_safe helper
+# ---------------------------------------------------------------------------
+
+
+async def test_mcp_attach_blocks_rfc1918_even_with_allow_remote():
+    """Even with allow_remote=true, RFC-1918 hosts are rejected by is_url_safe."""
+    server = StealthMCPServer()
+    with pytest.raises(ToolError) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://10.0.0.5:9222", "allow_remote": True}
+        )
+    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+
+
+async def test_mcp_attach_blocks_link_local_ipv6():
+    """Link-local IPv6 is rejected by is_loopback_host."""
+    server = StealthMCPServer()
+    with pytest.raises(ToolError) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://[fe80::1]:9222"}
+        )
+    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+
+
+async def test_mcp_attach_blocks_link_local_ipv6_even_with_allow_remote():
+    """Link-local IPv6 is also rejected by is_url_safe's fe80::/10 block."""
+    server = StealthMCPServer()
+    with pytest.raises(ToolError) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://[fe80::1]:9222", "allow_remote": True}
+        )
+    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+
+
+async def test_mcp_attach_allows_loopback_literal():
+    """127.0.0.1 with allow_remote unset passes the gate (no real connection test).
+
+    We can't actually connect to a real Chromium, so the call raises
+    RuntimeError from inside attach_over_cdp AFTER the gate passes.
+    Crucially, it does NOT raise ToolError(MCP_REMOTE_CDP_BLOCKED) — the
+    gate is the only thing this test is verifying.
+    """
+    server = StealthMCPServer()
+    with pytest.raises(Exception) as ei:
+        await server._tool_stealth_attach_over_cdp(
+            {"cdp_url": "http://127.0.0.1:1"}  # port 1: nothing listening
+        )
+    # Gate passed → no MCP_REMOTE_CDP_BLOCKED ToolError
+    if isinstance(ei.value, ToolError):
+        assert ei.value.error_code != "MCP_REMOTE_CDP_BLOCKED", (
+            f"Gate should have passed for loopback literal, got {ei.value.error_code}"
+        )
+    # Otherwise it's a RuntimeError from connect_over_cdp — also expected
+
+
+# ---------------------------------------------------------------------------
 # Integration: attach to a real Chromium and verify teardown does not kill it
 # ---------------------------------------------------------------------------
 
@@ -180,6 +236,8 @@ async def test_attach_over_cdp_live_new_context(remote_chromium):
     info = await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
 
     assert info["stealth_applied"] is True
+    assert info["stealth_requested"] is True
+    assert info["stealth_error"] is None
     assert info["adopted_context_index"] == "new"
     assert "degradation" in info and isinstance(info["degradation"], list)
     assert ab.browser is not None and ab.page is not None
@@ -200,5 +258,120 @@ async def test_attach_over_cdp_live_new_context(remote_chromium):
     ab2 = AgentBrowser(session_name="t-reattach", anonymous=True, ephemeral=True)
     info2 = await ab2.attach_over_cdp(f"127.0.0.1:{port}", new_context=True)
     assert info2["cdp_url"].startswith("http://")
+    assert info2["stealth_requested"] is True
     await ab2.close()
     assert proc.returncode is None
+
+
+async def test_attach_over_cdp_reports_stealth_install_failure(
+    remote_chromium, monkeypatch
+):
+    """When add_init_script raises, the return payload surfaces the failure.
+
+    We monkeypatch the method on BrowserContext to simulate a Playwright-level
+    rejection (e.g. invalid script syntax, large payload, etc.). The attach
+    must still succeed — but stealth_applied must be False and stealth_error
+    must be populated.
+    """
+    from playwright.async_api import BrowserContext
+
+    port, proc = remote_chromium
+
+    async def boom(self, script):
+        raise RuntimeError("simulated add_init_script rejection")
+
+    monkeypatch.setattr(BrowserContext, "add_init_script", boom)
+
+    ab = AgentBrowser(session_name="t-stealth-fail", anonymous=True, ephemeral=True)
+    info = await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
+
+    # Stealth was REQUESTED but the install FAILED
+    assert info["stealth_requested"] is True
+    assert info["stealth_applied"] is False
+    assert info["stealth_error"] is not None
+    assert "simulated add_init_script rejection" in info["stealth_error"]
+
+    # The attached context is still usable (we got a page)
+    assert ab.browser is not None and ab.page is not None
+
+    await ab.close()
+    # The external browser is still alive
+    await asyncio.sleep(0.3)
+    assert proc.returncode is None
+
+
+async def test_attach_over_cdp_stealth_not_requested(remote_chromium):
+    """When apply_stealth=False, stealth_applied is False but no error is set."""
+    port, proc = remote_chromium
+    ab = AgentBrowser(session_name="t-no-stealth", anonymous=True, ephemeral=True)
+    info = await ab.attach_over_cdp(
+        f"http://127.0.0.1:{port}", new_context=True, apply_stealth=False
+    )
+    assert info["stealth_applied"] is False
+    assert info["stealth_requested"] is False
+    assert info["stealth_error"] is None
+    await ab.close()
+    assert proc.returncode is None
+
+
+# ---------------------------------------------------------------------------
+# TeardownMode enum (#439)
+# ---------------------------------------------------------------------------
+
+
+def test_teardown_mode_enum_exists():  # noqa: not async — but pytestmark is async-mode global
+    """The TeardownMode enum is exported from core.agent_browser."""
+    from core.agent_browser import TeardownMode
+
+    assert TeardownMode.LAUNCHED.value == "launched"
+    assert TeardownMode.POOLED.value == "pooled"
+    assert TeardownMode.ATTACHED_OWNED_CTX.value == "attached_owned_ctx"
+    assert TeardownMode.ATTACHED_ADOPTED_CTX.value == "attached_adopted_ctx"
+
+
+async def test_teardown_mode_init_is_none():
+    """Fresh AgentBrowser has _teardown_mode = None (no browser yet)."""
+    ab = AgentBrowser(session_name="t-init", anonymous=True, ephemeral=True)
+    assert ab._teardown_mode is None
+    await ab.close()  # should be a no-op
+    assert ab._teardown_mode is None
+
+
+async def test_teardown_mode_set_to_attached_owned(remote_chromium):
+    """attach_over_cdp(new_context=True) sets ATTACHED_OWNED_CTX."""
+    from core.agent_browser import TeardownMode
+
+    port, proc = remote_chromium
+    ab = AgentBrowser(session_name="t-owned", anonymous=True, ephemeral=True)
+    await ab.attach_over_cdp(f"http://127.0.0.1:{port}", new_context=True)
+    assert ab._teardown_mode == TeardownMode.ATTACHED_OWNED_CTX
+    await ab.close()
+    assert ab._teardown_mode is None  # reset on close
+    assert proc.returncode is None
+
+
+async def test_teardown_mode_set_to_attached_adopted(remote_chromium):
+    """attach_over_cdp(adopt existing) sets ATTACHED_ADOPTED_CTX."""
+    from core.agent_browser import TeardownMode
+
+    port, proc = remote_chromium
+    # First call with new_context=True so the remote has ≥1 context
+    ab_setup = AgentBrowser(
+        session_name="t-setup", anonymous=True, ephemeral=True
+    )
+    await ab_setup.attach_over_cdp(
+        f"http://127.0.0.1:{port}", new_context=True
+    )
+    # Don't close — leave the context alive. Now adopt it from a new instance.
+    ab_adopt = AgentBrowser(
+        session_name="t-adopt", anonymous=True, ephemeral=True
+    )
+    await ab_adopt.attach_over_cdp(
+        f"http://127.0.0.1:{port}", new_context=False, context_index=0
+    )
+    assert ab_adopt._teardown_mode == TeardownMode.ATTACHED_ADOPTED_CTX
+    # Clean up — close should NOT kill the adopted context
+    await ab_adopt.close()
+    await ab_setup.close()
+    assert proc.returncode is None  # external browser still alive
+
