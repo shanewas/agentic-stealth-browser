@@ -1,0 +1,38 @@
+name: canary
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: playwright install --with-deps chromium
+      - name: run-canary
+        id: canary
+        run: python scripts/canary_run.py
+        env:
+          CANARY_HISTORY_PATH: docs/canary/history.jsonl
+          CANARY_DASHBOARD_PATH: docs/canary/index.html
+          CANARY_BADGE_PATH: docs/canary/badge.svg
+          CANARY_README_PATH: docs/canary/README.md
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "canary: score=${{ steps.canary.outputs.score }} at ${{ steps.canary.outputs.ts }}"
+          file_pattern: "docs/canary/*"
+      - name: alert-on-low
+        if: steps.canary.outputs.alert == 'true'
+        run: |
+          gh issue create \
+            --title "[canary] score dropped to ${{ steps.canary.outputs.score }}%" \
+            --body "Score below 75% for three consecutive runs. See https://github.com/shanewas/agentic-stealth-browser/blob/master/docs/canary/index.html"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

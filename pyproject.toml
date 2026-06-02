@@ -61,10 +61,32 @@ include = [
     "ai",
     "linkedin",
     "workflows",
+    "canary",
 ]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.cfg", "py.typed"]
+"canary" = ["templates/*.j2"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+module = [
+    "core.*",
+    "stealth.*",
+    "behavior.*",
+    "recovery.*",
+    "sessions.*",
+    "audit.*",
+    "proxy.*",
+    "production.*",
+    "scraping.*",
+    "ai.*",
+]
+ignore_errors = true
 
 [tool.ruff]
 # Target Python 3.10+
@@ -75,6 +97,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E402", "F841", "F811", "E712"]
+"canary/tests/*" = ["E402", "F841", "F811", "E712"]
 "scripts/*" = ["F841"]
 "stealth/presets.py" = ["E402"]
 
