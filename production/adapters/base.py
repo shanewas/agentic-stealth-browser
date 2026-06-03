@@ -6,7 +6,7 @@ docs/plans/2026-06-03-v2.5.0-real-backend-adapters.md for the full design.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 class Capability(str, Enum):
@@ -44,6 +44,24 @@ class AdapterCapabilityError(RuntimeError):
     """
 
 
+class AdapterNotFoundError(LookupError):
+    """Raised by get_adapter() when the requested name is not in
+    BACKEND_REGISTRY. Inherits from LookupError (the natural superclass for
+    "tried to look something up and failed") so callers can write a single
+    except clause for missing-resource errors.
+
+    Distinct from AdapterLaunchError, which is reserved for runtime launch
+    failures. The two failure modes deserve different UX:
+      * AdapterNotFoundError  -> "Backend 'X' is not configured"
+      * AdapterLaunchError    -> "Backend 'X' failed to start, retry?"
+
+    Note: KeyError is a subclass of LookupError, so existing callers using
+    `except KeyError` will not catch this — that is intentional. The contract
+    change forces callers to be explicit about whether they handle a missing
+    registration or a runtime failure.
+    """
+
+
 @runtime_checkable
 class BackendAdapter(Protocol):
     """Structural interface for all dashboard backend adapters.
@@ -51,17 +69,20 @@ class BackendAdapter(Protocol):
     Adapters MAY subclass DashboardBackendAdapter (the legacy shim) or
     implement this protocol directly. The contract is the same.
 
-    Required attributes:
+    Required attribute:
         name: stable string identifier used in BACKEND_REGISTRY and the
-              dashboard's "active_adapter" status field.
+              dashboard's "active_adapter" status field. Must be non-empty
+              (validated by register_adapter() at registration time).
 
-    Required async methods (see docs/plans/2026-5-0 for semantics):
+    Required async methods (see docs/plans/2026-06-03-v2.5.0-real-backend-adapters.md
+    for semantics):
         launch(profile, headless) -> None
         close() -> None
         navigate(url) -> None
         click(selector) -> None
         fill(selector, value) -> None
-        screenshot(path) -> Optional[str]  # returns saved path
+        screenshot(path) -> str   # path saved to; raises AdapterCapabilityError
+                                   # if the adapter does not declare Capability.SCREENSHOT
         status() -> dict[str, Any]
 
     Required sync method:
@@ -71,7 +92,7 @@ class BackendAdapter(Protocol):
         supports(capability) -> bool
     """
 
-    name: str = ""
+    name: str  # subclasses must override; no default — register_adapter enforces non-empty
 
     async def launch(
         self, profile: str, headless: bool = True
@@ -85,7 +106,7 @@ class BackendAdapter(Protocol):
 
     async def fill(self, selector: str, value: str) -> None: ...
 
-    async def screenshot(self, path: Optional[str] = None) -> Optional[str]: ...
+    async def screenshot(self, path: str) -> str: ...
 
     async def status(self) -> dict[str, Any]: ...
 

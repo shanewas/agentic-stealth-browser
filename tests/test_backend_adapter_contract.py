@@ -11,6 +11,7 @@ from production.adapters import (
     BACKEND_REGISTRY,
     AdapterCapabilityError,
     AdapterLaunchError,
+    AdapterNotFoundError,
     BackendAdapter,
     Capability,
     get_adapter,
@@ -59,16 +60,34 @@ def test_backend_adapter_has_required_methods():
 
 
 def test_backend_adapter_has_name_attribute():
-    """Every adapter must declare a stable name string."""
-    assert "name" in dir(BackendAdapter)
+    """Every adapter must declare a stable name string. We check the
+    annotation (not dir(), which would have included the old `name: str = ""`
+    default). The absence of a default value also means adapters that
+    forget to override it fail at attribute access, not silently — which
+    is the footgun issue 3 in the code-quality review addresses."""
+    annotations = getattr(BackendAdapter, "__annotations__", {})
+    assert "name" in annotations, (
+        f"BackendAdapter must declare `name` in its annotations; "
+        f"got {sorted(annotations)}"
+    )
+    # `from __future__ import annotations` makes all annotations PEP 563
+    # strings, so compare against the string "str" rather than the type itself.
+    assert annotations["name"] == "str", (
+        f"BackendAdapter.name must be typed as `str`, got {annotations['name']!r}"
+    )
 
 
-def test_get_adapter_raises_for_unknown_backend():
-    """get_adapter must raise AdapterLaunchError (not bare KeyError)
-    so callers can handle the failure mode uniformly."""
-    with pytest.raises(AdapterLaunchError) as exc_info:
+def test_get_adapter_raises_adapter_not_found_for_unknown_backend():
+    """get_adapter must raise AdapterNotFoundError (a LookupError subclass)
+    for unknown names — NOT AdapterLaunchError, which is reserved for
+    runtime launch failures. This separation lets callers distinguish
+    "wrong name" from "process spawn failed"."""
+    with pytest.raises(AdapterNotFoundError) as exc_info:
         get_adapter("does-not-exist")
     assert "does-not-exist" in str(exc_info.value)
+    # Must also be catchable as LookupError so generic dict-style handlers work
+    with pytest.raises(LookupError):
+        get_adapter("does-not-exist")
 
 
 def test_backend_registry_is_a_dict():
@@ -85,24 +104,81 @@ def test_adapter_capability_error_inherits_from_runtime_error():
     assert issubclass(AdapterLaunchError, RuntimeError)
 
 
-def test_capability_values_are_strings():
-    """Capabilities serialise as strings for JSON / dashboard status."""
-    for cap in Capability:
-        # Capability can be StrEnum or plain Enum; the .value is the wire form.
-        assert isinstance(cap.value, str)
-        assert cap.value  # not empty
-
-
 @pytest.mark.parametrize(
     "capability_name",
     ["LAUNCH", "CLOSE", "NAVIGATE", "CLICK", "FILL", "SCREENSHOT",
      "STATUS", "STREAM_CDP", "MULTI_CONTEXT", "HEADLESS_SWITCH"],
 )
-def test_each_capability_is_independent(capability_name):
-    """Each capability is a distinct enum member, not an alias."""
+def test_capability_wire_value_is_lowercase_name(capability_name):
+    """The wire form of a Capability must be its lowercase name so the
+    dashboard's status field and JSON payloads stay stable as we add members."""
     cap = Capability[capability_name]
-    assert cap.name == capability_name
-    # Distinct from every other capability
-    others = [c for c in Capability if c is not cap]
-    for other in others:
-        assert cap is not other
+    assert cap.value == capability_name.lower(), (
+        f"Capability.{capability_name}.value should be {capability_name.lower()!r}, "
+        f"got {cap.value!r}"
+    )
+    # Belt-and-braces: still a non-empty string (kept from the older loose test).
+    assert isinstance(cap.value, str) and cap.value
+
+
+def test_adapter_passes_runtime_checkable_isinstance():
+    """BackendAdapter is @runtime_checkable, so a class with the right shape
+    must pass isinstance() even without inheriting. This is the whole point
+    of the protocol: structural subtyping for plugin-style adapters."""
+
+    class _GoodAdapter:
+        name = "good"
+        async def launch(self, profile, headless=True): ...
+        async def close(self): ...
+        async def navigate(self, url): ...
+        async def click(self, selector): ...
+        async def fill(self, selector, value): ...
+        async def screenshot(self, path=None): ...
+        async def status(self): ...
+        def capabilities(self): return set()
+        def supports(self, capability): return False
+
+    class _BadAdapter:
+        """Missing close() and click() — must NOT satisfy the protocol."""
+        name = "bad"
+        async def launch(self, profile, headless=True): ...
+        async def navigate(self, url): ...
+        async def fill(self, selector, value): ...
+        async def screenshot(self, path=None): ...
+        async def status(self): ...
+        def capabilities(self): return set()
+
+    assert isinstance(_GoodAdapter(), BackendAdapter), (
+        "_GoodAdapter implements every method and must satisfy the protocol"
+    )
+    assert not isinstance(_BadAdapter(), BackendAdapter), (
+        "_BadAdapter is missing close() and click() and must fail isinstance()"
+    )
+
+
+def test_supports_default_uses_capabilities_set_membership():
+    """BackendAdapter.supports() default must return True for declared
+    capabilities and False for undeclared ones. This pins the default
+    behaviour so M1-M3 inherit it for free unless they override.
+
+    We invoke the unbound ``BackendAdapter.supports`` method directly
+    against a stub instance. Protocol default methods don't propagate to
+    unrelated classes (Python typing.Protocol semantics), so we test the
+    default as it lives on the protocol itself."""
+
+    class _Stub:
+        name = "stub"
+        def capabilities(self):
+            return {Capability.LAUNCH, Capability.CLOSE}
+        # NOTE: no supports() — we want the protocol's default to be exercised
+
+    stub = _Stub()
+    # Call the protocol's default supports() against our stub. The default
+    # body is `return capability in self.capabilities()`, so this is exactly
+    # what an inheriting adapter would do unless it overrides. The stub is
+    # intentionally incomplete; we are exercising the unbound method, not
+    # asserting full protocol conformance.
+    assert BackendAdapter.supports(stub, Capability.LAUNCH) is True  # type: ignore[arg-type]
+    assert BackendAdapter.supports(stub, Capability.CLOSE) is True  # type: ignore[arg-type]
+    assert BackendAdapter.supports(stub, Capability.CLICK) is False  # type: ignore[arg-type]
+    assert BackendAdapter.supports(stub, Capability.STREAM_CDP) is False  # type: ignore[arg-type]
