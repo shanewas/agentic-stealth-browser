@@ -87,6 +87,10 @@ register_adapter(_CDPBridgeAdapter)
 from production.adapters.playwright_mcp import PlaywrightMCPAdapter as _PlaywrightMCPAdapter  # noqa: E402
 register_adapter(_PlaywrightMCPAdapter)
 
+# M3: Agentic-Stealth-MCP adapter registration
+from production.adapters.agentic_stealth_mcp import AgenticStealthMCPAdapter as _AgenticStealthMCPAdapter  # noqa: E402
+register_adapter(_AgenticStealthMCPAdapter)
+
 
 __all__ = [
     "AdapterCapabilityError",
