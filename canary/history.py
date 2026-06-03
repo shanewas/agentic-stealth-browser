@@ -46,7 +46,9 @@ def entries_last_n_days(
     return result
 
 
-def average_score(history: list[dict[str, Any]], days: int | None = None) -> float | None:
+def average_score(
+    history: list[dict[str, Any]], days: int | None = None
+) -> float | None:
     """Mean score over history; optional window in days."""
     subset = entries_last_n_days(history, days) if days else history
     scores = [int(e["score"]) for e in subset if "score" in e]

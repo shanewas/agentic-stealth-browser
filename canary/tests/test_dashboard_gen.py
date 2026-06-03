@@ -3,7 +3,11 @@
 from pathlib import Path
 from typing import Any
 
-from canary.dashboard_gen import build_dashboard_context, generate_dashboard, render_dashboard
+from canary.dashboard_gen import (
+    build_dashboard_context,
+    generate_dashboard,
+    render_dashboard,
+)
 
 
 def _sample_history() -> list[dict[str, Any]]:
