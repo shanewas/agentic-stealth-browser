@@ -34,9 +34,9 @@ def render_badge(score: int, label: str = "canary") -> str:
     template = _env().get_template("badge.svg.j2")
     return str(
         template.render(
-        label=label,
-        message=badge_label(score),
-        color=badge_fill_color(score),
+            label=label,
+            message=badge_label(score),
+            color=badge_fill_color(score),
         )
     )
 

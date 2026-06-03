@@ -29,13 +29,22 @@ from mcp_security import (
     MCPSecurityContext,
     sanitize_tool_description,
 )
+from production.mcp_input_validator import InputValidationError, validate_tool_input
 
 
 JSONRPC_VERSION = "2.0"
 PROTOCOL_VERSION = "2025-03-26"
 SERVER_NAME = "agentic-stealth-browser"
 SERVER_TITLE = "Agentic Stealth Browser MCP Server"
-SERVER_VERSION = "2.3.0"
+
+try:
+    import importlib.metadata
+
+    SERVER_VERSION = importlib.metadata.version("agentic-stealth-browser")
+except Exception:
+    SERVER_VERSION = (
+        "2.4.1"  # fallback during dev / editable installs before metadata written
+    )
 
 
 class ToolError(Exception):
@@ -68,12 +77,18 @@ _BLOCKED_NETWORKS = [
 
 def is_url_safe(url: str) -> bool:
     """
-    Return True when the URL is safe to navigate / scrape.
+    Return True when the URL is safe to navigate / scrape (MCP outbound guard).
 
-    A URL is considered unsafe when its resolved IP address falls inside any of
-    the blocked private ranges (loopback, RFC-1918, link‑local) or resolves to
-    ``localhost``.
+    Fail CLOSED for security:
+    - only http/https schemes are permitted (no file:, javascript:, data:, ftp:, etc.)
+    - missing host or parse failures
+    - DNS resolution errors or empty results (no silent pass on transient failure)
+    - resolved IPs inside blocked private/loopback/link-local/cloud-metadata ranges
+
+    Used by stealth_navigate / stealth_scrape (and second-layer for remote CDP attach).
     """
+
+    ALLOWED_SCHEMES = {"http", "https"}
 
     def _ip_blocked(ip_str: str) -> bool:
         """Return True when the string represents a blocked IP or IP network."""
@@ -88,6 +103,10 @@ def is_url_safe(url: str) -> bool:
 
     try:
         parsed = urllib.parse.urlparse(url)
+        scheme = (parsed.scheme or "").lower()
+        if scheme and scheme not in ALLOWED_SCHEMES:
+            return False
+
         host = parsed.hostname
 
         # Fallback for URLs that urlparse can't extract a hostname from
@@ -95,16 +114,20 @@ def is_url_safe(url: str) -> bool:
         if not host:
             host = url.split("://", 1)[-1].split("/")[0].split("?")[0].rstrip("/")
             if not host:
-                return True
+                return False
 
         # If the hostname is already a literal IP address, check it directly.
         if _ip_blocked(host):
             return False
 
-        # Resolve hostname via DNS for hostnames that aren't blocked literals
-        addr_info = socket.getaddrinfo(host, None)
+        # Resolve hostname via DNS for hostnames that aren't blocked literals.
+        # Fail closed on resolution errors (no transient-DNS bypass).
+        try:
+            addr_info = socket.getaddrinfo(host, None)
+        except Exception:
+            return False
         if not addr_info:
-            return True  # unresolvable – let it pass
+            return False
 
         for family, _, _, _, sockaddr in addr_info:
             if family == socket.AF_INET:
@@ -116,11 +139,9 @@ def is_url_safe(url: str) -> bool:
             for network in _BLOCKED_NETWORKS:
                 if ip in network:
                     return False
+        return True
     except Exception:
-        # On any resolution error we fail open so that valid external URLs are
-        # not accidentally blocked by transient DNS issues.
-        pass
-    return True
+        return False
 
 
 def is_loopback_host(url: str) -> bool:
@@ -259,8 +280,18 @@ class StealthMCPServer:
             max_value=500000,
         )
         self._shutdown_requested = False
-        self._workflow_library_root = Path("workflows/library")
+        # #456: installation-safe workflow library location (user-writable for teach/replay writes;
+        # also discover bundled from package data for `stealth_workflow_list` etc even from arbitrary cwd).
+        self._workflow_library_root = (
+            Path.home() / ".agentic-browser" / "workflows" / "library"
+        )
         self._workflow_library_root.mkdir(parents=True, exist_ok=True)
+        try:
+            import importlib.resources as pkgres
+
+            self._bundled_workflow_root = pkgres.files("workflows") / "library"
+        except Exception:
+            self._bundled_workflow_root = None
         self._tools: Dict[str, ToolSpec] = self._build_tools()
 
     def _get_agent_browser_cls(self):
@@ -1248,14 +1279,35 @@ class StealthMCPServer:
                     "Set allow_remote=true to attach to a remote browser. "
                     "Only attach to endpoints you own and trust.",
                 )
-            if not is_url_safe(host_to_check):
-                raise ToolError(
-                    "MCP_REMOTE_CDP_BLOCKED",
-                    f"cdp_url host '{host}' resolves to a blocked network "
-                    "(RFC-1918, link-local, or cloud-metadata). "
-                    "Even with allow_remote=true, these are always rejected. "
-                    "Only attach to endpoints you own and trust.",
-                )
+            # #448: do not apply full is_url_safe (RFC1918 block) here — WSL/container
+            # host IPs are intentionally RFC1918 private ranges; the operator who sets
+            # allow_remote is explicitly trusting that endpoint (see warning in payload).
+            # Nav/scrape still use strict is_url_safe. Reconciles documented WSL workflow.
+
+            # Even with allow_remote=true, still reject link-local and cloud-metadata
+            # (untrusted auto-config / instance metadata ranges). This keeps the spirit
+            # of the original hardening while permitting the RFC1918 WSL use-case.
+            try:
+                norm = host_to_check
+                if not any(
+                    norm.startswith(p)
+                    for p in ("http://", "https://", "ws://", "wss://")
+                ):
+                    norm = "http://" + norm
+                ph = urllib.parse.urlparse(norm).hostname or ""
+                if ph:
+                    ip = ipaddress.ip_address(ph)
+                    if ip in ipaddress.ip_network(
+                        "169.254.0.0/16"
+                    ) or ip in ipaddress.ip_network("fe80::/10"):
+                        raise ToolError(
+                            "MCP_REMOTE_CDP_BLOCKED",
+                            f"cdp_url host '{host}' is in a blocked auto-config range "
+                            "(link-local or cloud-metadata). Even with allow_remote=true, "
+                            "these are rejected.",
+                        )
+            except (ValueError, TypeError, ipaddress.AddressValueError):
+                pass  # hostname or parse issue; will surface later or was already validated
 
         session_name = str(args.get("session_name") or "default")
         if session_name in self._sessions:
@@ -1489,11 +1541,32 @@ class StealthMCPServer:
             platform = str(platform)
             search_root = self._workflow_library_root / platform
             if not search_root.exists():
-                return self._tool_ok_payload({"workflows": []})
+                # fall back to bundled in wheel
+                if self._bundled_workflow_root:
+                    bundled_p = (
+                        self._bundled_workflow_root / platform
+                        if hasattr(self._bundled_workflow_root, "__truediv__")
+                        else None
+                    )
+                    if bundled_p and bundled_p.exists():
+                        search_root = bundled_p  # type: ignore
+                if (
+                    not getattr(search_root, "exists", lambda: False)()
+                    or not search_root.exists()
+                ):
+                    return self._tool_ok_payload({"workflows": []})
 
         workflows = []
+        roots_for_rel = [self._workflow_library_root]
+        if self._bundled_workflow_root:
+            roots_for_rel.append(self._bundled_workflow_root)
         for yaml_file in sorted(search_root.rglob("*.yaml")):
-            relative_path = yaml_file.relative_to(self._workflow_library_root)
+            # best effort relative for display (prefer user root)
+            rel_root = self._workflow_library_root
+            try:
+                relative_path = yaml_file.relative_to(rel_root)
+            except Exception:
+                relative_path = Path(yaml_file.name)
             filename_str = relative_path.as_posix()
 
             if pattern and not fnmatch.fnmatch(filename_str, pattern):
@@ -1667,8 +1740,23 @@ class StealthMCPServer:
                     msg_id, self._tool_result(payload, is_error=True)
                 )
 
+            # #455: enforce declarative validation before any handler execution.
+            # Rejects unknown args (matches additionalProperties: false in schemas),
+            # type/length/range/required/pattern violations. Never calls handler on bad input.
             try:
-                payload = await tool.handler(arguments)
+                validated_args = validate_tool_input(tool_name, arguments)
+            except InputValidationError as ive:
+                payload = self._tool_error_payload(
+                    "MCP_VALIDATION_ERROR",
+                    f"Invalid input for {ive.tool_name}: {ive.field} {ive.reason}",
+                    {"tool": ive.tool_name, "field": ive.field, "reason": ive.reason},
+                )
+                return self._jsonrpc_result(
+                    msg_id, self._tool_result(payload, is_error=True)
+                )
+
+            try:
+                payload = await tool.handler(validated_args)
                 return self._jsonrpc_result(
                     msg_id, self._tool_result(payload, is_error=False)
                 )

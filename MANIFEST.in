@@ -7,3 +7,6 @@ recursive-include stealth *.js *.json
 recursive-include production Dockerfile docker-healthcheck.py
 recursive-include examples *.md
 recursive-include tests *.py *.json
+recursive-include workflows *.yaml *.yml
+recursive-include plugins *.py
+recursive-include production/sdk *.py

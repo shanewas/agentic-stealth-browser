@@ -75,6 +75,14 @@ class ToolInputSchema:
             err = param.validate(value)
             if err:
                 raise InputValidationError(self.tool_name, param.name, err)
+        # Enforce additionalProperties: false to match advertised JSON schemas.
+        known = set(self.params.keys())
+        unknown = set(args.keys()) - known
+        if unknown:
+            first = sorted(unknown)[0]
+            raise InputValidationError(
+                self.tool_name, first, "unknown argument (additionalProperties: false)"
+            )
         return args
 
 

@@ -231,6 +231,8 @@ class AgentBrowser:
         rate_limits: Optional[
             dict
         ] = None,  # #136: tool rate-limit config (e.g. {"tool_calls_per_minute": 30, "total_calls_cap": 600})
+        preset: Optional[str] = None,  # #457: forward to implicit launch for CLI etc
+        region: Optional[str] = None,
     ):
         self.session_manager = SessionManager()
         self.session = self.session_manager.create_session(
@@ -253,6 +255,9 @@ class AgentBrowser:
         )
         self.browser = None  # Playwright BrowserContext (persistent or pooled) — see launch() docstring
         self.page = None  # Playwright Page (main) — use this for most page actions
+        self._owns_page: bool = (
+            False  # #451: do not close user-owned/adopted pages on teardown
+        )
         self.rng = (
             random.Random()
         )  # for warm_up, profile, screenshots, fallbacks (BUG-01 fix)
@@ -290,8 +295,8 @@ class AgentBrowser:
         self.debug_cdp: bool = (
             False  # #377: opt-in CDP remote debugging (localhost-only WS endpoint)
         )
-        self.current_preset: Optional[str] = None
-        self.current_region: str = "global"
+        self.current_preset: Optional[str] = preset
+        self.current_region: str = region or "global"
         self.tls_manager: Optional[Any] = None
         self.debug_reporter: Optional[Any] = None
         self._launch_options: Dict[
@@ -731,6 +736,7 @@ class AgentBrowser:
 
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
+        self._owns_page = True
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
 
         # #182: initialize default page_getter (overridable); recovery and internal now prefer via getter
@@ -860,6 +866,7 @@ class AgentBrowser:
                 except Exception:
                     pass
                 self.page = None
+                self._owns_page = False
             if getattr(self, "browser", None):
                 try:
                     if getattr(self, "_using_pool", False) and getattr(
@@ -1016,6 +1023,7 @@ class AgentBrowser:
                         self._cdp_browser_version = None
 
             self.page = await self.browser.new_page()
+            self._owns_page = True
             self.context = self.browser
 
             # 5. Re-apply stealth init script on context + fp seed
@@ -2084,6 +2092,7 @@ class AgentBrowser:
         new_p = await self.browser.new_page()
         if make_current:
             self.page = new_p
+            self._owns_page = True
             # re-wire for convenience (human etc now target the new current page)
             self.human = HumanBehavior(
                 new_p,
@@ -2126,6 +2135,9 @@ class AgentBrowser:
                 # still allow, user may have external
                 pass
             self.page = page
+            self._owns_page = (
+                True  # current page we are driving is now "ours" to manage
+            )
             self.human = HumanBehavior(
                 page, rng=self.rng, device_profile=getattr(self.persona, "device", None)
             )
@@ -2225,93 +2237,174 @@ class AgentBrowser:
         self._attached = True
         # #439: attach path — will be refined to OWNED or ADOPTED below.
 
-        # Pick or create the context we will drive.
-        existing_contexts = list(remote_browser.contexts)
-        adopted_index: Any
-        if new_context or not existing_contexts:
-            ctx_opts = dict(context_options or {})
-            ctx = await remote_browser.new_context(**ctx_opts)
-            self._attached_context_is_ours = True
-            # #439: we own the context, but not the browser process
-            self._teardown_mode = TeardownMode.ATTACHED_OWNED_CTX
-            adopted_index = "new"
-        else:
-            if context_index < 0 or context_index >= len(existing_contexts):
-                raise IndexError(
-                    f"context_index {context_index} out of range "
-                    f"(remote browser has {len(existing_contexts)} contexts)"
-                )
-            ctx = existing_contexts[context_index]
-            self._attached_context_is_ours = False
-            # #439: we adopted a user-owned context — do NOT close it on teardown
-            self._teardown_mode = TeardownMode.ATTACHED_ADOPTED_CTX
-            adopted_index = context_index
+        # #452: wrap post-connect steps so that ctx creation, page creation, or stealth
+        # failures roll back _pw / _remote_browser / any owned ctx we created, and reset
+        # attach state for clean retry on same instance. Never close adopted user resources.
+        try:
+            # Pick or create the context we will drive.
+            existing_contexts = list(remote_browser.contexts)
+            adopted_index: Any
+            if new_context or not existing_contexts:
+                ctx_opts = dict(context_options or {})
+                ctx = await remote_browser.new_context(**ctx_opts)
+                self._attached_context_is_ours = True
+                # #439: we own the context, but not the browser process
+                self._teardown_mode = TeardownMode.ATTACHED_OWNED_CTX
+                adopted_index = "new"
+            else:
+                if context_index < 0 or context_index >= len(existing_contexts):
+                    raise IndexError(
+                        f"context_index {context_index} out of range "
+                        f"(remote browser has {len(existing_contexts)} contexts)"
+                    )
+                ctx = existing_contexts[context_index]
+                self._attached_context_is_ours = False
+                # #439: we adopted a user-owned context — do NOT close it on teardown
+                self._teardown_mode = TeardownMode.ATTACHED_ADOPTED_CTX
+                adopted_index = context_index
 
-        self.browser = ctx  # AgentBrowser treats `browser` as the active context
-        self.browser_context = ctx
-        self.context = ctx
+            self.browser = ctx  # AgentBrowser treats `browser` as the active context
+            self.browser_context = ctx
+            self.context = ctx
 
-        # Stealth layer: init scripts apply to future pages (and re-apply on every
-        # navigation in existing pages). Launch-time tricks are unavailable.
-        stealth_installed = False
-        stealth_error: Optional[str] = None
-        if apply_stealth:
-            session_name = (self.session or {}).get("name", "default-session")
-            fp_seed = f"agentic-{session_name}-canvas-v4"
-            stealth_script = get_stealth_script(fingerprint_seed=fp_seed)
+            # Stealth layer: init scripts apply to future pages (and re-apply on every
+            # navigation in existing pages). Launch-time tricks are unavailable.
+            stealth_installed = False
+            stealth_error: Optional[str] = None
+            if apply_stealth:
+                session_name = (self.session or {}).get("name", "default-session")
+                fp_seed = f"agentic-{session_name}-canvas-v4"
+                stealth_script = get_stealth_script(fingerprint_seed=fp_seed)
+                try:
+                    await ctx.add_init_script(stealth_script)
+                    stealth_installed = True
+                except Exception as e:
+                    # Non-fatal: caller still gets a working attached context, but
+                    # the failure is surfaced in the return payload so callers
+                    # can log/alert rather than silently believing stealth is on.
+                    stealth_error = f"{type(e).__name__}: {e}"
+                    _logger = getattr(self, "logger", None)
+                    if _logger is not None:
+                        try:
+                            _logger.warning(
+                                "attach_over_cdp: stealth init script install failed: %s",
+                                stealth_error,
+                            )
+                        except Exception:
+                            pass
+
+            # Reuse the first existing page when adopting, else open a fresh one.
+            # #451: for adopted existing pages (new_context=False and pages present) we do not own
+            # the tab and must leave it open on close() to honor the attach contract.
             try:
-                await ctx.add_init_script(stealth_script)
-                stealth_installed = True
-            except Exception as e:
-                # Non-fatal: caller still gets a working attached context, but
-                # the failure is surfaced in the return payload so callers
-                # can log/alert rather than silently believing stealth is on.
-                stealth_error = f"{type(e).__name__}: {e}"
-                _logger = getattr(self, "logger", None)
-                if _logger is not None:
-                    try:
-                        _logger.warning(
-                            "attach_over_cdp: stealth init script install failed: %s",
-                            stealth_error,
-                        )
-                    except Exception:
-                        pass
+                pages = list(ctx.pages)
+                if pages and not new_context:
+                    self.page = pages[0]
+                    self._owns_page = False
+                else:
+                    self.page = await ctx.new_page()
+                    self._owns_page = True
+            except Exception:
+                self.page = await ctx.new_page()
+                self._owns_page = True
 
-        # Reuse the first existing page when adopting, else open a fresh one.
-        try:
-            pages = list(ctx.pages)
-            self.page = pages[0] if pages and not new_context else await ctx.new_page()
-        except Exception:
-            self.page = await ctx.new_page()
+            # #453: initialize runtime helpers (human, logger, scraper, recovery) so that
+            # documented safe_goto/safe_click/safe_type and MCP stealth_scrape work on
+            # attached sessions. Launch-only deep stealth (TLS etc) remain in degradation list.
+            self.human = HumanBehavior(
+                self.page,
+                rng=self.rng,
+                device_profile=getattr(self.persona, "device", None),
+            )
+            self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
+            try:
+                await self.human.initialize_mouse_tracker()
+            except Exception:
+                pass
+            self.logger = AuditLogger(
+                (self.session or {}).get("name", "attached-session"),
+                correlation_id=getattr(
+                    getattr(self, "metrics", None), "get_correlation_id", lambda: None
+                )(),
+            )
+            self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
+            self.ai = AIHooks(provider="none")
+            try:
+                self.recovery = AntiBlockOrchestrator(
+                    browser=self.browser,
+                    session_manager=getattr(self, "session_manager", None),
+                    proxy_manager=getattr(self, "proxy_manager", None),
+                    page_getter=getattr(self, "page_getter", None)
+                    or (lambda: self.page),
+                    light_mode=getattr(self, "light_mode", None),
+                    rng=self.rng,
+                )
+            except Exception:
+                self.recovery = None
 
-        # Best-effort version probe (non-fatal)
-        browser_version = "unknown"
-        try:
-            browser_version = remote_browser.version  # property on PW Browser
-        except Exception:
-            pass
+            # Best-effort version probe (non-fatal)
+            browser_version = "unknown"
+            try:
+                browser_version = remote_browser.version  # property on PW Browser
+            except Exception:
+                pass
 
-        return {
-            "cdp_url": normalised,
-            "browser_version": browser_version,
-            "context_count": len(existing_contexts),
-            "adopted_context_index": adopted_index,
-            "stealth_applied": stealth_installed,
-            "stealth_requested": bool(apply_stealth),
-            "stealth_error": stealth_error,
-            "degradation": [
-                "tls_ja3_ja4_fingerprint_not_applied (process-level)",
-                "launch_args_and_user_data_dir_not_applied (process-level)",
-                "regional_preset_tls_profile_not_applied (process-level)",
-                "already_open_pages_only_patched_on_next_navigation",
-            ],
-            "warning": (
-                "SECURITY: attach_over_cdp grants full control of the remote "
-                "browser including any authenticated user sessions. Only attach "
-                "to endpoints you own. Never expose the remote-debugging port "
-                "to untrusted networks."
-            ),
-        }
+            return {
+                "cdp_url": normalised,
+                "browser_version": browser_version,
+                "context_count": len(existing_contexts),
+                "adopted_context_index": adopted_index,
+                "stealth_applied": stealth_installed,
+                "stealth_requested": bool(apply_stealth),
+                "stealth_error": stealth_error,
+                "degradation": [
+                    "tls_ja3_ja4_fingerprint_not_applied (process-level)",
+                    "launch_args_and_user_data_dir_not_applied (process-level)",
+                    "regional_preset_tls_profile_not_applied (process-level)",
+                    "already_open_pages_only_patched_on_next_navigation",
+                ],
+                "warning": (
+                    "SECURITY: attach_over_cdp grants full control of the remote "
+                    "browser including any authenticated user sessions. Only attach "
+                    "to endpoints you own. Never expose the remote-debugging port "
+                    "to untrusted networks."
+                ),
+            }
+        except Exception as e:
+            # #452: best-effort rollback of anything we allocated after successful connect.
+            # Close only our created ctx (never adopted user ctxs or the external browser).
+            try:
+                if getattr(self, "_attached_context_is_ours", False) and getattr(
+                    self, "browser", None
+                ):
+                    await self.browser.close()
+            except Exception:
+                pass
+            self.browser = None
+            self.browser_context = None
+            self.context = None
+            try:
+                remote = getattr(self, "_remote_browser", None)
+                if remote is not None:
+                    await remote.close()
+            except Exception:
+                pass
+            self._remote_browser = None
+            if getattr(self, "_pw", None):
+                try:
+                    await self._pw.stop()
+                except Exception:
+                    pass
+                self._pw = None
+            self._attached = False
+            self._attached_cdp_url = None
+            self._attached_context_is_ours = False
+            self._teardown_mode = None
+            self.page = None
+            self._owns_page = False
+            raise RuntimeError(
+                f"attach_over_cdp: post-connect failure (ctx/page/stealth) for {normalised}: {e}"
+            ) from e
 
     async def close(self):
         """Close the browser, page, and underlying Playwright instance.
@@ -2323,11 +2416,16 @@ class AgentBrowser:
         are closed; adopted user contexts are left untouched.
         """
         try:
-            if self.page:
+            if self.page and getattr(self, "_owns_page", True):
+                # #451: only close pages we created/own; adopted user tabs and externally
+                # supplied pages via switch_to_page(new) must survive our close().
                 try:
                     await self.page.close()
                 except Exception:
                     pass
+                self.page = None
+            else:
+                # adopted or non-owned page: clear ref but leave the tab alive
                 self.page = None
 
             if self.browser:
@@ -2389,6 +2487,7 @@ class AgentBrowser:
             self.human = None
             self.orchestrator = None
             self.recovery = None
+            self._owns_page = False
             if getattr(self, "logger", None):
                 try:
                     self.logger.close()
@@ -2415,6 +2514,10 @@ class AgentBrowser:
                 launch_options=getattr(
                     self, "_custom_launch_options", None
                 ),  # #143: preserve custom opts on implicit launch
+                preset=getattr(
+                    self, "current_preset", None
+                ),  # #457: support preset/region via ctor + implicit aenter for CLI
+                region=getattr(self, "current_region", None),
             )
         return self
 

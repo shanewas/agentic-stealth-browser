@@ -11,7 +11,9 @@ def score_results(per_site: Mapping[str, str]) -> int:
     """Compute 0–100 score from per-site status strings."""
     pass_count = sum(1 for v in per_site.values() if v == "pass")
     soft_count = sum(1 for v in per_site.values() if v == "soft-detect")
-    raw = (pass_count * PASS_WEIGHT + soft_count * SOFT_DETECT_WEIGHT) / SITE_COUNT * 100
+    raw = (
+        (pass_count * PASS_WEIGHT + soft_count * SOFT_DETECT_WEIGHT) / SITE_COUNT * 100
+    )
     return round(raw)
 
 

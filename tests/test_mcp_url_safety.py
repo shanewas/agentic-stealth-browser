@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 # Make ``production`` importable as a top-level package.
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _PROD = os.path.join(_ROOT, "production")
@@ -46,11 +48,53 @@ def test_rfc1918_blocked() -> None:
 
 
 def test_rfc1918_blocked_even_for_allow_remote_helper() -> None:
-    """is_url_safe must still reject RFC-1918 hosts (second-layer block).
+    """is_url_safe still rejects RFC-1918 (used by nav/scrape guards).
 
-    This confirms the second-layer block works for ``allow_remote=true``
-    attach paths: even if a future change to ``is_loopback_host`` were
-    permissive, ``is_url_safe`` would still keep the operator off
-    private-network CDP endpoints.
+    Note: for CDP attach with allow_remote, RFC1918 is intentionally permitted
+    (#448) to support WSL/private-host workflows; nav remains protected.
     """
     assert mcp_server.is_url_safe("http://10.0.0.5:9222") is False
+
+
+# --- #454: fail-closed matrix for schemes, parse, and resolver failures ---
+
+
+@pytest.mark.parametrize(
+    "bad_url,reason",
+    [
+        ("file:///etc/passwd", "file scheme"),
+        ("javascript:alert(1)", "javascript scheme"),
+        ("data:text/plain,secret", "data scheme"),
+        ("ftp://example.com/file", "ftp scheme"),
+        ("ws://example.com", "ws scheme not allowed for nav"),
+        ("http://", "no host"),
+        ("https:///path", "no host after scheme"),
+        ("not-a-url-at-all", "no scheme no host fallback"),
+    ],
+)
+def test_is_url_safe_rejects_unsafe_schemes_and_bad_hosts(bad_url, reason):
+    """#454: unsupported schemes and missing-host cases must fail closed."""
+    assert mcp_server.is_url_safe(bad_url) is False, reason
+
+
+def test_is_url_safe_rejects_on_dns_failure(monkeypatch):
+    """#454: DNS errors (gaierror or any) must fail closed, never leak to browser."""
+    import socket
+
+    def _raise_gai(*a, **k):
+        raise socket.gaierror("temporary failure in name resolution")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _raise_gai)
+    assert mcp_server.is_url_safe("https://definitely-does-not-exist.invalid/") is False
+
+
+def test_is_url_safe_rejects_on_empty_addrinfo(monkeypatch):
+    """#454: empty resolver results must fail closed."""
+    monkeypatch.setattr("socket.getaddrinfo", lambda h, p: [])
+    assert mcp_server.is_url_safe("https://empty-resolver.example/") is False
+
+
+def test_is_url_safe_accepts_public_https():
+    """Sanity: real public hosts still pass (DNS + public IP)."""
+    # This may do real DNS; acceptable for positive control in unit matrix.
+    assert mcp_server.is_url_safe("https://example.com") is True

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-stealth-browser"
-version = "2.4.0"
+version = "2.4.1"
 description = "Production-grade, human-mimicking browser automation framework for autonomous agents. Survives modern anti-bot systems."
 readme = "README.md"
 license = "MIT"
@@ -46,6 +46,9 @@ dev = [
 [project.scripts]
 agentic-stealth-browser = "production.cli:main"
 
+[tool.setuptools]
+py-modules = ["mcp_security"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
@@ -57,10 +60,14 @@ include = [
     "audit",
     "proxy",
     "production",
+    "production.*",
     "scraping",
     "ai",
     "linkedin",
     "workflows",
+    "workflows.*",
+    "plugins",
+    "plugins.*",
     "canary",
 ]
 

@@ -408,6 +408,7 @@ async def test_timeline_limit_uses_env_default_and_max(monkeypatch):
     assert default_payload["count"] == 2
     assert server._sessions["obs"].last_limit == 2
 
+    # limit=5 > env-max=3 but < schema max=200 so validation passes; handler should clamp
     clamped_resp = await server.handle_jsonrpc(
         {
             "jsonrpc": "2.0",
@@ -415,7 +416,7 @@ async def test_timeline_limit_uses_env_default_and_max(monkeypatch):
             "method": "tools/call",
             "params": {
                 "name": "stealth_session_timeline",
-                "arguments": {"session_name": "obs", "limit": 999},
+                "arguments": {"session_name": "obs", "limit": 5},
             },
         }
     )
@@ -482,7 +483,7 @@ async def test_observability_payload_is_truncated_for_large_timeline(monkeypatch
             "method": "tools/call",
             "params": {
                 "name": "stealth_session_timeline",
-                "arguments": {"session_name": "obs", "limit": 400},
+                "arguments": {"session_name": "obs", "limit": 150},
             },
         }
     )
@@ -616,3 +617,168 @@ async def test_stealth_get_cdp_endpoint_disabled_by_default_and_enabled_when_fla
     assert "ws_endpoint" in cdp_e
     assert cdp_e["ws_endpoint"].startswith("ws://127.0.0.1")
     assert "warning" in cdp_e and "localhost" in cdp_e["warning"].lower()
+
+
+# --- #455: declarative input validation enforcement tests (dispatch level) ---
+
+
+from production.mcp_input_validator import (
+    InputValidationError,
+    validate_tool_input,
+    MCP_TOOL_SCHEMAS,
+)
+
+
+def test_validator_rejects_unknown_arguments():
+    """additionalProperties: false enforcement."""
+    with pytest.raises(InputValidationError) as exc:
+        validate_tool_input("stealth_launch", {"session_name": "x", "evil": 1})
+    assert "unknown argument" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "tool,args,field_part",
+    [
+        ("stealth_launch", {"session_name": "x" * 200}, "exceeds max"),
+        ("stealth_navigate", {"url": "x" * 5000}, "exceeds max"),
+        ("stealth_set_region", {"region": 123}, "expected str"),
+        (
+            "stealth_attach_over_cdp",
+            {"cdp_url": "http://h", "context_index": -1},
+            "below min",
+        ),
+        (
+            "stealth_attach_over_cdp",
+            {"cdp_url": "http://h", "context_index": 999},
+            "exceeds max",
+        ),
+    ],
+)
+def test_validator_rule_classes_type_length_range(tool, args, field_part):
+    """#455: dispatch-level coverage for type/len/range rules (and required via other cases)."""
+    # provide minimal for required where needed
+    if tool == "stealth_navigate" and "url" not in args:
+        args = {"url": "https://e.com", **args}
+    if tool == "stealth_attach_over_cdp" and "cdp_url" not in args:
+        args = {"cdp_url": "http://h", **args}
+    with pytest.raises(InputValidationError) as exc:
+        validate_tool_input(tool, args)
+    assert field_part in str(exc.value) or field_part in getattr(
+        exc.value, "reason", ""
+    )
+
+
+def test_validator_rejects_missing_required():
+    with pytest.raises(InputValidationError) as exc:
+        validate_tool_input("stealth_navigate", {"session_name": "s"})  # no url
+    assert "required" in str(exc.value).lower()
+
+
+def test_schema_validator_parity_basic():
+    """#455: every tool with a validator schema entry should be known to server list_tools too (no silent drift)."""
+    from production.mcp_server import StealthMCPServer
+
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    listed = {t["name"] for t in server.list_tools()["tools"]}
+    for name in MCP_TOOL_SCHEMAS:
+        assert name in listed, (
+            f"validator has {name} but server list_tools does not expose it"
+        )
+    # Also spot-check that launch etc have matching keys at high level
+    assert "stealth_launch" in listed and "stealth_launch" in MCP_TOOL_SCHEMAS
+
+
+@pytest.mark.asyncio
+async def test_validation_error_returned_as_mcp_tool_error_without_handler_side_effects():
+    """#455: validation errors are stable MCP errors, handler never runs."""
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    # launch a session
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "stealth_launch", "arguments": {"session_name": "val"}},
+        }
+    )
+    # bad call: overlong + unknown mixed, but first violation
+    resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "stealth_status",
+                "arguments": {"session_name": "val" * 100, "weird": True},
+            },
+        }
+    )
+    payload = _tool_structured_content(resp)
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "MCP_VALIDATION_ERROR"
+    assert "session_name" in payload.get("message", "") or "exceeds" in str(payload)
+    assert resp["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_navigate_and_scrape_reject_unsafe_urls_before_browser_invocation():
+    """#454: MCP guard must reject before _resolve_browser or safe_goto / scrape.
+
+    Proves browser navigation is never invoked for rejected URLs (handler regression).
+    """
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+
+    # Need a launched session for resolve to succeed (but guard fires first anyway)
+    await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 90,
+            "method": "tools/call",
+            "params": {
+                "name": "stealth_launch",
+                "arguments": {"session_name": "guard-test"},
+            },
+        }
+    )
+
+    for tool_name in ("stealth_navigate", "stealth_scrape"):
+        bad_resp = await server.handle_jsonrpc(
+            {
+                "jsonrpc": "2.0",
+                "id": 91,
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": {
+                        "session_name": "guard-test",
+                        "url": "http://10.0.0.1/secret",
+                    },
+                },
+            }
+        )
+        payload = _tool_structured_content(bad_resp)
+        assert payload["status"] == "error", f"{tool_name} should error"
+        assert payload.get("error_code") == "MCP_SSRF_BLOCKED", (
+            f"{tool_name} wrong code: {payload}"
+        )
+        assert "private or blocked" in payload.get(
+            "message", ""
+        ).lower() or "SSRF" in payload.get("error_code", "")
+
+    # Positive control still works
+    ok_resp = await server.handle_jsonrpc(
+        {
+            "jsonrpc": "2.0",
+            "id": 92,
+            "method": "tools/call",
+            "params": {
+                "name": "stealth_navigate",
+                "arguments": {
+                    "session_name": "guard-test",
+                    "url": "https://example.com",
+                },
+            },
+        }
+    )
+    ok_payload = _tool_structured_content(ok_resp)
+    assert ok_payload["status"] == "success"

@@ -70,18 +70,41 @@ async def test_mcp_attach_rejects_url_without_host():
 
 
 # ---------------------------------------------------------------------------
-# Two-layer safety gate (#438, #441): loopback helper + is_url_safe helper
+# Attach safety gate (#438, #441, #448): loopback + allow_remote; rfc1918 permitted
+# for documented WSL/private-host use when allow_remote=true (nav remains strict).
+# Link-local / cloud-metadata still blocked.
 # ---------------------------------------------------------------------------
 
 
-async def test_mcp_attach_blocks_rfc1918_even_with_allow_remote():
-    """Even with allow_remote=true, RFC-1918 hosts are rejected by is_url_safe."""
+async def test_mcp_attach_allows_rfc1918_with_explicit_allow_remote():
+    """#448: WSL/container host IPs are RFC1918; explicit allow_remote permits attach (nav still blocks via is_url_safe)."""
+    from unittest.mock import patch
+
     server = StealthMCPServer()
-    with pytest.raises(ToolError) as ei:
+    # Patch attach_over_cdp so the test doesn't perform a real (slow + doomed) CDP connect to 10.0.0.5.
+    # The only thing we assert is that the safety *gate* did not turn it into MCP_REMOTE_CDP_BLOCKED.
+    with patch(
+        "core.agent_browser.AgentBrowser.attach_over_cdp",
+        side_effect=RuntimeError(
+            "attach_over_cdp: failed to connect (simulated for test)"
+        ),
+    ):
+        try:
+            await server._tool_stealth_attach_over_cdp(
+                {"cdp_url": "http://10.0.0.5:9222", "allow_remote": True}
+            )
+        except Exception as e:
+            if isinstance(e, ToolError) and e.error_code == "MCP_REMOTE_CDP_BLOCKED":
+                pytest.fail(
+                    "RFC1918 + allow_remote should not be blocked by the CDP safety gate"
+                )
+            # RuntimeError from patch (or wrapped) or other non-BLOCKED error = gate was passed. Good.
+    # link-local still blocked even with allow (auto-config risk)
+    with pytest.raises(ToolError) as ei2:
         await server._tool_stealth_attach_over_cdp(
-            {"cdp_url": "http://10.0.0.5:9222", "allow_remote": True}
+            {"cdp_url": "http://[fe80::1]:9222", "allow_remote": True}
         )
-    assert ei.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
+    assert ei2.value.error_code == "MCP_REMOTE_CDP_BLOCKED"
 
 
 async def test_mcp_attach_blocks_link_local_ipv6():
@@ -93,7 +116,7 @@ async def test_mcp_attach_blocks_link_local_ipv6():
 
 
 async def test_mcp_attach_blocks_link_local_ipv6_even_with_allow_remote():
-    """Link-local IPv6 is also rejected by is_url_safe's fe80::/10 block."""
+    """Link-local IPv6 remains blocked even with allow_remote (untrusted auto-config range)."""
     server = StealthMCPServer()
     with pytest.raises(ToolError) as ei:
         await server._tool_stealth_attach_over_cdp(
@@ -362,7 +385,11 @@ async def test_teardown_mode_set_to_attached_adopted(remote_chromium):
         f"http://127.0.0.1:{port}", new_context=False, context_index=0
     )
     assert ab_adopt._teardown_mode == TeardownMode.ATTACHED_ADOPTED_CTX
-    # Clean up — close should NOT kill the adopted context
+    assert (
+        ab_adopt._owns_page is False
+    )  # #451: we must not close the adopted user's page/tab
+    # Clean up — close should NOT kill the adopted context or its pages
     await ab_adopt.close()
+    assert ab_adopt.page is None
     await ab_setup.close()
     assert proc.returncode is None  # external browser still alive

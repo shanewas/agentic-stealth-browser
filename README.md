@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/agentic-stealth-browser.svg)](https://pypi.org/project/agentic-stealth-browser/)
-[![Tests](https://img.shields.io/badge/tests-890%2B%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-915%2B%20passing-brightgreen)](tests/)
 [![GitHub Stars](https://img.shields.io/github/stars/shanewas/agentic-stealth-browser?style=flat&logo=github)](https://github.com/shanewas/agentic-stealth-browser)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/shanewas)
 
@@ -38,7 +38,7 @@ Sites don't just check your User-Agent anymore. They check *everything*:
 
 | Attack Surface | Vanilla Playwright | This library |
 |---|---|---|
-| **TLS handshake** (JA3/JA4 fingerprint) | Standard Python TLS — instantly identifiable | Region-spoofed profiles (US, Japan, EU, Korea) |
+| **TLS handshake** (client hello / JA3/JA4-ish) | Standard Python TLS — instantly identifiable | Region profile spoof via launch/presets (US, Japan, EU, Korea); process-level, not full custom TLS stack |
 | **Navigator APIs** (`navigator.webdriver`, `plugins`, `languages`) | Leaks automation flags everywhere | Every property patched before first paint |
 | **WebGL / Canvas fingerprint** | Headless GPU renders differently | Consistent buffers across sessions |
 | **Human behavior** | Robotic clicks, instant typing | Bézier mouse curves, variable speed, fatigue simulation |
@@ -97,13 +97,15 @@ Instead of launching a new Chromium, you can attach to a Chrome you already
 have running with `--remote-debugging-port=9222`:
 
 ```python
-async with AgentBrowser(session_name="attached") as browser:
-    await browser.attach_over_cdp(
-        "http://127.0.0.1:9222",   # or the Windows host IP from WSL
-        new_context=True,           # don't disturb the user's tabs
-    )
-    await browser.safe_goto("https://bot.sannysoft.com")
-    # close() will NOT terminate the external browser
+# Attach mode: use a fresh instance (async-with auto-launches a new browser first).
+browser = AgentBrowser(session_name="attached")
+await browser.attach_over_cdp(
+    "http://127.0.0.1:9222",   # or the Windows host IP from WSL
+    new_context=True,           # don't disturb the user's tabs
+)
+await browser.safe_goto("https://bot.sannysoft.com")
+# safe actions + MCP scrape now operational on attached; close() leaves external browser running.
+await browser.close()
 ```
 
 See [docs/ATTACH_OVER_CDP.md](docs/ATTACH_OVER_CDP.md) for the WSL→Windows
@@ -116,7 +118,7 @@ degradation matrix (init-script stealth still applies; TLS/JA3 does not).
 
 | Feature | What It Does |
 |---|---|
-| **TLS Fingerprinting** | JA3/JA4 region profiles |
+| **TLS Fingerprinting** | Region client-hello profiles (JA3/JA4 surface); attach mode degrades (process-level) |
 | **Human Behavior** | Mouse wobble, typing mistakes, fatigue, distraction |
 | **Auto Recovery** | Block detection → proxy/session rotation → retry |
 | **Account Warming** | 14-day gradual ramp-up for new accounts |
