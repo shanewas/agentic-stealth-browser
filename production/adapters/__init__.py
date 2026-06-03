@@ -79,6 +79,11 @@ def get_adapter(name: str) -> type[BackendAdapter]:
     return BACKEND_REGISTRY[name]
 
 
+# M1: CDP-bridge adapter registration
+from production.adapters.cdp_bridge import CDPBridgeAdapter as _CDPBridgeAdapter  # noqa: E402
+register_adapter(_CDPBridgeAdapter)
+
+
 __all__ = [
     "AdapterCapabilityError",
     "AdapterLaunchError",
