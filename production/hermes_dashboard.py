@@ -1881,15 +1881,41 @@ def create_app(
 def run_dashboard(
     host: str = "127.0.0.1", port: int = 8443, password: Optional[str] = None
 ) -> None:
+    import ipaddress
     import os
 
     import uvicorn
 
+    effective_password = password or os.getenv("HERMES_DASHBOARD_PASSWORD", "change-me")
     settings = DashboardSettings(
         host=host,
         port=port,
-        password=password or os.getenv("HERMES_DASHBOARD_PASSWORD", "change-me"),
+        password=effective_password,
     )
+
+    # #458: fail closed for non-loopback binds with default/empty/known password.
+    # Prevents accidental exposure of browser control dashboard with guessable creds.
+    def _is_loopback_bind(h: str) -> bool:
+        h = (h or "").strip().lower().strip("[]")
+        if h in ("127.0.0.1", "localhost", "::1"):
+            return True
+        try:
+            return ipaddress.ip_address(h).is_loopback
+        except Exception:
+            return False
+
+    if not _is_loopback_bind(settings.host) and settings.password in (
+        None,
+        "",
+        "change-me",
+    ):
+        raise RuntimeError(
+            f"Hermes dashboard refusing to bind to non-loopback host '{settings.host}' "
+            f"with default/empty password. Set a strong --password (or HERMES_DASHBOARD_PASSWORD env) "
+            "or use --host 127.0.0.1 / localhost / ::1 for local dev. "
+            "Remote deployment requires TLS reverse proxy and non-default secret."
+        )
+
     app = create_app(settings=settings)
 
     # Run uvicorn in a subprocess to avoid asyncio.Runner conflicts when

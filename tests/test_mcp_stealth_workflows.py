@@ -193,7 +193,10 @@ async def test_delete_fails_without_confirm_true():
     payload = _tool_structured_content(resp)
     assert payload["status"] == "error"
     assert payload["error_code"] == "MCP_VALIDATION_ERROR"
-    assert "Confirmation required" in payload["message"]
+    assert (
+        "confirm" in payload.get("message", "").lower()
+        or "required" in payload.get("message", "").lower()
+    )
     assert resp["result"].get("isError") is True
 
 

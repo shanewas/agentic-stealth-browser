@@ -83,16 +83,21 @@ from core.agent_browser import AgentBrowser
 
 async def main():
     win_host = "<paste WIN_HOST from step 2>"
-    async with AgentBrowser(session_name="wsl-windows-demo") as browser:
-        info = await browser.attach_over_cdp(
-            f"http://{win_host}:9222",
-            new_context=True,        # don't touch the user's tabs
-            apply_stealth=True,
-        )
-        print("attached:", info["browser_version"], info["degradation"])
+    # NOTE: attach_over_cdp on a fresh instance (do not use async-with auto-launch,
+    # which would create a browser before attach). close() will not kill the external.
+    browser = AgentBrowser(session_name="wsl-windows-demo")
+    info = await browser.attach_over_cdp(
+        f"http://{win_host}:9222",
+        new_context=True,        # don't touch the user's tabs
+        apply_stealth=True,
+    )
+    print("attached:", info["browser_version"], info["degradation"])
 
-        await browser.safe_goto("https://bot.sannysoft.com")
-        # init-script stealth still hides navigator.webdriver, etc.
+    await browser.safe_goto("https://bot.sannysoft.com")
+    # safe_* actions and MCP scrape now work; init-script stealth applied.
+    # init-script stealth still hides navigator.webdriver, etc.
+
+    await browser.close()  # or use try/finally
 
 asyncio.run(main())
 ```

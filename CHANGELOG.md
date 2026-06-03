@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.1] — v2.4.0 Stabilization Patch (2026-06-03)
+
+### Fixed / Security / Reliability (P0/P1 per #459)
+- **#454** MCP nav/scrape: `is_url_safe` now fails closed for non-http(s) schemes (`file:`, `javascript:`, `data:`, `ftp:`, ...), missing hosts, DNS errors, and empty resolutions. Unsafe inputs raise `MCP_SSRF_BLOCKED` before any browser navigation. Added unit matrix + dispatch regression tests.
+- **#455** MCP runtime: declarative input validation from `production/mcp_input_validator.py` is now enforced in `tools/call` dispatch (types, lengths, ranges, required, patterns, `additionalProperties: false`). Validation errors return stable `MCP_VALIDATION_ERROR` without invoking handlers. Schema/validator parity and dispatch tests added.
+- **#451** CDP attach: adopted user tabs (`new_context=False`) are no longer closed on `close()`. New `_owns_page` tracking + conditional teardown; adopted contexts/pages preserved per contract. Updated tests + docs.
+- **#452** CDP attach: post-`connect_over_cdp` failures (bad context_index, new_context, page create, stealth) now best-effort rollback `_pw`, `_remote_browser`, owned ctxs (never adopted), and reset attach flags for clean retry.
+- **#453** CDP attach: attach path now initializes `human`, `orchestrator`, `logger`, `scraper`, `ai`, `recovery` (with attach degradation notes). `safe_goto`/`safe_click`/`safe_type` + MCP `stealth_scrape` now operational on attached sessions.
+- **#458** Hermes dashboard: startup rejects default/empty/`change-me` password when binding to non-loopback (0.0.0.0, RFC1918, public, IPv6 non-loop). Loopback dev still convenient. Added guard tests.
+- **#457** CLI `scrape`: removed double `launch()` (async-with already launches; now passes preset/region via ctor so aenter applies them). Exactly one launch + one close. Aligned all user-facing names/help/examples to `agentic-stealth-browser`. Mocked regression test.
+- **#456** Packaging: `pyproject.toml` now includes `production.*`, `workflows.*`, `plugins.*`. `MANIFEST.in` extended. CI verify expanded for SDK import + bundled workflow discovery from clean cwd. MCP server workflow root switched to user-writable `~/.agentic-browser/...` + bundled discovery fallback for install safety.
+- **#447** MCP version: `SERVER_VERSION` now derives from `importlib.metadata.version("agentic-stealth-browser")` (falls back to 2.4.1); no longer stale.
+- **#448** CDP attach gate: relaxed RFC1918 rejection under `allow_remote=true` for attach (WSL host IPs are intentionally private); link-local/cloud still blocked. Nav remains strict. Reconciled docs + tests with real WSL workflow.
+- **#450** Docs/metadata: toned down TLS/JA3/JA4 claims to "region client-hello profiles (process-level)"; attach degradation already documented the limits. No wire-level full-stack spoofing claimed.
+- **#449** Release hygiene: refreshed counts, changelog, version to 2.4.1, support notes, publish smoke.
+
+### Added
+- Runtime helpers and ownership tracking for attach mode.
+- Validation dispatch + matrix tests; single-launch CLI mock test; dashboard bind security tests.
+
+### Changed
+- `pyproject.toml` version 2.4.0 → 2.4.1; packages.find + MANIFEST.in for full artifacts.
+- Attach lifecycle docs/examples (no more auto-launch + attach in same `async with`).
+- MCP attach remote safety contract + tests for WSL compatibility.
+
+### Tests / CI
+- All non-e2e/non-live green.
+- Focused attach + MCP safety + validation + CLI mocks + dashboard guard.
+- `ruff check` + `ruff format --check` pass.
+- Wheel build + import + discovery smoke updated in publish.yml.
+
+Closes #447, #448, #449, #450, #451, #452, #453, #454, #455, #456, #457, #458, #459 (patch scope).
+
+---
+
 ## [2.4.0] — Attach-Mode Hardening (2026-06-01)
 
 ### Fixed
