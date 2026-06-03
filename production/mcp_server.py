@@ -1284,6 +1284,31 @@ class StealthMCPServer:
             # allow_remote is explicitly trusting that endpoint (see warning in payload).
             # Nav/scrape still use strict is_url_safe. Reconciles documented WSL workflow.
 
+            # Even with allow_remote=true, still reject link-local and cloud-metadata
+            # (untrusted auto-config / instance metadata ranges). This keeps the spirit
+            # of the original hardening while permitting the RFC1918 WSL use-case.
+            try:
+                norm = host_to_check
+                if not any(
+                    norm.startswith(p)
+                    for p in ("http://", "https://", "ws://", "wss://")
+                ):
+                    norm = "http://" + norm
+                ph = urllib.parse.urlparse(norm).hostname or ""
+                if ph:
+                    ip = ipaddress.ip_address(ph)
+                    if ip in ipaddress.ip_network(
+                        "169.254.0.0/16"
+                    ) or ip in ipaddress.ip_network("fe80::/10"):
+                        raise ToolError(
+                            "MCP_REMOTE_CDP_BLOCKED",
+                            f"cdp_url host '{host}' is in a blocked auto-config range "
+                            "(link-local or cloud-metadata). Even with allow_remote=true, "
+                            "these are rejected.",
+                        )
+            except (ValueError, TypeError, ipaddress.AddressValueError):
+                pass  # hostname or parse issue; will surface later or was already validated
+
         session_name = str(args.get("session_name") or "default")
         if session_name in self._sessions:
             try:

@@ -78,17 +78,27 @@ async def test_mcp_attach_rejects_url_without_host():
 
 async def test_mcp_attach_allows_rfc1918_with_explicit_allow_remote():
     """#448: WSL/container host IPs are RFC1918; explicit allow_remote permits attach (nav still blocks via is_url_safe)."""
+    from unittest.mock import patch
+
     server = StealthMCPServer()
-    # Should NOT raise the remote block (the attach tool itself will fail later without real cdp, but gate passes)
-    # We call and expect ToolError only from connect, not from the safety gate.
-    try:
-        await server._tool_stealth_attach_over_cdp(
-            {"cdp_url": "http://10.0.0.5:9222", "allow_remote": True}
-        )
-    except ToolError as ei:
-        # connect will fail (no browser), but not the safety code
-        assert ei.error_code != "MCP_REMOTE_CDP_BLOCKED"
-        assert "connect" in str(ei).lower() or "failed" in str(ei).lower() or True
+    # Patch attach_over_cdp so the test doesn't perform a real (slow + doomed) CDP connect to 10.0.0.5.
+    # The only thing we assert is that the safety *gate* did not turn it into MCP_REMOTE_CDP_BLOCKED.
+    with patch(
+        "core.agent_browser.AgentBrowser.attach_over_cdp",
+        side_effect=RuntimeError(
+            "attach_over_cdp: failed to connect (simulated for test)"
+        ),
+    ):
+        try:
+            await server._tool_stealth_attach_over_cdp(
+                {"cdp_url": "http://10.0.0.5:9222", "allow_remote": True}
+            )
+        except Exception as e:
+            if isinstance(e, ToolError) and e.error_code == "MCP_REMOTE_CDP_BLOCKED":
+                pytest.fail(
+                    "RFC1918 + allow_remote should not be blocked by the CDP safety gate"
+                )
+            # RuntimeError from patch (or wrapped) or other non-BLOCKED error = gate was passed. Good.
     # link-local still blocked even with allow (auto-config risk)
     with pytest.raises(ToolError) as ei2:
         await server._tool_stealth_attach_over_cdp(
