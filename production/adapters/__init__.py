@@ -83,6 +83,10 @@ def get_adapter(name: str) -> type[BackendAdapter]:
 from production.adapters.cdp_bridge import CDPBridgeAdapter as _CDPBridgeAdapter  # noqa: E402
 register_adapter(_CDPBridgeAdapter)
 
+# M2: Playwright-MCP adapter registration
+from production.adapters.playwright_mcp import PlaywrightMCPAdapter as _PlaywrightMCPAdapter  # noqa: E402
+register_adapter(_PlaywrightMCPAdapter)
+
 
 __all__ = [
     "AdapterCapabilityError",
