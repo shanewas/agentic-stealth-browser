@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
+from production.adapters import BackendAdapter
+from production.dashboard_adapter_bridge import DashboardProtocolBridge
 from workflows.player import WorkflowPlayer
 from workflows.schema import (
     Workflow,
@@ -265,6 +267,22 @@ class BrowserRuntimeManager:
             "agentic-stealth-mcp": AgenticStealthMCPAdapter(self),
             "cdp-bridge": CDPBridgeAdapter(self),
         }
+        # M4: Protocol adapter bridge (M1-M3). Thin shim — the legacy
+        # in-file adapters above are preserved for backwards compat.
+        # See production/dashboard_adapter_bridge.py for design notes.
+        self.protocol_bridge = DashboardProtocolBridge(self)
+        self.active_protocol_adapter: Optional[str] = None
+
+    @property
+    def protocol_adapters(self) -> Dict[str, type[BackendAdapter]]:
+        """Alias for ``self.protocol_bridge.protocol_adapters`` — the
+        dict[name -> class] view of the M1-M3 Protocol registry.
+
+        Exposed as a top-level manager attribute so callers (CLI tooling,
+        tests, v2.5.1 dispatch) can reach the Protocol adapter registry
+        without needing to know about the bridge object.
+        """
+        return self.protocol_bridge.protocol_adapters
 
     def _get_agent_browser_cls(self) -> type:
         if self.agent_browser_cls is not None:
@@ -350,6 +368,28 @@ class BrowserRuntimeManager:
         status["warning"] = warning
         return status
 
+    def use_protocol_adapter(self, name: str) -> Dict[str, Any]:
+        """Switch to a Protocol-based backend adapter (M1-M3) for the next
+        action. The legacy in-file adapters remain usable independently.
+
+        This does NOT close the current browser or relaunch anything. It
+        just records the selection so status() can surface it and so
+        future actions can dispatch to the Protocol adapter.
+
+        Raises:
+            AdapterNotFoundError: if the name is not in BACKEND_REGISTRY.
+        """
+        # Validate via the bridge (raises AdapterNotFoundError on miss)
+        self.protocol_bridge.get(name)
+        self.active_protocol_adapter = name
+        self.activity.append(
+            "system",
+            "protocol_adapter_activated",
+            f"Activated Protocol adapter {name}",
+            adapter=name,
+        )
+        return {"active_protocol_adapter": name}
+
     async def status(self) -> Dict[str, Any]:
         page_url = ""
         title = ""
@@ -381,6 +421,12 @@ class BrowserRuntimeManager:
             "recording": self.recorder.active,
             "recording_name": self.recorder.name if self.recorder.active else None,
             "schedules_count": len(self.schedules),
+            # M4: Protocol adapter fields (M1-M3). Both keys are added
+            # alongside the existing 'capabilities' key (legacy in-file
+            # adapter data) so the dashboard's pre-M4 clients still see
+            # the same shape.
+            "active_protocol_adapter": self.active_protocol_adapter,
+            "protocol_adapters": self.protocol_bridge.all_capability_sets(),
         }
 
     async def navigate(self, url: str) -> Dict[str, Any]:
