@@ -1,12 +1,19 @@
 include LICENSE
 include README.md
 include CHANGELOG.md
+include CODE_OF_CONDUCT.md
+include CONTRIBUTING.md
+include SECURITY.md
 include .env.example
 
+include assets/*.gif assets/*.png assets/*.jpg assets/*.svg
+
+recursive-include docs *.md *.html *.svg *.jsonl
 recursive-include stealth *.js *.json
 recursive-include production Dockerfile docker-healthcheck.py
-recursive-include examples *.md
+recursive-include examples *.md *.py *.txt
 recursive-include tests *.py *.json
 recursive-include workflows *.yaml *.yml
 recursive-include plugins *.py
 recursive-include production/sdk *.py
+recursive-include scripts *.sh *.py

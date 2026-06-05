@@ -244,6 +244,8 @@ def main() -> None:
     s.add_argument("--preset", default=None, choices=[None] + list_presets())
     s.add_argument("--region", default="global")
     s.add_argument("--debug", action="store_true")
+    s.add_argument("--headless", action="store_true", default=True)
+    s.add_argument("--session", default=None)
     s.set_defaults(func=_cmd_status)
 
     # list-presets
