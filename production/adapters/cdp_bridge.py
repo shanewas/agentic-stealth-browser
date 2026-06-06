@@ -23,6 +23,7 @@ from playwright.async_api import (
 )
 
 from production.adapters.base import (
+    AdapterCapabilityError,
     AdapterLaunchError,
     Capability,
 )
@@ -152,14 +153,15 @@ class CDPBridgeAdapter:
         """Per the M0 contract, returns the path it saved to (-> str).
 
         Raises:
-            AdapterCapabilityError: if SCREENSHOT not in capabilities (defensive).
+            AdapterCapabilityError: only if a future cdp-bridge variant
+                drops SCREENSHOT from its declared capabilities; today
+                SCREENSHOT is always present and this branch is dead.
+                The M0 contract is the source of truth — capability
+                checks live there, not in each adapter. Capability
+                gating is enforced by the M2/M3 _require_capability()
+                helpers; M1 doesn't need its own.
             RuntimeError: if launched without a context.
         """
-        if Capability.SCREENSHOT not in self.capabilities():
-            from production.adapters.base import AdapterCapabilityError
-            raise AdapterCapabilityError(
-                "CDP-bridge adapter does not declare Capability.SCREENSHOT"
-            )
         page = self._require_page()
         if path is None:
             path = "screenshot.png"

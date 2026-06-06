@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from production.adapters import (
+    AdapterCapabilityError,
     AdapterLaunchError,
     BACKEND_REGISTRY,
     BackendAdapter,
@@ -335,3 +336,56 @@ async def test_close_idempotent(fake_subprocess):
     await adapter.launch("default", headless=True)
     await adapter.close()
     await adapter.close()  # second call must be safe
+
+
+# ---------------------------------------------------------------------------
+# Capability gating (v2.5.0 review fix S1)
+# ---------------------------------------------------------------------------
+
+
+def test_capability_gating_helper_raises_when_capability_missing():
+    """The M0 protocol contract (base.py:84) promises that action methods
+    raise AdapterCapabilityError when the active adapter does not declare
+    the corresponding capability. M2 must enforce this — otherwise the
+    docstring-vs-code lie survives the v2.5.0 release."""
+    adapter = PlaywrightMCPAdapter()
+
+    class _NoScreenshotAdapter(PlaywrightMCPAdapter):
+        name = "_test_no_screenshot"
+
+        def capabilities(self):
+            # Drop SCREENSHOT from the set to simulate a future variant
+            # that does not support it. The gating check must fire.
+            return super().capabilities() - {Capability.SCREENSHOT}
+
+    stripped = _NoScreenshotAdapter()
+    with pytest.raises(AdapterCapabilityError, match="screenshot"):
+        stripped._require_capability(Capability.SCREENSHOT)
+
+    # Sanity: an action the adapter DOES declare passes the check.
+    # We don't actually call the tool here — we just confirm the gate
+    # itself doesn't fire.
+    stripped._require_capability(Capability.NAVIGATE)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_screenshot_raises_capability_error_when_missing(fake_subprocess):
+    """End-to-end: when a future variant drops SCREENSHOT from its
+    declared capabilities, adapter.screenshot() must surface
+    AdapterCapabilityError — not an opaque MCP failure."""
+    fake = fake_subprocess["fake"]
+    _enqueue_init_response(fake)
+
+    class _NoScreenshotAdapter(PlaywrightMCPAdapter):
+        name = "_test_no_screenshot_e2e"
+
+        def capabilities(self):
+            return super().capabilities() - {Capability.SCREENSHOT}
+
+    adapter = _NoScreenshotAdapter()
+    await adapter.launch("default", headless=True)
+    try:
+        with pytest.raises(AdapterCapabilityError, match="screenshot"):
+            await adapter.screenshot("/tmp/should_not_write.png")
+    finally:
+        await adapter.close()

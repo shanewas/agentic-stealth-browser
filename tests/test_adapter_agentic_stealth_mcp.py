@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from production.adapters import (
+    AdapterCapabilityError,
     AdapterLaunchError,
     BACKEND_REGISTRY,
     BackendAdapter,
@@ -321,3 +322,46 @@ async def test_close_idempotent(fake_subprocess):
     await adapter.launch("default", headless=True)
     await adapter.close()
     await adapter.close()  # second call must not raise
+
+
+# ---------------------------------------------------------------------------
+# Capability gating (v2.5.0 review fix S1)
+# ---------------------------------------------------------------------------
+
+
+def test_capability_gating_helper_raises_when_capability_missing():
+    """The M0 protocol contract (base.py:84) promises action methods
+    raise AdapterCapabilityError when the adapter does not declare the
+    capability. M3 must enforce this — see playwright_mcp equivalent."""
+    class _NoScreenshotAdapter(AgenticStealthMCPAdapter):
+        name = "_test_no_screenshot"
+
+        def capabilities(self):
+            return super().capabilities() - {Capability.SCREENSHOT}
+
+    stripped = _NoScreenshotAdapter()
+    with pytest.raises(AdapterCapabilityError, match="screenshot"):
+        stripped._require_capability(Capability.SCREENSHOT)
+
+    # Sanity: a declared capability passes the gate.
+    stripped._require_capability(Capability.NAVIGATE)
+
+
+@pytest.mark.asyncio
+async def test_screenshot_raises_capability_error_when_missing(fake_subprocess):
+    fake = fake_subprocess["fake"]
+    _enqueue_init_response(fake)
+
+    class _NoScreenshotAdapter(AgenticStealthMCPAdapter):
+        name = "_test_no_screenshot_e2e"
+
+        def capabilities(self):
+            return super().capabilities() - {Capability.SCREENSHOT}
+
+    adapter = _NoScreenshotAdapter()
+    await adapter.launch("default", headless=True)
+    try:
+        with pytest.raises(AdapterCapabilityError, match="screenshot"):
+            await adapter.screenshot("/tmp/should_not_write.png")
+    finally:
+        await adapter.close()

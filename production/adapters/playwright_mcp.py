@@ -11,14 +11,27 @@ playwright-mcp at the time of writing.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 from typing import Any, Optional
 
 from production.adapters._jsonrpc_stdio import JsonRpcStdioClient
 from production.adapters.base import (
+    AdapterCapabilityError,
     AdapterLaunchError,
     Capability,
 )
+
+
+# Minimal env allowlist for the npx subprocess. The child does not need
+# OPENAI_API_KEY / AWS_* / etc. — those belong to the operator, not to a
+# browser automation tool. PATH is required for npx/node resolution;
+# HOME is required by npm for cache directories on some installs.
+def _subprocess_env() -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": os.environ.get("HOME", ""),
+    }
 
 
 # Pin a specific playwright-mcp version. The latest is fine; pin for
@@ -95,11 +108,18 @@ class PlaywrightMCPAdapter:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_subprocess_env(),
             )
         except Exception as exc:
             raise AdapterLaunchError(
                 f"Failed to spawn @playwright/mcp: {exc}"
             ) from exc
+
+        # Drain stderr in a background task. The pipe buffer is ~64KB;
+        # without this drain, a noisy child (one stack trace from a
+        # misconfigured Playwright install) blocks on its next stderr
+        # write, hangs the handshake, and triggers a slow SIGKILL on close.
+        self._stderr_task = asyncio.create_task(self._drain_stderr(self._proc.stderr))
 
         self._client = JsonRpcStdioClient(self._proc.stdin, self._proc.stdout)
 
@@ -116,6 +136,10 @@ class PlaywrightMCPAdapter:
             await self._client.notify("notifications/initialized")
         except Exception as exc:
             await self._terminate_subprocess()
+            # Reset state so a caller that catches AdapterLaunchError and
+            # then calls close() doesn't operate on a dead Process handle.
+            self._client = None
+            self._proc = None
             raise AdapterLaunchError(
                 f"MCP initialize handshake failed: {exc}"
             ) from exc
@@ -123,6 +147,17 @@ class PlaywrightMCPAdapter:
     # ------------------------------------------------------------------ close
     async def close(self) -> None:
         await self._terminate_subprocess()
+        # Cancel the stderr drain task only after the child is gone,
+        # so it can't raise mid-drain. Guarded by getattr for instances
+        # that never reached the launch-success path.
+        stderr_task = getattr(self, "_stderr_task", None)
+        if stderr_task is not None and not stderr_task.done():
+            stderr_task.cancel()
+            try:
+                await stderr_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._stderr_task = None
         self._client = None
         self._proc = None
 
@@ -141,15 +176,19 @@ class PlaywrightMCPAdapter:
 
     # ------------------------------------------------------------------ actions
     async def navigate(self, url: str) -> None:
+        self._require_capability(Capability.NAVIGATE)
         await self._call_tool("playwright_navigate", {"url": url})
 
     async def click(self, selector: str) -> None:
+        self._require_capability(Capability.CLICK)
         await self._call_tool("playwright_click", {"selector": selector})
 
     async def fill(self, selector: str, value: str) -> None:
+        self._require_capability(Capability.FILL)
         await self._call_tool("playwright_fill", {"selector": selector, "value": value})
 
     async def screenshot(self, path: Optional[str] = None) -> str:
+        self._require_capability(Capability.SCREENSHOT)
         if path is None:
             path = "screenshot.png"
         # playwright-mcp exposes playwright_take_screenshot (or browser_take_screenshot,
@@ -178,3 +217,35 @@ class PlaywrightMCPAdapter:
             "tools/call", {"name": name, "arguments": arguments}
         )
         return response.get("result", {})
+
+    def _require_capability(self, cap: Capability) -> None:
+        """Raise AdapterCapabilityError when the active adapter does not
+        declare ``cap``. Honors the M0 protocol contract at base.py:84 —
+        callers get a clean, distinct error type instead of an opaque
+        MCP failure. Mirrors cdp_bridge.py's defensive pattern, but here
+        the check is NOT tautological because each action maps to a
+        capability that *could* be absent on a future adapter variant.
+        """
+        if not self.supports(cap):
+            raise AdapterCapabilityError(
+                f"Playwright-MCP adapter does not declare {cap.value!r}"
+            )
+
+    @staticmethod
+    async def _drain_stderr(stream) -> None:
+        """Background task: read the child's stderr until EOF so the
+        kernel pipe never fills. Lines are discarded — stderr from a
+        child MCP server is debug noise, not data we consume. If the
+        child closes the stream cleanly, this returns; on read error
+        it logs and returns. Never raises into the parent task.
+        """
+        try:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Stream closed or read failed — nothing actionable.
+            return

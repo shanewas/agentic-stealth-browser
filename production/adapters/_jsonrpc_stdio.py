@@ -9,6 +9,12 @@ import asyncio
 import json
 from typing import Any, Optional
 
+# Hard cap on a single JSON-RPC frame. Anything larger is almost certainly
+# a misbehaving (or malicious) server attempting an OOM. 16 MB matches what
+# typical MCP stdio servers cap their own message sizes at; we refuse
+# anything larger to keep the lock-holder from hanging on a runaway readline.
+MAX_FRAME_BYTES = 16 * 1024 * 1024
+
 
 class JsonRpcStdioClient:
     """Minimal JSON-RPC client speaking newline-delimited JSON over async streams.
@@ -49,6 +55,13 @@ class JsonRpcStdioClient:
                 line = await asyncio.wait_for(self._stdout.readline(), timeout=timeout)
                 if not line:
                     raise ConnectionError("Subprocess closed stdout before responding")
+                if len(line) > MAX_FRAME_BYTES:
+                    # Refuse to buffer a runaway frame. Close the connection
+                    # so the caller surfaces a clear error rather than OOMing.
+                    raise ConnectionError(
+                        f"JSON-RPC frame exceeds {MAX_FRAME_BYTES} bytes; "
+                        "refusing to buffer"
+                    )
                 try:
                     response = json.loads(line.decode())
                 except json.JSONDecodeError:

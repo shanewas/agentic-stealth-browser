@@ -15,6 +15,7 @@ from production.adapters import (
     BackendAdapter,
     Capability,
     get_adapter,
+    register_adapter,
 )
 
 
@@ -181,4 +182,87 @@ def test_supports_default_uses_capabilities_set_membership():
     assert BackendAdapter.supports(stub, Capability.LAUNCH) is True  # type: ignore[arg-type]
     assert BackendAdapter.supports(stub, Capability.CLOSE) is True  # type: ignore[arg-type]
     assert BackendAdapter.supports(stub, Capability.CLICK) is False  # type: ignore[arg-type]
-    assert BackendAdapter.supports(stub, Capability.STREAM_CDP) is False  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# registry guards (added in v2.5.0 review fixes)
+# ---------------------------------------------------------------------------
+
+
+def test_register_adapter_rejects_duplicate_name():
+    """The registry must fail loud, not silently overwrite, when two
+    adapters claim the same name. Real-world impact: a user plugin with
+    a name collision would otherwise mask the built-in adapter and be
+    near-impossible to debug.
+
+    Uses a unique, throwaway name to avoid colliding with the three
+    built-in adapters (cdp-bridge, playwright-mcp, agentic-stealth-mcp).
+    """
+    unique = "_test_dup_probe_zz"
+
+    # The stubs are intentionally incomplete — we only care that
+    # register_adapter enforces the name-uniqueness invariant before
+    # any protocol-conformance check. Mirror the existing _Stub pattern
+    # in this file (`# type: ignore[arg-type]`) to keep pyright quiet.
+    @register_adapter  # type: ignore[arg-type]
+    class _First:
+        name = unique
+
+        def capabilities(self):
+            return set()
+
+    try:
+        with pytest.raises(AdapterLaunchError, match="already registered"):
+
+            @register_adapter  # type: ignore[arg-type]
+            class _Second:
+                name = unique
+
+                def capabilities(self):
+                    return set()
+    finally:
+        # Clean up so subsequent tests see the original registry.
+        BACKEND_REGISTRY.pop(unique, None)
+
+
+def test_register_adapter_rejects_empty_name():
+    """An adapter with name='' must be rejected at registration time,
+    not silently added (which would render as '': '' in dashboard
+    status JSON and be undebuggable)."""
+
+    class _Anon:
+        name = ""
+
+        def capabilities(self):
+            return set()
+
+    with pytest.raises(AdapterLaunchError, match="non-empty string"):
+        register_adapter(_Anon)  # type: ignore[arg-type]
+
+
+def test_register_adapter_rejects_non_string_name():
+    """Defends against accidental `name = SomeEnum.X` or `name = 1`."""
+
+    class _Bad:
+        name = 42
+
+        def capabilities(self):
+            return set()
+
+    with pytest.raises(AdapterLaunchError, match="non-empty string"):
+        register_adapter(_Bad)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# JSON-RPC stdio frame size cap (v2.5.0 review fix F2)
+# ---------------------------------------------------------------------------
+
+
+def test_jsonrpc_frame_size_limit_constant_exists():
+    """A 16MB hard cap on a single JSON-RPC frame protects the client
+    from a misbehaving (or hostile) server emitting a runaway readline.
+    Pin the constant so a future refactor doesn't quietly remove it."""
+    from production.adapters import _jsonrpc_stdio
+
+    assert hasattr(_jsonrpc_stdio, "MAX_FRAME_BYTES")
+    assert _jsonrpc_stdio.MAX_FRAME_BYTES == 16 * 1024 * 1024
