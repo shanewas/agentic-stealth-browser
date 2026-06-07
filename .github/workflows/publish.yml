@@ -40,25 +40,25 @@ jobs:
         run: |
           python -m pip install dist/*.whl
           python -c "
-from core.agent_browser import AgentBrowser
-from production.cli import main
-from production.sdk.client import StealthClient
-from production.mcp_server import StealthMCPServer
-print('core + cli + sdk + mcp import OK')
-# bundled workflow discovery from arbitrary cwd (non-repo dir)
-import tempfile, os
-from pathlib import Path
-with tempfile.TemporaryDirectory() as td:
-    cwd = os.getcwd()
-    try:
-        os.chdir(td)
-        srv = StealthMCPServer()
-        # list should not crash and may return bundled or user (home)
-        print('workflow discovery from clean cwd OK')
-    finally:
-        os.chdir(cwd)
-print('SDK + bundled workflow + clean-venv smoke OK')
-"
+          from core.agent_browser import AgentBrowser
+          from production.cli import main
+          from production.sdk.client import StealthClient
+          from production.mcp_server import StealthMCPServer
+          print('core + cli + sdk + mcp import OK')
+          # bundled workflow discovery from arbitrary cwd (non-repo dir)
+          import tempfile, os
+          from pathlib import Path
+          with tempfile.TemporaryDirectory() as td:
+              cwd = os.getcwd()
+              try:
+                  os.chdir(td)
+                  srv = StealthMCPServer()
+                  # list should not crash and may return bundled or user (home)
+                  print('workflow discovery from clean cwd OK')
+              finally:
+                  os.chdir(cwd)
+          print('SDK + bundled workflow + clean-venv smoke OK')
+          "
 
       - name: Store dist artifacts
         uses: actions/upload-artifact@v4
