@@ -6,6 +6,7 @@ M1 (CDP-bridge, direct) and M3 (Agentic-Stealth-MCP, our own server).
 Key distinguishing test: this adapter calls `playwright_navigate` not
 `stealth_navigate`. M3 calls the latter.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,6 +28,7 @@ from production.adapters.playwright_mcp import PlaywrightMCPAdapter
 # Fixtures: fake MCP stdio server
 # ---------------------------------------------------------------------------
 
+
 class _FakeStdio:
     """Stand-in for the stdio of a real MCP subprocess.
 
@@ -36,6 +38,7 @@ class _FakeStdio:
     queue_write: messages the adapter WROTE to the subprocess's stdin
     queue_read: messages the fake server WILL write to its stdout
     """
+
     def __init__(self):
         self.queue_write: list[dict] = []
         self.queue_read: list[dict] = []
@@ -66,11 +69,13 @@ def fake_subprocess(monkeypatch):
     stdin.wait_closed = AsyncMock()
 
     stdout = MagicMock(name="stdout")
+
     async def _readline():
         msg = fake.read_message()
         if msg is None:
             return b""
         return (json.dumps(msg) + "\n").encode()
+
     stdout.readline = _readline
 
     proc = MagicMock(name="subprocess")
@@ -79,8 +84,10 @@ def fake_subprocess(monkeypatch):
     proc.returncode = None
     proc.terminate = MagicMock()
     proc.kill = MagicMock()
+
     async def _wait():
         proc.returncode = 0
+
     proc.wait = _wait
 
     async def _create_subprocess_exec(*args, **kwargs):
@@ -97,28 +104,33 @@ def fake_subprocess(monkeypatch):
 
 def _enqueue_init_response(fake: _FakeStdio) -> None:
     """Queue a minimal MCP initialize response that the fake server returns."""
-    fake.queue_read.append({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": {
-            "protocolVersion": "2024-11-05",
-            "serverInfo": {"name": "playwright-mcp", "version": "0.0.30"},
-            "capabilities": {"tools": {}},
-        },
-    })
+    fake.queue_read.append(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {"name": "playwright-mcp", "version": "0.0.30"},
+                "capabilities": {"tools": {}},
+            },
+        }
+    )
 
 
 def _enqueue_tool_response(fake: _FakeStdio, request_id: int, content: list) -> None:
-    fake.queue_read.append({
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": {"content": content, "isError": False},
-    })
+    fake.queue_read.append(
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"content": content, "isError": False},
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Registration / lookup
 # ---------------------------------------------------------------------------
+
 
 def test_playwright_mcp_is_registered():
     assert "playwright-mcp" in BACKEND_REGISTRY
@@ -133,13 +145,18 @@ def test_playwright_mcp_satisfies_runtime_checkable_protocol():
 # Capability contract
 # ---------------------------------------------------------------------------
 
+
 def test_playwright_mcp_capabilities_includes_launch_action_set():
     """This adapter SPAWNS a new browser via @playwright/mcp, so LAUNCH is in."""
     caps = PlaywrightMCPAdapter().capabilities()
     expected = {
-        Capability.LAUNCH, Capability.CLOSE,
-        Capability.NAVIGATE, Capability.CLICK, Capability.FILL,
-        Capability.SCREENSHOT, Capability.STATUS,
+        Capability.LAUNCH,
+        Capability.CLOSE,
+        Capability.NAVIGATE,
+        Capability.CLICK,
+        Capability.FILL,
+        Capability.SCREENSHOT,
+        Capability.STATUS,
         Capability.HEADLESS_SWITCH,
     }
     assert expected.issubset(caps), f"Missing: {expected - caps}"
@@ -158,6 +175,7 @@ def test_playwright_mcp_capabilities_excludes_multi_context():
 # ---------------------------------------------------------------------------
 # Spawn behavior
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_launch_spawns_npx_playwright_mcp(fake_subprocess):
@@ -196,8 +214,10 @@ async def test_launch_sends_initialize_jsonrpc(fake_subprocess):
 @pytest.mark.asyncio
 async def test_launch_raises_adapter_launch_error_on_spawn_failure(monkeypatch):
     """If the subprocess fails to spawn, the adapter must surface AdapterLaunchError."""
+
     async def _explode(*args, **kwargs):
         raise OSError("npx not found")
+
     monkeypatch.setattr(
         "production.adapters.playwright_mcp.asyncio.create_subprocess_exec",
         _explode,
@@ -205,12 +225,15 @@ async def test_launch_raises_adapter_launch_error_on_spawn_failure(monkeypatch):
     adapter = PlaywrightMCPAdapter()
     with pytest.raises(AdapterLaunchError) as exc_info:
         await adapter.launch("default", headless=True)
-    assert "npx not found" in str(exc_info.value) or "spawn" in str(exc_info.value).lower()
+    assert (
+        "npx not found" in str(exc_info.value) or "spawn" in str(exc_info.value).lower()
+    )
 
 
 # ---------------------------------------------------------------------------
 # Action dispatch (this is the DISTINGUISHING test vs M3)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_navigate_sends_playwright_navigate_tool_call(fake_subprocess):
@@ -297,6 +320,7 @@ async def test_screenshot_sends_take_screenshot_tool_call(fake_subprocess, tmp_p
 # Negative: capability gating
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_rejects_stream_cdp_request_with_capability_error(fake_subprocess):
     """Calling a method that requires STREAM_CDP on this adapter must raise
@@ -314,6 +338,7 @@ async def test_rejects_stream_cdp_request_with_capability_error(fake_subprocess)
 # ---------------------------------------------------------------------------
 # Close behavior
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_close_terminates_subprocess(fake_subprocess):

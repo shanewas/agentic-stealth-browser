@@ -14,6 +14,7 @@ Public surface:
     get_adapter(name)      - registry lookup with friendly error
     register_adapter(cls)  - validate + register a BackendAdapter subclass
 """
+
 from __future__ import annotations
 
 from production.adapters.base import (
@@ -73,22 +74,28 @@ def get_adapter(name: str) -> type[BackendAdapter]:
     if name not in BACKEND_REGISTRY:
         registered = ", ".join(sorted(BACKEND_REGISTRY.keys())) or "<none>"
         raise AdapterNotFoundError(
-            f"Unknown backend adapter: {name!r}. "
-            f"Registered adapters: {registered}"
+            f"Unknown backend adapter: {name!r}. Registered adapters: {registered}"
         )
     return BACKEND_REGISTRY[name]
 
 
 # M1: CDP-bridge adapter registration
 from production.adapters.cdp_bridge import CDPBridgeAdapter as _CDPBridgeAdapter  # noqa: E402
+
 register_adapter(_CDPBridgeAdapter)
 
 # M2: Playwright-MCP adapter registration
-from production.adapters.playwright_mcp import PlaywrightMCPAdapter as _PlaywrightMCPAdapter  # noqa: E402
+from production.adapters.playwright_mcp import (  # noqa: E402
+    PlaywrightMCPAdapter as _PlaywrightMCPAdapter,
+)
+
 register_adapter(_PlaywrightMCPAdapter)
 
 # M3: Agentic-Stealth-MCP adapter registration
-from production.adapters.agentic_stealth_mcp import AgenticStealthMCPAdapter as _AgenticStealthMCPAdapter  # noqa: E402
+from production.adapters.agentic_stealth_mcp import (  # noqa: E402
+    AgenticStealthMCPAdapter as _AgenticStealthMCPAdapter,
+)
+
 register_adapter(_AgenticStealthMCPAdapter)
 
 

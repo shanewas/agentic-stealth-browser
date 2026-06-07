@@ -8,6 +8,7 @@ Capability set: {LAUNCH, CLOSE, NAVIGATE, CLICK, FILL, SCREENSHOT, STATUS,
 HEADLESS_SWITCH}. STREAM_CDP and MULTI_CONTEXT are NOT supported by
 playwright-mcp at the time of writing.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -111,9 +112,7 @@ class PlaywrightMCPAdapter:
                 env=_subprocess_env(),
             )
         except Exception as exc:
-            raise AdapterLaunchError(
-                f"Failed to spawn @playwright/mcp: {exc}"
-            ) from exc
+            raise AdapterLaunchError(f"Failed to spawn @playwright/mcp: {exc}") from exc
 
         # Drain stderr in a background task. The pipe buffer is ~64KB;
         # without this drain, a noisy child (one stack trace from a
@@ -129,7 +128,10 @@ class PlaywrightMCPAdapter:
                 "initialize",
                 {
                     "protocolVersion": "2024-11-05",
-                    "clientInfo": {"name": "agentic-stealth-browser", "version": "2.5.0"},
+                    "clientInfo": {
+                        "name": "agentic-stealth-browser",
+                        "version": "2.5.0",
+                    },
                     "capabilities": {},
                 },
             )
@@ -140,9 +142,7 @@ class PlaywrightMCPAdapter:
             # then calls close() doesn't operate on a dead Process handle.
             self._client = None
             self._proc = None
-            raise AdapterLaunchError(
-                f"MCP initialize handshake failed: {exc}"
-            ) from exc
+            raise AdapterLaunchError(f"MCP initialize handshake failed: {exc}") from exc
 
     # ------------------------------------------------------------------ close
     async def close(self) -> None:
@@ -208,11 +208,11 @@ class PlaywrightMCPAdapter:
         }
 
     # ------------------------------------------------------------------ helpers
-    async def _call_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if self._client is None:
-            raise RuntimeError("Playwright-MCP adapter not launched; call launch() first")
+            raise RuntimeError(
+                "Playwright-MCP adapter not launched; call launch() first"
+            )
         response = await self._client.request(
             "tools/call", {"name": name, "arguments": arguments}
         )

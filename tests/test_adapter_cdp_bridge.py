@@ -6,6 +6,7 @@ The CDP-bridge adapter is distinct from the local launch path:
 - It tracks page ownership to honor the v2.4.1 attach contract
   (never close adopted pages).
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,6 +27,7 @@ from production.adapters.cdp_bridge import CDPBridgeAdapter
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 class _FakeCDP:
     """Minimal stand-in for a playwright Browser returned by connect_over_cdp.
 
@@ -35,6 +37,7 @@ class _FakeCDP:
     tests/test_backend_adapter_contract.py; this file focuses on
     *behavior* of the CDP-bridge adapter.
     """
+
     def __init__(self):
         self.contexts: list[MagicMock] = []
         self.closed = False
@@ -55,8 +58,10 @@ class _FakeCDP:
         ctx = MagicMock(name="BrowserContext")
         ctx.pages = []
         ctx.closed = False
+
         async def _close():
             ctx.closed = True
+
         ctx.close = _close
         self.contexts.append(ctx)
         return ctx
@@ -88,6 +93,7 @@ def fake_playwright():
 # Registration / lookup
 # ---------------------------------------------------------------------------
 
+
 def test_cdp_bridge_is_registered():
     """The adapter must be in BACKEND_REGISTRY by name 'cdp-bridge'."""
     assert "cdp-bridge" in BACKEND_REGISTRY
@@ -116,6 +122,7 @@ def test_cdp_bridge_satisfies_runtime_checkable_protocol():
 # Capability contract
 # ---------------------------------------------------------------------------
 
+
 def test_cdp_bridge_capabilities_excludes_launch():
     """CDP-bridge takes over an existing browser, does NOT support LAUNCH."""
     caps = CDPBridgeAdapter().capabilities()
@@ -143,6 +150,7 @@ def test_cdp_bridge_capabilities_includes_action_set():
 # Launch behavior
 # ---------------------------------------------------------------------------
 
+
 async def test_launch_connects_to_endpoint_via_connect_over_cdp(fake_playwright):
     """launch() must call connect_over_cdp — not spawn a new browser process."""
     adapter = CDPBridgeAdapter()
@@ -154,7 +162,9 @@ async def test_launch_connects_to_endpoint_via_connect_over_cdp(fake_playwright)
 
 async def test_launch_raises_adapter_launch_error_on_connect_failure(fake_playwright):
     """If connect_over_cdp raises, the adapter must surface AdapterLaunchError."""
-    fake_playwright["pw"].chromium.connect_over_cdp.side_effect = ConnectionError("boom")
+    fake_playwright["pw"].chromium.connect_over_cdp.side_effect = ConnectionError(
+        "boom"
+    )
     adapter = CDPBridgeAdapter()
     with pytest.raises(AdapterLaunchError) as exc_info:
         await adapter.launch("ws://localhost:9222", headless=True)
@@ -175,6 +185,7 @@ async def test_launch_creates_new_context_when_requested(fake_playwright):
 # ---------------------------------------------------------------------------
 # Action behavior (mocked)
 # ---------------------------------------------------------------------------
+
 
 async def test_navigate_calls_page_goto(fake_playwright):
     adapter = CDPBridgeAdapter()
@@ -231,6 +242,7 @@ async def test_screenshot_returns_saved_path(fake_playwright, tmp_path):
 # Close behavior (the v2.4.1 attach contract)
 # ---------------------------------------------------------------------------
 
+
 async def test_close_closes_owned_pages_only(fake_playwright):
     """close() must close owned pages, never adopted ones.
 
@@ -271,6 +283,7 @@ async def test_close_stops_playwright(fake_playwright):
 # ---------------------------------------------------------------------------
 # Status behavior
 # ---------------------------------------------------------------------------
+
 
 async def test_status_returns_dict_with_cdp_metadata(fake_playwright):
     adapter = CDPBridgeAdapter()

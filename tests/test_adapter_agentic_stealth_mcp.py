@@ -6,6 +6,7 @@ from M1 (CDP-bridge, direct) and M2 (Playwright-MCP, official @playwright/mcp).
 Key distinguishing test: this adapter calls `stealth_navigate` not
 `playwright_navigate`. M2 calls the latter.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,6 +27,7 @@ from production.adapters.agentic_stealth_mcp import AgenticStealthMCPAdapter
 # ---------------------------------------------------------------------------
 # Fixtures: fake MCP stdio server (ASB's own server)
 # ---------------------------------------------------------------------------
+
 
 class _FakeStdio:
     def __init__(self):
@@ -53,11 +55,13 @@ def fake_subprocess(monkeypatch):
     stdin.wait_closed = AsyncMock()
 
     stdout = MagicMock(name="stdout")
+
     async def _readline():
         msg = fake.read_message()
         if msg is None:
             return b""
         return (json.dumps(msg) + "\n").encode()
+
     stdout.readline = _readline
 
     proc = MagicMock(name="subprocess")
@@ -66,8 +70,10 @@ def fake_subprocess(monkeypatch):
     proc.returncode = None
     proc.terminate = MagicMock()
     proc.kill = MagicMock()
+
     async def _wait():
         proc.returncode = 0
+
     proc.wait = _wait
 
     async def _create_subprocess_exec(*args, **kwargs):
@@ -83,31 +89,36 @@ def fake_subprocess(monkeypatch):
 
 def _enqueue_init_response(fake: _FakeStdio) -> None:
     """Queue an MCP initialize response from the project's own mcp_server."""
-    fake.queue_read.append({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": {
-            "protocolVersion": "2024-11-05",
-            "serverInfo": {
-                "name": "agentic-stealth-browser",
-                "version": "2.5.0",
+    fake.queue_read.append(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
+                    "name": "agentic-stealth-browser",
+                    "version": "2.5.0",
+                },
+                "capabilities": {"tools": {}},
             },
-            "capabilities": {"tools": {}},
-        },
-    })
+        }
+    )
 
 
 def _enqueue_tool_response(fake: _FakeStdio, request_id: int, content: list) -> None:
-    fake.queue_read.append({
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": {"content": content, "isError": False},
-    })
+    fake.queue_read.append(
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"content": content, "isError": False},
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Registration / lookup
 # ---------------------------------------------------------------------------
+
 
 def test_asb_mcp_is_registered():
     assert "agentic-stealth-mcp" in BACKEND_REGISTRY
@@ -122,13 +133,18 @@ def test_asb_mcp_satisfies_runtime_checkable_protocol():
 # Capability contract
 # ---------------------------------------------------------------------------
 
+
 def test_asb_mcp_capabilities_includes_launch_action_set():
     """Spawns a new browser, so LAUNCH is in."""
     caps = AgenticStealthMCPAdapter().capabilities()
     expected = {
-        Capability.LAUNCH, Capability.CLOSE,
-        Capability.NAVIGATE, Capability.CLICK, Capability.FILL,
-        Capability.SCREENSHOT, Capability.STATUS,
+        Capability.LAUNCH,
+        Capability.CLOSE,
+        Capability.NAVIGATE,
+        Capability.CLICK,
+        Capability.FILL,
+        Capability.SCREENSHOT,
+        Capability.STATUS,
         Capability.HEADLESS_SWITCH,
         Capability.MULTI_CONTEXT,  # ASB-specific
     }
@@ -143,6 +159,7 @@ def test_asb_mcp_capabilities_excludes_stream_cdp():
 # ---------------------------------------------------------------------------
 # Spawn behavior
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_launch_spawns_project_own_mcp_server(fake_subprocess):
@@ -181,6 +198,7 @@ async def test_launch_handshake_reports_agentic_stealth_server(fake_subprocess):
 async def test_launch_raises_adapter_launch_error_on_spawn_failure(monkeypatch):
     async def _explode(*args, **kwargs):
         raise OSError("python not found")
+
     monkeypatch.setattr(
         "production.adapters.agentic_stealth_mcp.asyncio.create_subprocess_exec",
         _explode,
@@ -188,12 +206,15 @@ async def test_launch_raises_adapter_launch_error_on_spawn_failure(monkeypatch):
     adapter = AgenticStealthMCPAdapter()
     with pytest.raises(AdapterLaunchError) as exc_info:
         await adapter.launch("default", headless=True)
-    assert "spawn" in str(exc_info.value).lower() or "python not found" in str(exc_info.value)
+    assert "spawn" in str(exc_info.value).lower() or "python not found" in str(
+        exc_info.value
+    )
 
 
 # ---------------------------------------------------------------------------
 # Action dispatch (this is the DISTINGUISHING test vs M2)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_navigate_calls_stealth_navigate_tool(fake_subprocess):
@@ -275,6 +296,7 @@ async def test_screenshot_returns_saved_path(fake_subprocess, tmp_path):
 # Distinct from M2: ASB-specific tool name prefix
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_navigate_does_not_call_playwright_navigate(fake_subprocess):
     """Explicit negative: this adapter must NEVER call playwright_navigate."""
@@ -290,9 +312,7 @@ async def test_navigate_does_not_call_playwright_navigate(fake_subprocess):
 
     await adapter.navigate("https://example.com")
     tool_names = [
-        m["params"]["name"]
-        for m in fake.queue_write
-        if m.get("method") == "tools/call"
+        m["params"]["name"] for m in fake.queue_write if m.get("method") == "tools/call"
     ]
     assert "playwright_navigate" not in tool_names, (
         f"ASB MCP should not call playwright_navigate: {tool_names}"
@@ -302,6 +322,7 @@ async def test_navigate_does_not_call_playwright_navigate(fake_subprocess):
 # ---------------------------------------------------------------------------
 # Close behavior
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_close_terminates_subprocess(fake_subprocess):
@@ -333,6 +354,7 @@ def test_capability_gating_helper_raises_when_capability_missing():
     """The M0 protocol contract (base.py:84) promises action methods
     raise AdapterCapabilityError when the adapter does not declare the
     capability. M3 must enforce this — see playwright_mcp equivalent."""
+
     class _NoScreenshotAdapter(AgenticStealthMCPAdapter):
         name = "_test_no_screenshot"
 

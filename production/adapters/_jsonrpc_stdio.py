@@ -3,6 +3,7 @@
 M2 (Playwright-MCP) and M3 (Agentic-Stealth-MCP) both use this client
 to talk to their respective stdio servers. Newline-delimited JSON.
 """
+
 from __future__ import annotations
 
 import asyncio

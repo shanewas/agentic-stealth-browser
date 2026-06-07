@@ -5,6 +5,7 @@ into the dashboard's BrowserRuntimeManager as a thin shim. The legacy
 in-file adapters (DashboardBackendAdapter subclasses) are preserved —
 a full rewrite is v2.5.1.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -17,6 +18,7 @@ from production.hermes_dashboard import BrowserRuntimeManager
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def manager(tmp_path, monkeypatch):
@@ -36,6 +38,7 @@ def manager(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # Bridge construction
 # ---------------------------------------------------------------------------
+
 
 def test_bridge_constructs_with_manager(manager):
     """The bridge holds a reference to the manager for activity events."""
@@ -60,6 +63,7 @@ def test_get_protocol_adapter_returns_class(manager):
 
 def test_get_protocol_adapter_raises_for_unknown(manager):
     from production.adapters import AdapterNotFoundError
+
     bridge = DashboardProtocolBridge(manager)
     with pytest.raises(AdapterNotFoundError):
         bridge.get("nonexistent")
@@ -68,6 +72,7 @@ def test_get_protocol_adapter_raises_for_unknown(manager):
 # ---------------------------------------------------------------------------
 # Manager integration
 # ---------------------------------------------------------------------------
+
 
 def test_manager_exposes_protocol_adapters_attribute(manager):
     """BrowserRuntimeManager.protocol_adapters is populated on construction."""
@@ -88,14 +93,14 @@ def test_use_protocol_adapter_switches(manager):
     manager.use_protocol_adapter("playwright-mcp")
     assert manager.active_protocol_adapter == "playwright-mcp"
     events = [
-        e for e in manager.activity._events
-        if e.event == "protocol_adapter_activated"
+        e for e in manager.activity._events if e.event == "protocol_adapter_activated"
     ]
     assert events, "No protocol_adapter_activated audit event recorded"
 
 
 def test_use_protocol_adapter_rejects_unknown(manager):
     from production.adapters import AdapterNotFoundError
+
     with pytest.raises(AdapterNotFoundError):
         manager.use_protocol_adapter("nonexistent")
 
@@ -103,6 +108,7 @@ def test_use_protocol_adapter_rejects_unknown(manager):
 # ---------------------------------------------------------------------------
 # Status surfacing (the issue's acceptance criterion)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_status_includes_protocol_adapter_capabilities(manager):
@@ -138,6 +144,7 @@ async def test_status_active_protocol_adapter_is_none_initially(manager):
 # Capability surfacing vs the in-file adapters (M4 should NOT remove them)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_legacy_capabilities_still_present(manager):
     """The existing 'capabilities' key in status() must still be present
@@ -152,6 +159,7 @@ async def test_legacy_capabilities_still_present(manager):
 # ---------------------------------------------------------------------------
 # Backwards compatibility: existing in-file adapters still work
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_legacy_adapters_still_respond_to_status(manager):

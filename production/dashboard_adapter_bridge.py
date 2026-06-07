@@ -8,6 +8,7 @@ preserved; this module wires the new Protocol adapters in NEXT to them.
 A full rewrite — replacing the in-file classes with Protocol-based
 delegation — is deferred to v2.5.1.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

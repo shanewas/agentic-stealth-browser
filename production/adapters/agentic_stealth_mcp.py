@@ -12,6 +12,7 @@ Capability set: {LAUNCH, CLOSE, NAVIGATE, CLICK, FILL, SCREENSHOT, STATUS,
 HEADLESS_SWITCH, MULTI_CONTEXT}. STREAM_CDP is NOT supported (the MCP
 server doesn't expose raw CDP).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -115,14 +116,20 @@ class AgenticStealthMCPAdapter:
                 "initialize",
                 {
                     "protocolVersion": "2024-11-05",
-                    "clientInfo": {"name": "agentic-stealth-browser-dashboard", "version": "2.5.0"},
+                    "clientInfo": {
+                        "name": "agentic-stealth-browser-dashboard",
+                        "version": "2.5.0",
+                    },
                     "capabilities": {},
                 },
             )
             # Defensive: confirm the server is actually our MCP server
             server_info = response.get("result", {}).get("serverInfo", {})
             server_name = server_info.get("name", "")
-            if "agentic-stealth" not in server_name and "agentic_stealth" not in server_name:
+            if (
+                "agentic-stealth" not in server_name
+                and "agentic_stealth" not in server_name
+            ):
                 await self._terminate_subprocess()
                 raise AdapterLaunchError(
                     f"Unexpected MCP server: {server_name!r}; expected agentic-stealth-browser"
@@ -134,9 +141,7 @@ class AgenticStealthMCPAdapter:
             # then calls close() doesn't operate on a dead Process handle.
             self._client = None
             self._proc = None
-            raise AdapterLaunchError(
-                f"MCP initialize handshake failed: {exc}"
-            ) from exc
+            raise AdapterLaunchError(f"MCP initialize handshake failed: {exc}") from exc
 
     # ------------------------------------------------------------------ close
     async def close(self) -> None:
@@ -202,9 +207,7 @@ class AgenticStealthMCPAdapter:
         }
 
     # ------------------------------------------------------------------ helpers
-    async def _call_tool(
-        self, name: str, arguments: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if self._client is None:
             raise RuntimeError(
                 "Agentic-Stealth-MCP adapter not launched; call launch() first"

@@ -3,6 +3,7 @@
 These tests pin the public surface that M1-M3 will implement. They run
 without any actual adapter logic — just the protocol/enum/registry.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -35,9 +36,7 @@ def test_capability_enum_has_canonical_members():
         "HEADLESS_SWITCH",
     }
     actual = {c.name for c in Capability}
-    assert expected.issubset(actual), (
-        f"Missing capabilities: {expected - actual}"
-    )
+    assert expected.issubset(actual), f"Missing capabilities: {expected - actual}"
 
 
 def test_backend_adapter_is_a_protocol():
@@ -52,8 +51,15 @@ def test_backend_adapter_is_a_protocol():
 def test_backend_adapter_has_required_methods():
     """The protocol must define the eight action methods + capabilities()."""
     required = {
-        "launch", "close", "navigate", "click", "fill",
-        "screenshot", "status", "capabilities", "supports",
+        "launch",
+        "close",
+        "navigate",
+        "click",
+        "fill",
+        "screenshot",
+        "status",
+        "capabilities",
+        "supports",
     }
     actual = set(dir(BackendAdapter))
     missing = required - actual
@@ -107,8 +113,18 @@ def test_adapter_capability_error_inherits_from_runtime_error():
 
 @pytest.mark.parametrize(
     "capability_name",
-    ["LAUNCH", "CLOSE", "NAVIGATE", "CLICK", "FILL", "SCREENSHOT",
-     "STATUS", "STREAM_CDP", "MULTI_CONTEXT", "HEADLESS_SWITCH"],
+    [
+        "LAUNCH",
+        "CLOSE",
+        "NAVIGATE",
+        "CLICK",
+        "FILL",
+        "SCREENSHOT",
+        "STATUS",
+        "STREAM_CDP",
+        "MULTI_CONTEXT",
+        "HEADLESS_SWITCH",
+    ],
 )
 def test_capability_wire_value_is_lowercase_name(capability_name):
     """The wire form of a Capability must be its lowercase name so the
@@ -129,6 +145,7 @@ def test_adapter_passes_runtime_checkable_isinstance():
 
     class _GoodAdapter:
         name = "good"
+
         async def launch(self, profile, headless=True): ...
         async def close(self): ...
         async def navigate(self, url): ...
@@ -136,18 +153,24 @@ def test_adapter_passes_runtime_checkable_isinstance():
         async def fill(self, selector, value): ...
         async def screenshot(self, path=None): ...
         async def status(self): ...
-        def capabilities(self): return set()
-        def supports(self, capability): return False
+        def capabilities(self):
+            return set()
+
+        def supports(self, capability):
+            return False
 
     class _BadAdapter:
         """Missing close() and click() — must NOT satisfy the protocol."""
+
         name = "bad"
+
         async def launch(self, profile, headless=True): ...
         async def navigate(self, url): ...
         async def fill(self, selector, value): ...
         async def screenshot(self, path=None): ...
         async def status(self): ...
-        def capabilities(self): return set()
+        def capabilities(self):
+            return set()
 
     assert isinstance(_GoodAdapter(), BackendAdapter), (
         "_GoodAdapter implements every method and must satisfy the protocol"
@@ -169,8 +192,10 @@ def test_supports_default_uses_capabilities_set_membership():
 
     class _Stub:
         name = "stub"
+
         def capabilities(self):
             return {Capability.LAUNCH, Capability.CLOSE}
+
         # NOTE: no supports() — we want the protocol's default to be exercised
 
     stub = _Stub()

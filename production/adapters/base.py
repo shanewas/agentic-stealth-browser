@@ -3,6 +3,7 @@
 This module defines the contract that M1-M3 implement. See
 docs/plans/2026-06-03-v2.5.0-real-backend-adapters.md for the full design.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -18,14 +19,15 @@ class Capability(str, Enum):
 
     Wire form is the enum .value (a string) so it round-trips through JSON.
     """
-    LAUNCH = "launch"            # can start a new browser process
-    CLOSE = "close"              # can tear down cleanly
-    NAVIGATE = "navigate"        # can drive page.goto
-    CLICK = "click"              # can drive page.click
-    FILL = "fill"                # can drive page.fill
-    SCREENSHOT = "screenshot"    # can capture page screenshots
-    STATUS = "status"            # can report runtime health
-    STREAM_CDP = "stream_cdp"    # can expose raw CDP event stream
+
+    LAUNCH = "launch"  # can start a new browser process
+    CLOSE = "close"  # can tear down cleanly
+    NAVIGATE = "navigate"  # can drive page.goto
+    CLICK = "click"  # can drive page.click
+    FILL = "fill"  # can drive page.fill
+    SCREENSHOT = "screenshot"  # can capture page screenshots
+    STATUS = "status"  # can report runtime health
+    STREAM_CDP = "stream_cdp"  # can expose raw CDP event stream
     MULTI_CONTEXT = "multi_context"  # can manage multiple BrowserContexts
     HEADLESS_SWITCH = "headless_switch"  # can toggle headless at runtime
 
@@ -94,9 +96,7 @@ class BackendAdapter(Protocol):
 
     name: str  # subclasses must override; no default — register_adapter enforces non-empty
 
-    async def launch(
-        self, profile: str, headless: bool = True
-    ) -> None: ...
+    async def launch(self, profile: str, headless: bool = True) -> None: ...
 
     async def close(self) -> None: ...
 

@@ -11,6 +11,7 @@ Capability set: {NAVIGATE, CLICK, FILL, SCREENSHOT, STATUS, STREAM_CDP}.
 LAUNCH is deliberately excluded — the user must already have a browser
 running and reachable at the CDP endpoint.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -23,7 +24,6 @@ from playwright.async_api import (
 )
 
 from production.adapters.base import (
-    AdapterCapabilityError,
     AdapterLaunchError,
     Capability,
 )
@@ -188,9 +188,7 @@ class CDPBridgeAdapter:
     def _require_page(self) -> Page:
         """Return the single page owned by this adapter's context, or raise."""
         if self._context is None:
-            raise RuntimeError(
-                "CDP-bridge adapter not launched; call launch() first"
-            )
+            raise RuntimeError("CDP-bridge adapter not launched; call launch() first")
         # Single-page model for the dashboard adapter. If multiple pages exist,
         # take the first one. Multi-context capability is not declared by this
         # adapter; use Agentic-Stealth-MCP for that.
