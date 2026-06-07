@@ -6,15 +6,25 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/agentic-stealth-browser.svg)](https://pypi.org/project/agentic-stealth-browser/)
-[![Tests](https://img.shields.io/badge/tests-915%2B%20passing-brightgreen)](tests/)
 [![GitHub Stars](https://img.shields.io/github/stars/shanewas/agentic-stealth-browser?style=flat&logo=github)](https://github.com/shanewas/agentic-stealth-browser)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/shanewas)
 
 <p align="center">
   <img src="assets/hn-demo.gif" alt="Agentic Stealth Browser Demo" width="90%">
 </p>
 
-Production-grade stealth browser automation that **survives Cloudflare, LinkedIn, Amazon, and other anti-bot systems** by looking convincingly human at every layer.
+## What is this
+
+A production-grade stealth browser automation library for Python, built on Playwright.
+It survives modern anti-bot systems (Cloudflare, LinkedIn, Amazon, etc.) by looking
+convincingly human at every layer — TLS, navigator, WebGL/Canvas, behavior, recovery.
+
+**When to use it** — you are building an autonomous agent, scraper, or operator tool
+that needs to pass bot detection in headless mode on protected sites.
+
+**When NOT to use it** — you only need to scrape public, unprotected pages (use
+`httpx` + `selectolax` or `playwright` directly). You need a real uTLS stack at the
+wire level (use `curl_cffi`). You need CAPTCHA solving (this project intentionally
+stops at detection + intervention; see Limitations below).
 
 ```bash
 pip install agentic-stealth-browser
@@ -27,7 +37,7 @@ from core.agent_browser import AgentBrowser
 async with AgentBrowser(session_name="demo") as browser:
     await browser.launch(headless=True)
     await browser.safe_goto("https://bot.sannysoft.com")
-    # ✓ passes WebGL, Canvas, AudioContext, WebRTC, and TLS fingerprinting
+    # passes WebGL, Canvas, AudioContext, WebRTC, and TLS fingerprint checks
 ```
 
 ---
@@ -38,14 +48,39 @@ Sites don't just check your User-Agent anymore. They check *everything*:
 
 | Attack Surface | Vanilla Playwright | This library |
 |---|---|---|
-| **TLS handshake** (client hello / JA3/JA4-ish) | Standard Python TLS — instantly identifiable | Region profile spoof via launch/presets (US, Japan, EU, Korea); process-level, not full custom TLS stack |
+| **TLS handshake** (client hello / JA3/JA4-ish) | Standard Python TLS — instantly identifiable | Region-spoofed TLS profile (process-level, not custom uTLS) |
 | **Navigator APIs** (`navigator.webdriver`, `plugins`, `languages`) | Leaks automation flags everywhere | Every property patched before first paint |
 | **WebGL / Canvas fingerprint** | Headless GPU renders differently | Consistent buffers across sessions |
 | **Human behavior** | Robotic clicks, instant typing | Bézier mouse curves, variable speed, fatigue simulation |
 | **Auto-recovery** | None — blocks = failure | CAPTCHA detection → proxy rotation → retry chain |
 | **Account warming** | Nothing | 14-day graduated ramp-up per account |
 
-Result: **passes bot.sannysoft.com, pixelscan.net, and CreepJS** with zero flags in headless mode.
+Result: **passes bot.sannysoft.com, pixelscan.net, and CreepJS** with zero flags in
+headless mode (detection canaries run every 4 hours via `docs/canary.md`).
+
+---
+
+## Limitations & honest claims
+
+This library is opinionated and has real limits. Operators should know them up front:
+
+- **Not a real uTLS stack.** TLS fingerprinting is process-level (region-matched
+  client-hello, init-script negotiation). It is *not* `curl_cffi`-grade wire-level
+  impersonation. Attach mode (CDP) degrades further: the host browser's TLS is whatever
+  the user already has.
+- **Headless detection is a moving target.** Detection vendors change heuristics
+  weekly. This project runs a 4-hourly detection canary
+  ([docs/canary.md](docs/canary.md)) and patches regressions, but zero-flag is a
+  snapshot, not a guarantee.
+- **No CAPTCHA solving.** The recovery chain *detects* CAPTCHAs and surfaces them to
+  the operator dashboard for manual intervention. It does not call solving services.
+  If you need solver integration, build a `BasePlugin` that calls your provider and
+  drops the cookie back into the session.
+- **E2E tests against live protected sites are opt-in.** The default CI runs
+  contract + mocked integration tests. Live-site E2E (`RUN_E2E_ANTI_BLOCK=1`) is
+  flaky by nature and skipped on PRs.
+- **Login credentials are not shipped.** Examples that touch authenticated endpoints
+  stop at the search/listing stage.
 
 ---
 
@@ -114,6 +149,23 @@ degradation matrix (init-script stealth still applies; TLS/JA3 does not).
 
 ---
 
+## Install from source
+
+```bash
+git clone https://github.com/shanewas/agentic-stealth-browser.git
+cd agentic-stealth-browser
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+playwright install chromium
+pytest tests/ -q
+```
+
+The dev extras pull in `pytest`, `pytest-asyncio`, `ruff`, and the test fixture
+deps. The full suite takes ~2 minutes on a warm cache; the default run skips
+live E2E (`RUN_E2E_ANTI_BLOCK=1` to enable).
+
+---
+
 ## Key Features
 
 | Feature | What It Does |
@@ -133,12 +185,17 @@ degradation matrix (init-script stealth still applies; TLS/JA3 does not).
 
 ---
 
-## New in v2.3.0
+## New in v2.5.0
 
-- **Show HN launch** — README overhaul, demo GIF, streamlined community onboarding
-- **Buy Me A Coffee** — sponsor the project directly
-- **PID tracking** — `AgentBrowser._browser_process` for external process monitoring
-- **PyPI publish automation** — OIDC trusted publishing on every release tag
+- **BackendAdapter protocol** — pluggable execution backends (M0–M4 shipped)
+  across CDP-bridge, playwright-mcp, and agentic-stealth-mcp
+- **Real dashboard backends** — the Hermes dashboard now wires a thin shim over
+  the adapter protocol, so the same UI drives all three backends
+- **Attach-mode hardening** — adopted tabs are preserved on `close()`; bad
+  context/stealth installs roll back cleanly; `human`/`scraper`/`recovery`
+  initialized for attach
+- **CLI `status`** — added `--headless` and `--session` flags for headless
+  operator checks against a named session
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
@@ -153,6 +210,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 - **[Plugins](plugins/)** — lifecycle hooks for custom behavior
 - **[VPS Deployment](scripts/setup_rbb.sh)** — systemd, Caddy reverse proxy, Cloudflare Tunnel patterns
 - **[Migration v1 → v2](scripts/migrate_v1_to_v2.py)** — deprecation shims, migration guide, script
+- **[Documentation index](docs/README.md)** — full docs/ tree: attach-over-CDP, canary, plans, analysis
+- **[Examples](examples/recipes/)** — runnable recipes for Cloudflare, LinkedIn, Amazon
 
 Additional references: [CHANGELOG.md](CHANGELOG.md) · [Workflow Library](workflows/library/) · [Migration Guide](scripts/migrate_v1_to_v2.py)
 
@@ -169,7 +228,9 @@ Additional references: [CHANGELOG.md](CHANGELOG.md) · [Workflow Library](workfl
 ├── production/     MCP server, SDK, orchestrator, security, profiler
 ├── plugins/        Plugin system with template
 ├── scripts/        Migration, evaluation, benchmarking
-└── tests/          890+ contract + integration tests
+├── docs/           Attach-over-CDP, canary, plans, analysis
+├── examples/       Runnable recipes (Cloudflare, LinkedIn, Amazon)
+└── tests/          Contract + integration tests (live E2E opt-in)
 ```
 
 ## License

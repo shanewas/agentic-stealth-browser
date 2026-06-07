@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+## [2.5.0] — Real Dashboard Backend Adapters (#444) (2026-06-07)
+
+### Added
+- **`BackendAdapter` Protocol + `Capability` enum** (`production/adapters/base.py:84`): runtime-checkable protocol with `launch`/`close`/`navigate`/`click`/`fill`/`screenshot`/`status`/`capabilities` surface. All three backends (M1/M2/M3) implement it. New `AdapterLaunchError` and `AdapterCapabilityError` exception types; `register_adapter` enforces non-empty string names. (#444 M0)
+- **`CDPBridgeAdapter`** (`production/adapters/cdp_bridge.py`): Playwright `connect_over_cdp` over WebSocket. Used for adopted-context / WSL-host workflows where the operator already owns a browser process. (#444 M1)
+- **`PlaywrightMCPAdapter`** (`production/adapters/playwright_mcp.py`): stdio subprocess + MCP JSON-RPC. Spawns `npx @playwright/mcp` with an explicit env allowlist (PATH, HOME) and a 16 MB `MAX_FRAME_BYTES` frame cap. (#444 M2)
+- **`AgenticStealthMCPAdapter`** (`production/adapters/agentic_stealth_mcp.py`): stdio subprocess + MCP JSON-RPC, round-trips through the bundled `production.mcp_server` runtime. Same env allowlist, frame cap, and stderr-drain guarantees as M2. (#444 M3)
+- **Dashboard backend wiring (M4)**: `BrowserRuntimeManager` resolves the configured backend through the adapter registry, records an audit event on backend switch, surfaces negotiated capabilities in dashboard status, and rejects unsupported actions with a backend-specific error. `production/dashboard_adapter_bridge.py` is now a thin shim that re-exports the three M1–M3 adapters. (#444 M4)
+
+### Changed
+- `production/hermes_dashboard.py` re-exports `BackendAdapter` from `production/adapters/`.
+- `production/dashboard_adapter_bridge.py` thin shim replaces the three alias backends.
+- `MANIFEST.in`: ships `assets/*.{gif,png,jpg,svg}` (demo GIF), `docs/`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md` (sdist previously dropped the demo GIF and the entire `docs/` tree).
+- `README.md`: added "What is this / When to use / When NOT to use" block at top, honest comparison table (region client-hello profiles, not full uTLS), install-from-source section, full project tree + doc index. Dropped unverified test-count badge and Buy Me A Coffee. 177 → 238 lines.
+- New `docs/README.md` operator/reference/planning index. Root-level `*PLAN.md` / `*READINESS.md` / `*DASHBOARD.md` / `HN_POST.md` moved to `docs/plans/misc/` as historical.
+- Examples rewritten for honesty and reproducibility: `01_cloudflare_bypass.py` (nowsecure.nl + screenshot), `02_linkedin_search.py` (`linkedin_2026` preset + webdriver check + DDG), `03_amazon_product.py` (product → title + price). `recipes/README.md` table updated.
+- `pyproject.toml` version 2.4.1 → 2.5.0.
+
+### Fixed
+- **#444 M0 review (showstoppers)**:
+  - **S1 capability gating**: M2/M3 `navigate`/`click`/`fill`/`screenshot` now call `self.supports()` and raise `AdapterCapabilityError` if the adapter doesn't declare the capability (enforces `base.py:84` protocol contract). New `_require_capability()` helper on each adapter.
+  - **S2 stderr drain**: M2/M3 `stderr=PIPE` is now drained by a background task started right after `spawn` and cancelled in `close()`. A noisy child no longer fills the ~64 KB kernel pipe buffer, blocks on its next stderr write, hangs the handshake, and triggers a slow SIGKILL on close.
+  - **F1 stale state on retry**: after MCP handshake failure, `terminate_subprocess()` is called and `self._proc` / `self._client` are cleared. A caller that catches `AdapterLaunchError` and then calls `close()` no longer operates on a dead `Process` handle.
+- **#444 M0 review (smaller)**:
+  - **F2 frame cap**: `_jsonrpc_stdio.readline()` now enforces `MAX_FRAME_BYTES = 16 MB` and raises `ConnectionError` on overflow. A misbehaving server emitting a multi-GB line no longer OOMs the client.
+  - **F3 env allowlist**: both stdio adapters now pass an explicit `env={PATH, HOME}` to `asyncio.create_subprocess_exec` instead of inheriting the operator's full environment (`OPENAI_API_KEY`, `AWS_*`, `DATABASE_URL`, ...).
+  - **A3 dead tautology**: `cdp_bridge.screenshot()` had a defensive `Capability.SCREENSHOT` check that could never fire (always in `capabilities()`). Branch removed; M0 contract is the only contract that matters.
+  - **M0 code-quality review (17abc50)**: exception types narrowed to library-specific where appropriate, `isinstance` coverage tightened, defensive tautology branches removed, transport teardown made symmetric with launch.
+- **Adapter capability gating**: now consistent across M1/M2/M3 — each action is contractually declared, not assumed.
+- **Ruff/format housekeeping** (4432701): 12 ruff format issues + 1 unused import fixed.
+
+### Tests / CI
+- `tests/test_backend_adapter_contract.py` — new contract test pinning the M0 Protocol surface, `Capability` enum members, and `register_adapter` duplicate/empty/non-string rejection.
+- `tests/test_adapter_cdp_bridge.py`, `tests/test_adapter_playwright_mcp.py`, `tests/test_adapter_agentic_stealth_mcp.py` — new per-adapter tests covering launch, capability negotiation, action gating, stderr drain, env allowlist, and close lifecycle.
+- `tests/test_dashboard_protocol_bridge.py` — new dashboard-wiring test (M4): audit event on backend switch, capability surface, unsupported-action rejection.
+- `pytest -q`: 1025 collected, 1023 passed, 2 e2e skipped, 0 failed (139 s; baseline maintained).
+- `ruff check` + `ruff format --check` clean across 159 Python files.
+
+Closes #444.
+
+---
+
 ## [2.4.1] — v2.4.0 Stabilization Patch (2026-06-03)
 
 ### Fixed / Security / Reliability (P0/P1 per #459)
@@ -69,24 +113,6 @@ Closes #447, #448, #449, #450, #451, #452, #453, #454, #455, #456, #457, #458, #
 - #438, #439, #440, #441
 
 ---
-
-## [Unreleased]
-
-### Added
-- **`AgentBrowser.attach_over_cdp(cdp_url, ...)`**: connect to an already-running
-  browser exposed via Chrome DevTools Protocol (e.g. Chrome launched with
-  `--remote-debugging-port=9222`) instead of spawning a new Chromium. Complements
-  the existing `debug_cdp=True` launch flag — that one *exposes* an endpoint, this
-  one *consumes* one. Primary use case: drive a real desktop browser from a
-  different host (WSL → Windows, container → host, dev box → remote display).
-  Runtime stealth init scripts (navigator/canvas/WebGL/audio patches) are still
-  injected on the chosen context; launch-time stealth (TLS/JA3, regional preset,
-  user-data-dir) is unavailable in attach mode and listed in the return payload's
-  `degradation` field. `close()` disconnects without terminating the external
-  browser. (#attach-cdp)
-- **MCP tool `stealth_attach_over_cdp`**: surfaces `attach_over_cdp` through the
-  MCP server. Defaults to loopback-only; non-loopback hosts require explicit
-  `allow_remote=true` and raise `MCP_REMOTE_CDP_BLOCKED` otherwise. (#attach-cdp)
 
 ## [2.3.0] — Show HN & Community Launch (2026-05-28)
 
