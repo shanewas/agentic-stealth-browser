@@ -24,7 +24,7 @@ jobs:
           CANARY_DASHBOARD_PATH: docs/canary/index.html
           CANARY_BADGE_PATH: docs/canary/badge.svg
           CANARY_README_PATH: docs/canary/README.md
-      - uses: stefanzweifel/git-auto-commit-action@v5
+      - uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "canary: score=${{ steps.canary.outputs.score }} at ${{ steps.canary.outputs.ts }}"
           file_pattern: "docs/canary/*"
