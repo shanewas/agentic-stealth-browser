@@ -5,6 +5,17 @@ Prevents cross-session data access:
 - One session's tool calls cannot access another session's browser instance.
 - session_name must match the caller's authorized session.
 - Token-based session binding for concurrent clients.
+
+NOT YET INTEGRATED (honesty note): SessionEnforcer is defined and unit-tested but
+is NOT called from the MCP dispatch path in production/mcp_server.py. Its model
+isolates *concurrent client contexts* from each other via per-context tokens, but
+the current MCP transport is single-client stdio and carries no per-call context
+token to key check_access() on. With one trust domain there is nothing to isolate
+from, and _resolve_browser() already rejects unknown/closed sessions — so wiring a
+constant global token here would be security theater, not enforcement. This class
+becomes meaningful only under a multi-client transport (e.g. HTTP/SSE) that supplies
+a real per-client context token to bind_session()/check_access(). Until then it
+enforces nothing at runtime; do not rely on it for isolation.
 """
 
 from __future__ import annotations
@@ -48,6 +59,11 @@ class SessionEnforcer:
     Each call context is associated with a token. Tools can only operate on
     sessions bound to their call context's token. A single client/context cannot
     access another context's browser instances.
+
+    NOT WIRED: no call site in production/mcp_server.py's dispatch path. Requires a
+    multi-client transport that supplies a per-context token — the current stdio
+    transport does not. See the module docstring. This is a defined-but-inert
+    security control, not an active one.
     """
 
     def __init__(self) -> None:

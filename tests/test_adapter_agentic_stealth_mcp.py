@@ -17,6 +17,7 @@ import pytest
 from production.adapters import (
     AdapterCapabilityError,
     AdapterLaunchError,
+    AdapterToolError,
     BACKEND_REGISTRY,
     BackendAdapter,
     Capability,
@@ -367,6 +368,33 @@ def test_capability_gating_helper_raises_when_capability_missing():
 
     # Sanity: a declared capability passes the gate.
     stripped._require_capability(Capability.NAVIGATE)
+
+
+@pytest.mark.asyncio
+async def test_navigate_raises_adapter_tool_error_on_is_error(fake_subprocess):
+    """A tool-level failure (isError: true) must not be treated as success."""
+    fake = fake_subprocess["fake"]
+    _enqueue_init_response(fake)
+    adapter = AgenticStealthMCPAdapter()
+    await adapter.launch("default", headless=True)
+    fake.queue_write.clear()
+    fake.queue_read.clear()
+
+    fake.queue_read.append(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "content": [{"type": "text", "text": "Error: navigation timed out"}],
+                "isError": True,
+            },
+        }
+    )
+    try:
+        with pytest.raises(AdapterToolError):
+            await adapter.navigate("https://example.com")
+    finally:
+        await adapter.close()
 
 
 @pytest.mark.asyncio

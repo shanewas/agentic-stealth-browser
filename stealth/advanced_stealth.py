@@ -85,6 +85,7 @@ def get_stealth_script(
     fingerprint_seed: str = None,
     hardware: Dict[str, Any] = None,
     screen: Dict[str, Any] = None,
+    attach_mode: bool = False,
 ) -> str:
     """
     Returns a comprehensive stealth injection script.
@@ -93,7 +94,11 @@ def get_stealth_script(
     fingerprint_seed: per-session stable seed for canvas/WebGL/audio noise (addresses #94 static patches)
     hardware: dict from persona.device.get_hardware_fingerprint() for #255 correlation
     screen: dict from persona.device.get_screen_profile() for #124 viewport realism + #198 screen/DPR/orient
-    Cached by profile+seed+hardware+screen key with 2-hour TTL (#72 #63).
+    attach_mode: True when attaching to an already-running real browser (attach_over_cdp). In this
+        mode the fixed Windows-profile overrides for navigator.platform, WebGL vendor/renderer, and
+        screen/DPR are skipped entirely so the injected fingerprint doesn't contradict the real
+        attached browser's OS/GPU/display (which the real UA, TLS/JA3, and CDP already expose).
+    Cached by profile+seed+hardware+screen+attach_mode key with 2-hour TTL (#72 #63).
     """
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     hw = hardware or {"hardwareConcurrency": 8, "deviceMemory": 8}
@@ -108,86 +113,112 @@ def get_stealth_script(
         "orientation": "landscape-primary",
     }
 
-    cache_key = make_cache_key(profile, fingerprint_seed, hardware, screen)
+    cache_profile = profile + (":attach" if attach_mode else "")
+    cache_key = make_cache_key(cache_profile, fingerprint_seed, hardware, screen)
     cached = _script_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    script = _build_stealth_script(seed, hw, scr)
+    script = _build_stealth_script(seed, hw, scr, attach_mode=attach_mode)
     _script_cache.put(cache_key, script)
     return script
 
 
-def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) -> str:
+def _build_stealth_script(
+    seed: str, hw: Dict[str, Any], scr: Dict[str, Any], attach_mode: bool = False
+) -> str:
     """Build the stealth script string (internal, called when cache miss)."""
     script = """
     // === Advanced Agentic Stealth v0.4-p2-cluster (battery/speech/media #103, audio osc #162, viewport/screen/DPR/orient #124 #198, fonts #191, TLS docs #114; builds on #352) ===
-    
+    // Each patch section below is try/catch isolated: one API mismatch degrades only that
+    // signal instead of aborting every patch after it (init-script install still "succeeds").
+    const __STEALTH_ATTACH_MODE__ = __ATTACH_MODE__;
+
     // Core anti-detection (improved for #138)
-    Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-        configurable: true
-    });
-    
-    // Hide webdriver from property descriptors (stronger than simple getter)
     try {
-        delete Object.getPrototypeOf(navigator).webdriver;
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => false,
+            configurable: true
+        });
+
+        // Hide webdriver from property descriptors (stronger than simple getter)
+        try {
+            delete Object.getPrototypeOf(navigator).webdriver;
+        } catch (e) {}
     } catch (e) {}
-    
+
     // Plugins & mimeTypes will be defined later with proper prototype chain
-    
+
     // Hardware fingerprint (consistent, persona power_level correlated via #255)
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => __HW_CONC__ });
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => __DEV_MEM__ });
-    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-    
+    // navigator.platform override skipped in attach_mode: the real attached browser's UA,
+    // userAgentData.platform, Sec-Ch-Ua-Platform header, and TLS/JA3 all reflect the real OS.
+    try {
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => __HW_CONC__ });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => __DEV_MEM__ });
+        if (!__STEALTH_ATTACH_MODE__) {
+            Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        }
+    } catch (e) {}
+
     // Battery, SpeechSynthesis, MediaDevices spoofing (#103) - realistic stable per-session/persona values
     // getBattery returns fake BatteryManager; speech provides common real voices; mediaDevices returns consistent fake audio devices (no video cam to limit exposure)
-    navigator.getBattery = navigator.getBattery || (() => Promise.resolve({ charging: true, chargingTime: null, dischargingTime: null, level: 0.82 + (Math.random()*0.13), addEventListener:()=>{}, removeEventListener:()=>{} }));
-    (function spoofSpeech() {
-      const voices = [
-        {voiceURI:"Alex",name:"Alex",lang:"en-US",localService:true,default:true},
-        {voiceURI:"Samantha",name:"Samantha",lang:"en-US",localService:true,default:false},
-        {voiceURI:"Daniel",name:"Daniel",lang:"en-GB",localService:true,default:false},
-        {voiceURI:"Karen",name:"Karen",lang:"en-AU",localService:true,default:false},
-        {voiceURI:"Moira",name:"Moira",lang:"en-IE",localService:true,default:false}
-      ];
-      const synth = window.speechSynthesis || {};
-      synth.getVoices = () => voices;
-      if (typeof synth.onvoiceschanged === "function") { try { setTimeout(() => synth.onvoiceschanged(new Event("voiceschanged")), 5); } catch(e){} }
-      window.speechSynthesis = synth;
-    })();
-    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-      const fakeDevs = [
-        {deviceId:"def1",kind:"audioinput",label:"Default - Microphone (Realtek High Definition Audio)",groupId:"g1"},
-        {deviceId:"def2",kind:"audiooutput",label:"Default - Speakers (Realtek High Definition Audio)",groupId:"g1"},
-        {deviceId:"com1",kind:"audioinput",label:"Communications - Microphone",groupId:"g2"}
-      ];
-      navigator.mediaDevices.enumerateDevices = () => Promise.resolve(fakeDevs);
-      const _origGUM = navigator.mediaDevices.getUserMedia;
-      navigator.mediaDevices.getUserMedia = async (c) => { if (c && c.video) throw new DOMException("Permission denied","NotAllowedError"); return _origGUM ? _origGUM.call(navigator.mediaDevices, c) : {getTracks:()=>[]}; };
-    }
-    
+    try {
+        navigator.getBattery = navigator.getBattery || (() => Promise.resolve({ charging: true, chargingTime: null, dischargingTime: null, level: 0.82 + (Math.random()*0.13), addEventListener:()=>{}, removeEventListener:()=>{} }));
+    } catch (e) {}
+    try {
+        (function spoofSpeech() {
+          const voices = [
+            {voiceURI:"Alex",name:"Alex",lang:"en-US",localService:true,default:true},
+            {voiceURI:"Samantha",name:"Samantha",lang:"en-US",localService:true,default:false},
+            {voiceURI:"Daniel",name:"Daniel",lang:"en-GB",localService:true,default:false},
+            {voiceURI:"Karen",name:"Karen",lang:"en-AU",localService:true,default:false},
+            {voiceURI:"Moira",name:"Moira",lang:"en-IE",localService:true,default:false}
+          ];
+          const synth = window.speechSynthesis || {};
+          synth.getVoices = () => voices;
+          if (typeof synth.onvoiceschanged === "function") { try { setTimeout(() => synth.onvoiceschanged(new Event("voiceschanged")), 5); } catch(e){} }
+          window.speechSynthesis = synth;
+        })();
+    } catch (e) {}
+    try {
+        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+          const fakeDevs = [
+            {deviceId:"def1",kind:"audioinput",label:"Default - Microphone (Realtek High Definition Audio)",groupId:"g1"},
+            {deviceId:"def2",kind:"audiooutput",label:"Default - Speakers (Realtek High Definition Audio)",groupId:"g1"},
+            {deviceId:"com1",kind:"audioinput",label:"Communications - Microphone",groupId:"g2"}
+          ];
+          navigator.mediaDevices.enumerateDevices = () => Promise.resolve(fakeDevs);
+          const _origGUM = navigator.mediaDevices.getUserMedia;
+          navigator.mediaDevices.getUserMedia = async (c) => { if (c && c.video) throw new DOMException("Permission denied","NotAllowedError"); return _origGUM ? _origGUM.call(navigator.mediaDevices, c) : {getTracks:()=>[]}; };
+        }
+    } catch (e) {}
+
     // P2: __stealth marker + realistic font list (for #271 measureText correlation + #279 detection; enhanced #191)
     // List chosen to match common Windows desktop; measurements jittered consistently via font-aware seed.
     // Full document.fonts replacement avoided (risk of side-effects); exposed list + patched measure suffice for correlation.
-    window.__stealth = window.__stealth || {
-        version: "0.4-p2-cluster",
-        patched: ["webdriver","canvas","offscreen","webgl","webgl2","measureText","hardware","webrtc","fonts","battery","speechSynthesis","mediaDevices","audio","screen","dpr","orientation"],
-        fonts: ["Arial","Helvetica","Times New Roman","Courier New","Verdana","Georgia","Palatino Linotype","Garamond","Book Antiqua","Comic Sans MS","Trebuchet MS","Arial Black","Impact","Lucida Console","Segoe UI","Calibri","Cambria","Consolas","Tahoma","Microsoft Sans Serif","Lucida Sans Unicode"],
-        playwright_compat: "baseline-124+",
-        ts: Date.now()
-    };
-    
+    try {
+        window.__stealth = window.__stealth || {
+            version: "0.4-p2-cluster",
+            patched: ["webdriver","canvas","offscreen","webgl","webgl2","measureText","hardware","webrtc","fonts","battery","speechSynthesis","mediaDevices","audio","screen","dpr","orientation"],
+            fonts: ["Arial","Helvetica","Times New Roman","Courier New","Verdana","Georgia","Palatino Linotype","Garamond","Book Antiqua","Comic Sans MS","Trebuchet MS","Arial Black","Impact","Lucida Console","Segoe UI","Calibri","Cambria","Consolas","Tahoma","Microsoft Sans Serif","Lucida Sans Unicode"],
+            playwright_compat: "baseline-124+",
+            ts: Date.now()
+        };
+    } catch (e) {}
+
     // Languages
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-    Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
-    
+    try {
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+    } catch (e) {}
+
     // Chrome runtime
-    if (!window.chrome) {
-        window.chrome = { runtime: {}, app: { isInstalled: false } };
-    }
-    
+    try {
+        if (!window.chrome) {
+            window.chrome = { runtime: {}, app: { isInstalled: false } };
+        }
+    } catch (e) {}
+
     // === Canvas, OffscreenCanvas, WebGL2, Font protection (v0.4 - fixes #25 #27 #94 #150 #210 #262 #95) ===
     // - Non-destructive tiny seeded subpixel jitter on fillText/strokeText (changes raster pixels for toDataURL fp consistently; content/visibility identical; defeats old mangling)
     // - Seeded small noise on getImageData (covers pixel read-back, OffscreenCanvas 2d, workers)
@@ -195,6 +226,7 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
     // - Unified robust prototype patching for HTMLCanvasElement + OffscreenCanvas (#262)
     // - DPR/zoom-aware jitterScale for consistent fingerprints across zoom levels (#210)
     // - Patches re-applied automatically on nav/reload via context init_script (#150)
+    try {
     (function(fpSeed) {
       const SEED = fpSeed || "agentic-default-seed-2026";
       function seededRand(n) {
@@ -274,13 +306,17 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
       }
 
       // WebGL + WebGL2 getParameter extended (prep #218)
+      // vendor/renderer/version strings only forced in launch mode (known Windows profile); in
+      // attach_mode the real GPU strings are left alone to stay consistent with the real UA/platform.
       function installWebGLSpoof(Proto) {
         if (!Proto || !Proto.prototype || Proto.prototype.__stealthPatched) return;
         const orig = Proto.prototype.getParameter;
         Proto.prototype.getParameter = function(p) {
-          if (p === 37445) return "Intel Inc.";
-          if (p === 37446) return "Intel(R) UHD Graphics 620";
-          if (p === 37447) return "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
+          if (!__STEALTH_ATTACH_MODE__) {
+            if (p === 37445) return "Intel Inc.";
+            if (p === 37446) return "Intel(R) UHD Graphics 620";
+            if (p === 37447) return "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
+          }
           if (p === 35660) return 16;
           if (p === 36349 || p === 36348) return 0x8b20;
           if (p === 34024 || p === 34076) {
@@ -294,9 +330,11 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
       if (typeof WebGL2RenderingContext !== "undefined") installWebGLSpoof(WebGL2RenderingContext);
 
     })("__DYNAMIC_SEED_PLACEHOLDER__");
+    } catch (e) {}
     // === End improved canvas patch ===
     // AudioContext noise + oscillator + sampleRate (#162 full coverage; builds on prior partial)
     // Uses per-session seeded noise for consistent fingerprints (same seed = same audio noise)
+    try {
     const _audioSeed = "__DYNAMIC_SEED_PLACEHOLDER__" || "agentic-audio-v1";
     function _audioSeededRand(n) {
         let x = 2166136261 >>> 0;
@@ -342,15 +380,19 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
             };
         }
     }
-    
+    } catch (e) {}
+
     // Permissions
-    const origQuery = navigator.permissions.query;
-    navigator.permissions.query = (p) => {
-        if (p.name === 'notifications') return Promise.resolve({ state: 'default' });
-        return origQuery(p);
-    };
-    
+    try {
+        const origQuery = navigator.permissions.query;
+        navigator.permissions.query = (p) => {
+            if (p.name === 'notifications') return Promise.resolve({ state: 'default' });
+            return origQuery(p);
+        };
+    } catch (e) {}
+
     // Plugins (proper prototype chain for instanceof checks)
+    try {
     (function() {
         // Create plugin objects with correct prototype
         function FakePlugin(name, filename, description) {
@@ -384,10 +426,12 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
         Object.defineProperty(navigator, 'plugins', { get: function() { return pluginsObj; }, configurable: true });
         Object.defineProperty(navigator, 'mimeTypes', { get: function() { return mimeTypesObj; }, configurable: true });
     })();
-    
+    } catch (e) {}
+
     // WebRTC protection (improved #170 P1 leak prevention)
     // Prevents local IP / private network leaks via ICE candidates + prototype tampering resistance
     // Uses per-session deterministic fake IP derived from fingerprint seed (not RFC5737, not Math.random)
+    try {
     (function() {
         const RTC = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
         if (!RTC) return;
@@ -405,27 +449,59 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
                     const offer = await origCreateOffer.apply(this, a);
                     return offer;
                 };
+                // Shared candidate-filtering wrapper, reused by both the onicecandidate
+                // property setter and the addEventListener path below, so a page can't
+                // dodge the filter just by listening a different way.
+                function wrapIceHandler(h) {
+                    if (!h) return h;
+                    return function(ev) {
+                        if (ev && ev.candidate && ev.candidate.candidate) {
+                            let c = ev.candidate.candidate;
+                            // replace any private / local IP with safe public fake
+                            c = c.replace(/(\\d{1,3}\\.){3}\\d{1,3}/g, (m) => {
+                                if (/^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|127\\.|169\\.254\\.)/.test(m)) return fakePublicIP;
+                                return m;
+                            });
+                            try { ev.candidate.candidate = c; } catch(e){}
+                        }
+                        return h.call(this, ev);
+                    };
+                }
                 // Mangle candidates to never expose real private IPs
                 const origSet = Object.getOwnPropertyDescriptor(OrigRTC.prototype, "onicecandidate");
                 Object.defineProperty(pc, "onicecandidate", {
                     set: function(h) {
-                        const wrapped = h ? function(ev) {
-                            if (ev && ev.candidate && ev.candidate.candidate) {
-                                let c = ev.candidate.candidate;
-                                // replace any private / local IP with safe public fake
-                                c = c.replace(/(\\d{1,3}\\.){3}\\d{1,3}/g, (m) => {
-                                    if (/^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|127\\.|169\\.254\\.)/.test(m)) return fakePublicIP;
-                                    return m;
-                                });
-                                try { ev.candidate.candidate = c; } catch(e){}
-                            }
-                            return h.call(this, ev);
-                        } : h;
-                        OrigRTC.prototype.onicecandidate = wrapped; // best effort
+                        const wrapped = wrapIceHandler(h);
+                        // Per-instance: invoke the real prototype setter bound to this pc, not a
+                        // direct assignment to OrigRTC.prototype (which would leak the wrapped
+                        // handler to every other RTCPeerConnection instance).
+                        if (origSet && origSet.set) { origSet.set.call(pc, wrapped); }
                     },
-                    get: function() { return OrigRTC.prototype.onicecandidate; }
+                    get: function() { return (origSet && origSet.get) ? origSet.get.call(pc) : undefined; }
                 });
-                pc.createDataChannel = function() { return { label: "stealth", readyState: "open" }; };
+                // Per-instance addEventListener wrap: a page listening via
+                // pc.addEventListener('icecandidate', ...) instead of the onicecandidate
+                // property would otherwise bypass the filter above and see raw candidates.
+                // Route icecandidate listeners through the same wrapper; every other event
+                // type passes straight through to the real addEventListener.
+                // ponytail: removeEventListener isn't wrapped, so removing an icecandidate
+                // listener by its original reference won't unhook the wrapped one; not a
+                // leak vector (filter still applies), just a stale listener if a page relies on it.
+                const origAddEventListener = pc.addEventListener ? pc.addEventListener.bind(pc) : null;
+                if (origAddEventListener) {
+                    pc.addEventListener = function(type, listener, options) {
+                        if (type === "icecandidate") {
+                            return origAddEventListener(type, wrapIceHandler(listener), options);
+                        }
+                        return origAddEventListener(type, listener, options);
+                    };
+                }
+                // createDataChannel: leak protection targets ICE candidates only, so proxy
+                // through to the real implementation instead of stubbing it out.
+                const origCreateDataChannel = pc.createDataChannel ? pc.createDataChannel.bind(pc) : null;
+                if (origCreateDataChannel) {
+                    pc.createDataChannel = function(label, opts) { return origCreateDataChannel(label, opts); };
+                }
                 return pc;
             } catch(e) {
                 return new OrigRTC(config, constraints);
@@ -436,17 +512,24 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
             window.RTCPeerConnection.prototype.__stealthPatched = true;
         }
     })();
-    
+    } catch (e) {}
+
     // Screen / viewport / DPR / orientation consistency (#124 #198) - injected from persona.screen for realistic variation
-    Object.defineProperty(screen, 'width', { get: () => __SCREEN_W__ });
-    Object.defineProperty(screen, 'height', { get: () => __SCREEN_H__ });
-    Object.defineProperty(screen, 'availWidth', { get: () => __SCREEN_AW__ });
-    Object.defineProperty(screen, 'availHeight', { get: () => __SCREEN_AH__ });
-    Object.defineProperty(screen, 'colorDepth', { get: () => __SCREEN_CD__ });
-    Object.defineProperty(screen, 'pixelDepth', { get: () => __SCREEN_PD__ });
-    Object.defineProperty(window, 'devicePixelRatio', { get: () => __DPR__ });
-    Object.defineProperty(screen, 'orientation', { get: () => ({ type: "__ORIENT__", angle: 0, onchange: null, addEventListener: () => {}, removeEventListener: () => {} }) });
-    
+    // Skipped entirely in attach_mode: the real attached display's devicePixelRatio/resolution
+    // must match (Retina/scaled displays are detectable via matchMedia resolution vs DPR mismatch).
+    try {
+        if (!__STEALTH_ATTACH_MODE__) {
+            Object.defineProperty(screen, 'width', { get: () => __SCREEN_W__ });
+            Object.defineProperty(screen, 'height', { get: () => __SCREEN_H__ });
+            Object.defineProperty(screen, 'availWidth', { get: () => __SCREEN_AW__ });
+            Object.defineProperty(screen, 'availHeight', { get: () => __SCREEN_AH__ });
+            Object.defineProperty(screen, 'colorDepth', { get: () => __SCREEN_CD__ });
+            Object.defineProperty(screen, 'pixelDepth', { get: () => __SCREEN_PD__ });
+            Object.defineProperty(window, 'devicePixelRatio', { get: () => __DPR__ });
+            Object.defineProperty(screen, 'orientation', { get: () => ({ type: "__ORIENT__", angle: 0, onchange: null, addEventListener: () => {}, removeEventListener: () => {} }) });
+        }
+    } catch (e) {}
+
     // === End Stealth ===
     """
 
@@ -458,6 +541,10 @@ def _build_stealth_script(seed: str, hw: Dict[str, Any], scr: Dict[str, Any]) ->
     if not _safe_seed:
         _safe_seed = "agentic-default-seed"
     seed = _safe_seed
+
+    # attach_mode flag: gates the navigator.platform / WebGL vendor / screen+DPR overrides so
+    # attach_over_cdp() doesn't contradict the real attached browser's OS/GPU/display.
+    script = script.replace("__ATTACH_MODE__", "true" if attach_mode else "false")
 
     # Inject the runtime seed into the JS IIFE call (makes canvas noise / fp per-session unique)
     # Use json.dumps for safe JS string interpolation (escapes quotes, backslashes, etc.)

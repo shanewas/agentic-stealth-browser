@@ -3,8 +3,8 @@
 Playwright-MCP is the official @playwright/mcp server. It is distinct from
 M1 (CDP-bridge, direct) and M3 (Agentic-Stealth-MCP, our own server).
 
-Key distinguishing test: this adapter calls `playwright_navigate` not
-`stealth_navigate`. M3 calls the latter.
+Key distinguishing test: this adapter calls `browser_navigate` (the current
+@playwright/mcp tool naming) not `stealth_navigate`. M3 calls the latter.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import pytest
 from production.adapters import (
     AdapterCapabilityError,
     AdapterLaunchError,
+    AdapterToolError,
     BACKEND_REGISTRY,
     BackendAdapter,
     Capability,
@@ -236,8 +237,8 @@ async def test_launch_raises_adapter_launch_error_on_spawn_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_navigate_sends_playwright_navigate_tool_call(fake_subprocess):
-    """adapter.navigate(url) must call the playwright_navigate tool — not stealth_navigate."""
+async def test_navigate_sends_browser_navigate_tool_call(fake_subprocess):
+    """adapter.navigate(url) must call the browser_navigate tool — not stealth_navigate."""
     fake = fake_subprocess["fake"]
     _enqueue_init_response(fake)
     # After init, queue a response for the navigate tool call
@@ -252,15 +253,15 @@ async def test_navigate_sends_playwright_navigate_tool_call(fake_subprocess):
     _enqueue_tool_response(fake, 2, [{"type": "text", "text": "navigated"}])
     await adapter.navigate("https://example.com")
 
-    # The tool call message should reference playwright_navigate
+    # The tool call message should reference browser_navigate
     tool_calls = [m for m in fake.queue_write if m.get("method") == "tools/call"]
     assert tool_calls, f"No tools/call sent: {fake.queue_write}"
-    assert tool_calls[0]["params"]["name"] == "playwright_navigate"
+    assert tool_calls[0]["params"]["name"] == "browser_navigate"
     assert tool_calls[0]["params"]["arguments"]["url"] == "https://example.com"
 
 
 @pytest.mark.asyncio
-async def test_click_sends_playwright_click_tool_call(fake_subprocess):
+async def test_click_sends_browser_click_tool_call(fake_subprocess):
     fake = fake_subprocess["fake"]
     _enqueue_init_response(fake)
     _enqueue_tool_response(fake, 2, [{"type": "text", "text": "clicked"}])
@@ -273,12 +274,16 @@ async def test_click_sends_playwright_click_tool_call(fake_subprocess):
 
     await adapter.click("#submit")
     tool_calls = [m for m in fake.queue_write if m.get("method") == "tools/call"]
-    assert tool_calls[0]["params"]["name"] == "playwright_click"
-    assert tool_calls[0]["params"]["arguments"]["selector"] == "#submit"
+    assert tool_calls[0]["params"]["name"] == "browser_click"
+    # 0.0.78 schema: browser_click takes `target` (required; accepts a plain
+    # CSS selector, not only a snapshot ref) + `element` (optional
+    # human-readable description) — no `selector` key.
+    assert tool_calls[0]["params"]["arguments"]["target"] == "#submit"
+    assert tool_calls[0]["params"]["arguments"]["element"] == "#submit"
 
 
 @pytest.mark.asyncio
-async def test_fill_sends_playwright_fill_tool_call(fake_subprocess):
+async def test_fill_sends_browser_type_tool_call(fake_subprocess):
     fake = fake_subprocess["fake"]
     _enqueue_init_response(fake)
     _enqueue_tool_response(fake, 2, [{"type": "text", "text": "filled"}])
@@ -291,9 +296,11 @@ async def test_fill_sends_playwright_fill_tool_call(fake_subprocess):
 
     await adapter.fill("#email", "x@y.com")
     tool_calls = [m for m in fake.queue_write if m.get("method") == "tools/call"]
-    assert tool_calls[0]["params"]["name"] == "playwright_fill"
-    assert tool_calls[0]["params"]["arguments"]["selector"] == "#email"
-    assert tool_calls[0]["params"]["arguments"]["value"] == "x@y.com"
+    assert tool_calls[0]["params"]["name"] == "browser_type"
+    # 0.0.78 schema: browser_type takes `target` (required) + `text`
+    # (required) + optional `element` — no `selector`/`value` keys.
+    assert tool_calls[0]["params"]["arguments"]["target"] == "#email"
+    assert tool_calls[0]["params"]["arguments"]["text"] == "x@y.com"
 
 
 @pytest.mark.asyncio
@@ -391,6 +398,34 @@ def test_capability_gating_helper_raises_when_capability_missing():
     # We don't actually call the tool here — we just confirm the gate
     # itself doesn't fire.
     stripped._require_capability(Capability.NAVIGATE)  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_navigate_raises_adapter_tool_error_on_is_error(fake_subprocess):
+    """A tool-level failure (isError: true) is a valid JSON-RPC response, not
+    a protocol error — the adapter must not swallow it as success."""
+    fake = fake_subprocess["fake"]
+    _enqueue_init_response(fake)
+    adapter = PlaywrightMCPAdapter()
+    await adapter.launch("default", headless=True)
+    fake.queue_write.clear()
+    fake.queue_read.clear()
+
+    fake.queue_read.append(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "content": [{"type": "text", "text": "Error: no element found"}],
+                "isError": True,
+            },
+        }
+    )
+    try:
+        with pytest.raises(AdapterToolError):
+            await adapter.navigate("https://example.com")
+    finally:
+        await adapter.close()
 
 
 @pytest.mark.asyncio

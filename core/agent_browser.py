@@ -2274,7 +2274,9 @@ class AgentBrowser:
             if apply_stealth:
                 session_name = (self.session or {}).get("name", "default-session")
                 fp_seed = f"agentic-{session_name}-canvas-v4"
-                stealth_script = get_stealth_script(fingerprint_seed=fp_seed)
+                stealth_script = get_stealth_script(
+                    fingerprint_seed=fp_seed, attach_mode=True
+                )
                 try:
                     await ctx.add_init_script(stealth_script)
                     stealth_installed = True

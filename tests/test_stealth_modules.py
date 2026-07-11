@@ -89,6 +89,15 @@ class TestGetStealthScript:
         script = get_stealth_script()
         assert "RTCPeerConnection" in script
 
+    def test_webrtc_addeventlistener_icecandidate_filtered(self):
+        # A page listening via pc.addEventListener('icecandidate', ...) must be routed
+        # through the same candidate-filtering wrapper as the onicecandidate property
+        # setter, not left as a raw passthrough that leaks private IPs.
+        script = get_stealth_script()
+        assert "pc.addEventListener" in script
+        assert "wrapIceHandler(listener)" in script
+        assert 'type === "icecandidate"' in script
+
     def test_contains_audio_spoofing(self):
         script = get_stealth_script()
         assert "AudioContext" in script or "AudioC" in script

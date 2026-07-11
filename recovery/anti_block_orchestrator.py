@@ -26,6 +26,7 @@ P2 Recovery Cluster (#112 #139 #151 #157 #171 #184):
 import asyncio
 import time
 import random
+import uuid
 from typing import Dict, Any, Optional, Callable
 from enum import Enum
 from dataclasses import dataclass, field
@@ -145,6 +146,7 @@ class AntiBlockOrchestrator:
             "transient_backoff_multiplier": 0.7,
         },
         "google": {
+            # ponytail: no content-detector for google strategy, falls back to defaults
             "max_retries": 3,
             "base_backoff": 20,
             "max_backoff": 120,
@@ -448,7 +450,7 @@ class AntiBlockOrchestrator:
         status = context.http_status
         response_time = context.response_time
         error_lower = (context.last_error or "").lower()
-        platform = context.platform.lower()
+        platform = (context.platform or "default").lower()
 
         # #171: Distinguish transient network errors (timeouts, DNS, conn resets) from real blocks.
         # Transient: short backoff only, no rotation, no circuit trip, no proxy burn.
@@ -813,7 +815,7 @@ class AntiBlockOrchestrator:
                 )
                 # Create a fresh session
                 new_session = self.session_manager.create_session(
-                    session_name=f"recovery-{context.platform}-{context.attempt}",
+                    session_name=f"recovery-{context.platform}-{context.attempt}-{uuid.uuid4().hex[:8]}",
                     anonymous=True,
                 )
                 # Store as dict for hook compatibility + name for metadata
@@ -825,6 +827,13 @@ class AntiBlockOrchestrator:
                     context.metadata["new_session_name"] = str(new_session)
             except Exception as e:
                 self.logger.log_error("session_rotation_failed", str(e))
+                # If session rotation was the chosen action and failed, recovery failed
+                if action in (
+                    RecoveryAction.ROTATE_SESSION_ONLY,
+                    RecoveryAction.ROTATE_BOTH,
+                ):
+                    self._update_recovery_history(context, action, success=False)
+                    return False
 
         if should_rotate_proxy and self.proxy_manager:
             try:
@@ -848,9 +857,10 @@ class AntiBlockOrchestrator:
                         user=base_user,
                         password=pwd,
                         country=ctry,
-                        session_name=f"recovery-{context.attempt}",
+                        session_name=f"recovery-{context.attempt}-{uuid.uuid4().hex[:8]}",
                         duration_minutes=30,  # shorter duration for recovery
                     )
+                    # ponytail: global mutation, add per-domain lock if orchestrator drives multiple domains concurrently
                     # Ensure manager state is updated for future use
                     self.proxy_manager.current_config = new_config
                     context.metadata["new_proxy"] = new_config.session_name
@@ -858,6 +868,13 @@ class AntiBlockOrchestrator:
                     context.metadata["new_proxy_config"] = new_config.to_safe_dict()
             except Exception as e:
                 self.logger.log_error("proxy_rotation_failed", str(e))
+                # If proxy rotation was the chosen action and failed, recovery failed
+                if action in (
+                    RecoveryAction.ROTATE_PROXY_ONLY,
+                    RecoveryAction.ROTATE_BOTH,
+                ):
+                    self._update_recovery_history(context, action, success=False)
+                    return False
 
         # Invoke wired rotation relaunch hook (from AgentBrowser) so that proxy/session rotation actually takes effect on live browser/page
         # This completes the recovery rotation loop for #38/#16 etc.
@@ -898,11 +915,6 @@ class AntiBlockOrchestrator:
 
         await asyncio.sleep(delay)
 
-        # Tentative history update (refined on next success path in execute/detect)
-        self._update_recovery_history(
-            context, action, success=(action not in (RecoveryAction.FAIL_FAST,))
-        )
-
         return context.attempt < strategy.get("max_retries", 4)
 
     async def execute_with_recovery(
@@ -920,6 +932,7 @@ class AntiBlockOrchestrator:
         context = RecoveryContext(platform=platform, url=url)
         strategy = self.get_strategy(platform)
         max_retries = max_retries or strategy["max_retries"]
+        circuit_breaker_hit = False
 
         for attempt in range(1, max_retries + 1):
             context.attempt = attempt
@@ -930,6 +943,7 @@ class AntiBlockOrchestrator:
                 self.logger.log_action(
                     "circuit_breaker_blocked_execute", {"platform": platform}
                 )
+                circuit_breaker_hit = True
                 break
 
             try:
@@ -947,8 +961,14 @@ class AntiBlockOrchestrator:
                 block_type = await self.detect_block(context)
                 if block_type == BlockType.NONE:
                     self._reset_circuit(key)
+                    # Record with actual recovery action if one was taken, else NOOP
+                    recorded_action = (
+                        context.recovery_action
+                        if context.recovery_action
+                        else RecoveryAction.NOOP
+                    )
                     self._update_recovery_history(
-                        context, RecoveryAction.NOOP, success=True
+                        context, recorded_action, success=True
                     )
                     return result
 
@@ -965,6 +985,13 @@ class AntiBlockOrchestrator:
                 if not should_continue:
                     raise
 
+        if circuit_breaker_hit:
+            raise MaxRetriesExceeded(
+                f"Circuit breaker open for {platform}",
+                platform=platform,
+                max_retries=max_retries,
+                last_error="circuit_breaker_open",
+            ) from None
         raise MaxRetriesExceeded(
             f"Max retries exceeded for {platform} after {max_retries} attempts",
             platform=platform,

@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import asyncio
 import time
+from unittest.mock import MagicMock
 from recovery.anti_block_orchestrator import (
     AntiBlockOrchestrator,
     BlockType,
@@ -322,6 +323,27 @@ class TestRecoveryHistoryLearning:
         orch._update_recovery_history(ctx, RecoveryAction.BACKOFF, success=False)
         action = orch._decide_recovery_action(ctx, BlockType.HARD_RATE_LIMIT)
         assert action == RecoveryAction.ROTATE_BOTH
+
+
+class TestRotationFailureHistory:
+    async def test_session_rotation_failure_records_history_and_fails(self):
+        # ROTATE_SESSION_ONLY chosen (linkedin's preferred_first_action), but the
+        # session_manager raises -> recover() must record the failed action in
+        # recovery history (so history-learning can demote it) before returning False.
+        session_manager = MagicMock()
+        session_manager.create_session.side_effect = RuntimeError("boom")
+        orch = AntiBlockOrchestrator(session_manager=session_manager)
+        orch._update_recovery_history = MagicMock(wraps=orch._update_recovery_history)
+        ctx = _make_ctx(
+            platform="linkedin", url="https://linkedin.com/feed", http_status=429
+        )
+
+        result = await orch.recover(ctx)
+
+        assert result is False
+        orch._update_recovery_history.assert_called_with(
+            ctx, RecoveryAction.ROTATE_SESSION_ONLY, success=False
+        )
 
 
 class TestMaxRetriesExceeded:

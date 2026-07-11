@@ -9,6 +9,7 @@ Public surface:
     Capability             - the feature enum
     AdapterLaunchError     - cannot start (runtime)
     AdapterCapabilityError - cannot perform a requested action
+    AdapterToolError       - MCP tool call reported isError: true
     AdapterNotFoundError   - get_adapter() was called with an unknown name
     BACKEND_REGISTRY       - mutable dict[name -> Adapter class]
     get_adapter(name)      - registry lookup with friendly error
@@ -21,6 +22,7 @@ from production.adapters.base import (
     AdapterCapabilityError,
     AdapterLaunchError,
     AdapterNotFoundError,
+    AdapterToolError,
     BackendAdapter,
     Capability,
 )
@@ -103,6 +105,7 @@ __all__ = [
     "AdapterCapabilityError",
     "AdapterLaunchError",
     "AdapterNotFoundError",
+    "AdapterToolError",
     "BACKEND_REGISTRY",
     "BackendAdapter",
     "Capability",

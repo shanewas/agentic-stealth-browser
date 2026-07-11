@@ -24,6 +24,7 @@ from production.adapters._jsonrpc_stdio import JsonRpcStdioClient
 from production.adapters.base import (
     AdapterCapabilityError,
     AdapterLaunchError,
+    AdapterToolError,
     Capability,
 )
 
@@ -118,7 +119,7 @@ class AgenticStealthMCPAdapter:
                     "protocolVersion": "2024-11-05",
                     "clientInfo": {
                         "name": "agentic-stealth-browser-dashboard",
-                        "version": "2.5.0",
+                        "version": "2.6.0",
                     },
                     "capabilities": {},
                 },
@@ -199,9 +200,11 @@ class AgenticStealthMCPAdapter:
         return str(path)
 
     async def status(self) -> dict[str, Any]:
+        alive = self._proc is not None and self._proc.returncode is None
         return {
             "backend": self.name,
-            "running": self._proc is not None and self._proc.returncode is None,
+            "connected": alive,
+            "running": alive,  # back-compat alias; "connected" is canonical
             "headless": self._headless,
             "profile": self._profile,
         }
@@ -215,7 +218,12 @@ class AgenticStealthMCPAdapter:
         response = await self._client.request(
             "tools/call", {"name": name, "arguments": arguments}
         )
-        return response.get("result", {})
+        result = response.get("result", {})
+        if result.get("isError"):
+            raise AdapterToolError(
+                f"MCP tool {name!r} failed: {result.get('content')!r}"
+            )
+        return result
 
     def _require_capability(self, cap: Capability) -> None:
         """Raise AdapterCapabilityError when the active adapter does not
