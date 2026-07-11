@@ -1,0 +1,3 @@
+baseline.json
+assets/*
+!assets/.gitkeep
