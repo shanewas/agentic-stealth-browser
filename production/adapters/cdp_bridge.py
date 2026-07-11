@@ -14,6 +14,7 @@ running and reachable at the CDP endpoint.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from playwright.async_api import (
@@ -72,17 +73,24 @@ class CDPBridgeAdapter:
         return capability in self.capabilities()
 
     # ------------------------------------------------------------------ launch
-    async def launch(self, endpoint: str, headless: bool = True) -> None:
+    async def launch(self, profile: str, headless: bool = True) -> None:
         """Connect to an existing CDP endpoint. Does NOT spawn a new browser.
 
         Args:
-            endpoint: ws:// or wss:// URL of the Chrome DevTools Protocol server.
+            profile: either a raw ws:// / wss:// / http(s):// CDP endpoint URL
+                (back-compat with direct callers of this adapter), or a
+                profile name — consistent with the base.py contract and the
+                M2/M3 adapters — resolved to an endpoint via the
+                ``CDP_ENDPOINT_<PROFILE>`` (or generic ``CDP_ENDPOINT``)
+                environment variable.
             headless: cosmetic flag, passed to spec but the remote browser's
                       display state is determined by its own launch args.
 
         Raises:
-            AdapterLaunchError: if the connection cannot be established.
+            AdapterLaunchError: if the connection cannot be established, or
+                (for a profile name) if no endpoint is configured for it.
         """
+        endpoint = self._resolve_endpoint(profile)
         self._endpoint = endpoint
         self._playwright = await async_playwright().start()
         try:
@@ -102,6 +110,23 @@ class CDPBridgeAdapter:
         # Create a fresh context for this adapter's use. Adopt vs. own is tracked.
         self._context = await self._browser.new_context()
         self._owns_page = True
+
+    # ponytail: profile -> endpoint resolution is a flat env-var lookup, not
+    # a real profile registry. Fine while operators set one CDP target per
+    # profile by hand; upgrade to a config-file-backed mapping if/when the
+    # dashboard needs to drive many named CDP profiles at once.
+    @staticmethod
+    def _resolve_endpoint(profile: str) -> str:
+        if profile.startswith(("ws://", "wss://", "http://", "https://")):
+            return profile
+        env_key = f"CDP_ENDPOINT_{profile.upper().replace('-', '_')}"
+        endpoint = os.environ.get(env_key) or os.environ.get("CDP_ENDPOINT")
+        if not endpoint:
+            raise AdapterLaunchError(
+                f"No CDP endpoint configured for profile {profile!r}; "
+                f"set {env_key} or CDP_ENDPOINT to a ws:// CDP URL"
+            )
+        return endpoint
 
     # ------------------------------------------------------------------ close
     async def close(self) -> None:
@@ -180,6 +205,7 @@ class CDPBridgeAdapter:
         return {
             "backend": self.name,
             "connected": connected,
+            "running": connected,  # back-compat alias; "connected" is canonical
             "endpoint": self._endpoint,
             "owns_page": self._owns_page,
         }

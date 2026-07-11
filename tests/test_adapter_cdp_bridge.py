@@ -293,3 +293,28 @@ async def test_status_returns_dict_with_cdp_metadata(fake_playwright):
     # Minimum contract: backend name, connected state
     assert status.get("backend") == "cdp-bridge"
     assert status.get("connected") is True
+    # "running" kept as a back-compat alias for callers that read the M2/M3 key
+    assert status.get("running") is True
+
+
+# ---------------------------------------------------------------------------
+# Profile-name -> endpoint resolution (uniform launch(profile) contract)
+# ---------------------------------------------------------------------------
+
+
+async def test_launch_resolves_profile_name_from_env_var(fake_playwright, monkeypatch):
+    """launch() must accept a profile name (consistent with M2/M3) and resolve
+    it to a CDP endpoint via CDP_ENDPOINT_<PROFILE>, not treat it as a literal
+    endpoint URL."""
+    monkeypatch.setenv("CDP_ENDPOINT_DEFAULT", "ws://localhost:9333")
+    adapter = CDPBridgeAdapter()
+    await adapter.launch("default", headless=True)
+    fake_playwright["pw"].chromium.connect_over_cdp.assert_called_once_with(
+        "ws://localhost:9333"
+    )
+
+
+async def test_launch_raises_when_profile_has_no_configured_endpoint(fake_playwright):
+    adapter = CDPBridgeAdapter()
+    with pytest.raises(AdapterLaunchError, match="No CDP endpoint configured"):
+        await adapter.launch("unconfigured-profile", headless=True)

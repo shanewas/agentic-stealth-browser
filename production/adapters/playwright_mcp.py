@@ -20,6 +20,7 @@ from production.adapters._jsonrpc_stdio import JsonRpcStdioClient
 from production.adapters.base import (
     AdapterCapabilityError,
     AdapterLaunchError,
+    AdapterToolError,
     Capability,
 )
 
@@ -35,11 +36,13 @@ def _subprocess_env() -> dict[str, str]:
     }
 
 
-# Pin a specific playwright-mcp version. The latest is fine; pin for
-# reproducibility. Update this when a new release is tested.
+# Pinned playwright-mcp version (not @latest — @latest is not a pin and lets
+# upstream tool-name/behavior changes silently break this adapter). Update
+# this deliberately when a new release has been tested against the tool
+# names below.
 PLAYWRIGHT_MCP_NPX_ARGS = [
     "-y",
-    "@playwright/mcp@latest",
+    "@playwright/mcp@0.0.78",
     "--isolated",
 ]
 
@@ -130,7 +133,7 @@ class PlaywrightMCPAdapter:
                     "protocolVersion": "2024-11-05",
                     "clientInfo": {
                         "name": "agentic-stealth-browser",
-                        "version": "2.5.0",
+                        "version": "2.6.0",
                     },
                     "capabilities": {},
                 },
@@ -175,34 +178,45 @@ class PlaywrightMCPAdapter:
             pass  # already dead
 
     # ------------------------------------------------------------------ actions
+    # Verified against @playwright/mcp 0.0.78 (playwright-core coreBundle.js
+    # tool schemas, packages/playwright-core/src/tools/backend/{snapshot,navigate}.ts):
+    # browser_click / browser_type take `target` (required) + `element`
+    # (optional, human-readable description) — no `selector` key. `target` is
+    # NOT limited to snapshot refs: targetLocators() only treats it as a ref
+    # when it matches /^(f\d+)?e\d+$/, otherwise it's used directly as a
+    # Playwright selector string. So a CSS selector in `target` works with no
+    # browser_snapshot round-trip.
     async def navigate(self, url: str) -> None:
         self._require_capability(Capability.NAVIGATE)
-        await self._call_tool("playwright_navigate", {"url": url})
+        await self._call_tool("browser_navigate", {"url": url})
 
     async def click(self, selector: str) -> None:
         self._require_capability(Capability.CLICK)
-        await self._call_tool("playwright_click", {"selector": selector})
+        await self._call_tool(
+            "browser_click", {"element": selector, "target": selector}
+        )
 
     async def fill(self, selector: str, value: str) -> None:
         self._require_capability(Capability.FILL)
-        await self._call_tool("playwright_fill", {"selector": selector, "value": value})
+        await self._call_tool(
+            "browser_type", {"element": selector, "target": selector, "text": value}
+        )
 
     async def screenshot(self, path: Optional[str] = None) -> str:
         self._require_capability(Capability.SCREENSHOT)
         if path is None:
             path = "screenshot.png"
-        # playwright-mcp exposes playwright_take_screenshot (or browser_take_screenshot,
-        # depending on version). Try the common names; the test will accept any.
-        try:
-            await self._call_tool("browser_take_screenshot", {"filename": path})
-        except RuntimeError:
-            await self._call_tool("playwright_take_screenshot", {"filename": path})
+        # 0.0.78 schema: browser_take_screenshot takes `filename` (optional str).
+        # No fallback tool name needed — pinned version only exposes this one.
+        await self._call_tool("browser_take_screenshot", {"filename": path})
         return str(path)
 
     async def status(self) -> dict[str, Any]:
+        alive = self._proc is not None and self._proc.returncode is None
         return {
             "backend": self.name,
-            "running": self._proc is not None and self._proc.returncode is None,
+            "connected": alive,
+            "running": alive,  # back-compat alias; "connected" is canonical
             "headless": self._headless,
             "profile": self._profile,
         }
@@ -216,7 +230,12 @@ class PlaywrightMCPAdapter:
         response = await self._client.request(
             "tools/call", {"name": name, "arguments": arguments}
         )
-        return response.get("result", {})
+        result = response.get("result", {})
+        if result.get("isError"):
+            raise AdapterToolError(
+                f"MCP tool {name!r} failed: {result.get('content')!r}"
+            )
+        return result
 
     def _require_capability(self, cap: Capability) -> None:
         """Raise AdapterCapabilityError when the active adapter does not

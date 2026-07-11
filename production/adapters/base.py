@@ -46,6 +46,20 @@ class AdapterCapabilityError(RuntimeError):
     """
 
 
+class AdapterToolError(RuntimeError):
+    """Raised when an MCP tool call completes as a valid JSON-RPC response
+    but reports a tool-level failure (``result["isError"] is True``).
+
+    MCP servers report a failed tool execution (bad selector, navigation
+    timeout, etc.) as a *successful* JSON-RPC call whose result carries
+    ``isError: true`` — not as a JSON-RPC protocol-level error. Without this
+    exception, adapters would silently treat a failed navigate/click/fill/
+    screenshot as success. Distinct from AdapterLaunchError (process/handshake
+    failures) and the plain RuntimeError raised by JsonRpcStdioClient for
+    JSON-RPC protocol errors (e.g. unknown method).
+    """
+
+
 class AdapterNotFoundError(LookupError):
     """Raised by get_adapter() when the requested name is not in
     BACKEND_REGISTRY. Inherits from LookupError (the natural superclass for
