@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] — Stealth & MCP Hardening (2026-07-12)
+
+### Added
+- **`attach_mode` param** (`stealth/advanced_stealth.py`): `get_stealth_script(..., attach_mode=True)` skips `navigator.platform` / WebGL vendor-renderer / screen-DPR overrides when attaching to a real browser, so the injected fingerprint no longer contradicts the real OS/GPU. `core/agent_browser.py`'s `attach_over_cdp()` now passes `attach_mode=True`.
+- **`AdapterToolError`** (`production/adapters/`): raised when an MCP tool result carries `isError: true` — previously a failed `navigate`/`click`/`fill` call reported silent success.
+- **Canonical `connected` field** on adapter `status()` (`production/adapters/`), with a `running` back-compat alias.
+- **CDP bridge profile resolution** (`production/adapters/cdp_bridge.py`): `launch(profile)` now accepts either a raw `ws/wss/http(s)` endpoint or a profile name resolved via `CDP_ENDPOINT_<PROFILE>` / `CDP_ENDPOINT` env, aligning its signature with the `BackendAdapter` protocol and sibling adapters.
+- Adapter, stealth, and recovery unit tests covering the above (`tests/test_adapter_*.py`, `tests/test_stealth_modules.py`, `tests/test_recovery_state_machine.py`).
+- `CLAUDE.md`: contributor guidance (setup, test commands mirroring CI, architecture map, conventions).
+
+### Fixed
+- **Per-patch isolation** (`stealth/advanced_stealth.py`): each stealth patch now runs in its own try/catch, so one API mismatch no longer aborts every patch queued after it.
+- **Rotation failure correctness** (`recovery/anti_block_orchestrator.py`): a failed `ROTATE_*` action now returns `False` and records `_update_recovery_history(success=False)` instead of silently succeeding; per-attempt session/proxy names get a uuid suffix to avoid collisions; a redundant tentative history update was removed.
+- **playwright-mcp pin** (`production/adapters/playwright_mcp.py`): pinned to `@playwright/mcp@0.0.78` with corrected `browser_navigate`/`browser_click`/`browser_type` schema (`element`/`target`/`text`).
+
+### Security
+- **WebRTC leak fix** (`stealth/advanced_stealth.py`): `onicecandidate` is now rebound per-instance instead of on the shared prototype (no cross-instance/global leak); `addEventListener('icecandidate', ...)` listeners are now filtered too; `createDataChannel` restored to a real passthrough.
+- **PolicyEngine + ApprovalGate wiring** (`production/mcp_server.py`): both now sit in the `tools/call` dispatch path and workflow replay. Fail-open by default — no policy files means allow-all and auto-approve, so existing flows are unchanged — operators opt into enforcement via `STEALTH_MCP_POLICY` env or an approval callback.
+- **Honesty docstring** (`production/mcp_session_isolation.py`): documents that `SessionEnforcer` is defined and tested but NOT wired into the dispatch path — inert until a multi-client transport exists (single-client stdio has no per-context token).
+
+### Changed
+- `core/agent_browser.py`: `attach_over_cdp()` passes `attach_mode=True` through to the stealth script generator (see Added).
+
+---
+
 ## [2.5.0] — Real Dashboard Backend Adapters (#444) (2026-06-07)
 
 ### Added
@@ -405,7 +430,8 @@ See the full v0.9.0 milestone and the stacked PRs #383/#384/#385 for implementat
 
 ---
 
-[unreleased]: https://github.com/shanewas/agentic-stealth-browser/compare/v2.3.0...HEAD
+[unreleased]: https://github.com/shanewas/agentic-stealth-browser/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.6.0
 [2.3.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.3.0
 [2.1.1]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.1.1
 [2.1.0]: https://github.com/shanewas/agentic-stealth-browser/releases/tag/v2.1.0

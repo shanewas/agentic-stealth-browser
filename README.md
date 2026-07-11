@@ -185,6 +185,29 @@ live E2E (`RUN_E2E_ANTI_BLOCK=1` to enable).
 
 ---
 
+## New in v2.6.0
+
+- **Stealth patch isolation** — per-patch try/catch in `advanced_stealth.py`; one
+  API mismatch no longer aborts every patch queued after it
+- **Attach-mode fingerprint coherence** — new `attach_mode` skips
+  navigator.platform / WebGL vendor-renderer / screen-DPR overrides that would
+  otherwise contradict a real attached browser's OS/GPU
+- **WebRTC leak hardening** — per-instance `onicecandidate` rebind (no
+  prototype-global leak); the `addEventListener('icecandidate')` variant is
+  now filtered too
+- **MCP policy/approval gates** — `PolicyEngine` + `ApprovalGate` wired into
+  the dispatch path, fail-open by default (opt-in enforcement via
+  `STEALTH_MCP_POLICY` env)
+- **Adapter `isError` surfacing** — failed MCP tool calls now raise
+  `AdapterToolError` instead of reporting silent success; playwright-mcp
+  pinned to 0.0.78 with the corrected tool schema
+- **Recovery rotation-failure correctness** — failed rotations now propagate
+  and record history instead of silently succeeding
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+
+---
+
 ## New in v2.5.0
 
 - **BackendAdapter protocol** — pluggable execution backends (M0–M4 shipped)
