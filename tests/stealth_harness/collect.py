@@ -119,7 +119,9 @@ async def collect() -> dict:
                 "ja4": (tls.get("tls") or {}).get("ja4"),
                 "ja4_r": (tls.get("tls") or {}).get("ja4_r"),
                 "peetprint_hash": (tls.get("tls") or {}).get("peetprint_hash"),
-                "akamai_h2_hash": (tls.get("http2") or {}).get("akamai_fingerprint_hash"),
+                "akamai_h2_hash": (tls.get("http2") or {}).get(
+                    "akamai_fingerprint_hash"
+                ),
                 "user_agent_seen": tls.get("user_agent"),
                 "has_pq_keyshare": "X25519MLKEM768" in raw or "4588" in raw,
             }
@@ -158,4 +160,5 @@ async def collect() -> dict:
 
 if __name__ == "__main__":
     import asyncio
+
     print(json.dumps(asyncio.run(collect()), indent=2))

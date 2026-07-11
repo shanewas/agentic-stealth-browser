@@ -47,8 +47,11 @@ def _reference():
 @pytest.fixture(scope="module")
 def measured():
     if os.environ.get("STEALTH_HARNESS_LIVE") != "1":
-        pytest.skip("STEALTH_HARNESS_LIVE!=1 — set it on a real browser env to grade stealth")
+        pytest.skip(
+            "STEALTH_HARNESS_LIVE!=1 — set it on a real browser env to grade stealth"
+        )
     from tests.stealth_harness.collect import collect
+
     try:
         data = asyncio.run(collect())
     except Exception as e:  # engine/browser not installed on this box
@@ -60,16 +63,21 @@ def measured():
 
 # --- P1 CDP -----------------------------------------------------------------
 
+
 def test_webdriver_is_undefined_not_false(measured):
     # `false` means "patched but present" — real Chrome has it UNDEFINED.
-    assert measured["probes"].get("webdriver") in (None, "undefined"), measured["probes"].get("webdriver")
+    assert measured["probes"].get("webdriver") in (None, "undefined"), measured[
+        "probes"
+    ].get("webdriver")
 
 
 # --- P1 headless tells ------------------------------------------------------
 
+
 def test_renderer_is_not_software(measured):
-    assert not measured["engine"].get("renderer_is_software"), \
+    assert not measured["engine"].get("renderer_is_software"), (
         f"software renderer is a headless/GPU-less tell: {measured['probes'].get('webglRenderer')}"
+    )
 
 
 def test_plugins_present(measured):
@@ -78,14 +86,20 @@ def test_plugins_present(measured):
 
 # --- P1 TLS -----------------------------------------------------------------
 
-@pytest.mark.skipif(_reference() is None, reason="no reference-chrome-*.json captured yet")
+
+@pytest.mark.skipif(
+    _reference() is None, reason="no reference-chrome-*.json captured yet"
+)
 def test_ja4_matches_reference(measured):
     ref = _reference()
-    assert measured["tls"].get("ja4") == ref["tls"]["ja4"], \
+    assert measured["tls"].get("ja4") == ref["tls"]["ja4"], (
         f"JA4 {measured['tls'].get('ja4')} != reference {ref['tls']['ja4']}"
+    )
 
 
-@pytest.mark.skipif(_reference() is None, reason="no reference-chrome-*.json captured yet")
+@pytest.mark.skipif(
+    _reference() is None, reason="no reference-chrome-*.json captured yet"
+)
 def test_http2_matches_reference(measured):
     ref = _reference()
     assert measured["tls"].get("akamai_h2_hash") == ref["tls"]["akamai_h2_hash"]
@@ -98,12 +112,16 @@ def test_post_quantum_keyshare_present(measured):
 
 # --- P1 coherence -----------------------------------------------------------
 
+
 def test_ua_major_matches_uadata(measured):
-    assert measured["engine"].get("ua_matches_uaData"), \
+    assert measured["engine"].get("ua_matches_uaData"), (
         f"UA major {measured['engine'].get('ua_major')} != uaData {measured['engine'].get('uaData_major')}"
+    )
 
 
-@pytest.mark.skipif(_reference() is None, reason="no reference-chrome-*.json captured yet")
+@pytest.mark.skipif(
+    _reference() is None, reason="no reference-chrome-*.json captured yet"
+)
 def test_ua_major_matches_reference(measured):
     ref = _reference()
     assert measured["engine"].get("ua_major") == ref["engine"]["ua_major"]
@@ -111,7 +129,9 @@ def test_ua_major_matches_reference(measured):
 
 # --- P3 trusted input -------------------------------------------------------
 
+
 def test_mouse_events_are_trusted(measured):
     ti = measured["trusted_input"]
-    assert ti.get("mousemove") is True and ti.get("wheel") is True, \
+    assert ti.get("mousemove") is True and ti.get("wheel") is True, (
         f"synthetic input is untrusted (isTrusted=false): {ti}"
+    )
