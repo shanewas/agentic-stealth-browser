@@ -29,7 +29,9 @@ from mcp_security import (
     MCPSecurityContext,
     sanitize_tool_description,
 )
+from production.approval_gate import ApprovalDecision, ApprovalGate
 from production.mcp_input_validator import InputValidationError, validate_tool_input
+from production.policy_engine import PolicyEngine
 
 
 JSONRPC_VERSION = "2.0"
@@ -293,6 +295,28 @@ class StealthMCPServer:
         except Exception:
             self._bundled_workflow_root = None
         self._tools: Dict[str, ToolSpec] = self._build_tools()
+
+        # Security gates wired into the dispatch path (see handle_jsonrpc tools/call
+        # and _tool_stealth_replay). Posture:
+        #   - PolicyEngine: step-type / domain allow-lists. Enforced by default from
+        #     policy YAML in ~/.agentic-browser/policies. With no policy files the
+        #     default policy allows everything (fail-open), so normal flows are unchanged.
+        #     Set STEALTH_MCP_POLICY to activate a named loaded policy.
+        #   - ApprovalGate: sensitive-action approval. Permissive by default — there is
+        #     no human in the loop over headless stdio, so we auto-approve to avoid
+        #     deadlocking launch/navigate/replay. An operator (SDK/dashboard) enables
+        #     real enforcement by installing an approval callback via
+        #     self._approval_gate.set_allow_callback(...).
+        self._policy_engine = PolicyEngine()
+        try:
+            self._policy_engine.load_policies()
+        except Exception:
+            pass
+        active_policy = os.getenv("STEALTH_MCP_POLICY")
+        if active_policy:
+            self._policy_engine.set_active(active_policy)
+        self._approval_gate = ApprovalGate(auto_approve_known_domains=True)
+        self._approval_gate.set_allow_callback(lambda req: ApprovalDecision.ALLOWED)
 
     def _get_agent_browser_cls(self):
         if self._agent_browser_cls is not None:
@@ -1507,6 +1531,38 @@ class StealthMCPServer:
 
         workflow = load_workflow(str(resolved_workflow_path))
 
+        # Security gate: enforce policy (step-type / domain allow-lists) on every step
+        # before executing any of them. Default policy is fail-open; operator policy
+        # YAML makes this deny blocked step types / domains and require approval.
+        for idx, step in enumerate(workflow.steps):
+            decision = self._policy_engine.check_step(
+                step.type, str(step.params.get("url", ""))
+            )
+            if not decision["allowed"]:
+                raise ToolError(
+                    "MCP_POLICY_DENIED",
+                    f"Workflow step {idx} ('{step.type}') denied by policy: {decision['reason']}",
+                    {
+                        "step_index": idx,
+                        "step_type": step.type,
+                        "reason": decision["reason"],
+                    },
+                )
+            if decision.get("approval_required"):
+                appr = self._approval_gate.check_sensitive(
+                    step.type, step.params, str(session_name or "")
+                )
+                if appr.decision != ApprovalDecision.ALLOWED:
+                    raise ToolError(
+                        "MCP_APPROVAL_REQUIRED",
+                        f"Workflow step {idx} ('{step.type}') requires approval: {appr.reason}",
+                        {
+                            "step_index": idx,
+                            "step_type": step.type,
+                            "request_id": appr.request_id,
+                        },
+                    )
+
         if session_name:
             resolved_name, browser = await self._resolve_browser(session_name)
         else:
@@ -1750,6 +1806,26 @@ class StealthMCPServer:
                     "MCP_VALIDATION_ERROR",
                     f"Invalid input for {ive.tool_name}: {ive.field} {ive.reason}",
                     {"tool": ive.tool_name, "field": ive.field, "reason": ive.reason},
+                )
+                return self._jsonrpc_result(
+                    msg_id, self._tool_result(payload, is_error=True)
+                )
+
+            # Security gate: sensitive-action approval before handler execution.
+            # No-op for non-sensitive tools; permissive unless an operator installs an
+            # approval callback (see __init__). Blocks on DENIED/PENDING when enforced.
+            gate = self._approval_gate.check_sensitive(
+                tool_name, validated_args, str(validated_args.get("session_name") or "")
+            )
+            if gate.decision != ApprovalDecision.ALLOWED:
+                payload = self._tool_error_payload(
+                    "MCP_APPROVAL_REQUIRED",
+                    f"Action '{tool_name}' requires approval: {gate.reason}",
+                    {
+                        "tool": tool_name,
+                        "request_id": gate.request_id,
+                        "decision": gate.decision.value,
+                    },
                 )
                 return self._jsonrpc_result(
                     msg_id, self._tool_result(payload, is_error=True)
