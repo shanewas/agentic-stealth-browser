@@ -94,7 +94,7 @@ class AuditLogger:
             try:
                 h.close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
         self._std_log_queue: "queue.Queue[logging.LogRecord]" = queue.Queue(
             maxsize=2000
@@ -340,7 +340,9 @@ class AuditLogger:
                     try:
                         entries.append(json.loads(line))
                     except Exception:
-                        pass  # tolerate corrupt lines
+                        logging.getLogger(__name__).debug(
+                            "suppressed exception", exc_info=True
+                        )  # tolerate corrupt lines
 
         if since_ts or before_ts:
             filtered = []
@@ -391,7 +393,9 @@ class AuditLogger:
                 try:
                     self._write_audit_line(entry)
                 except Exception:
-                    pass  # never crash writer
+                    logging.getLogger(__name__).debug(
+                        "suppressed exception", exc_info=True
+                    )  # never crash writer
                 finally:
                     self._audit_queue.task_done()
             except queue.Empty:
@@ -405,10 +409,12 @@ class AuditLogger:
                 try:
                     self._write_audit_line(entry)
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).debug(
+                        "suppressed exception", exc_info=True
+                    )
                 self._audit_queue.task_done()
         except queue.Empty:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
     def _purge_old_logs(self) -> None:
         """Retention: delete log files for this session older than AGENTIC_AUDIT_RETENTION_DAYS."""
@@ -422,9 +428,11 @@ class AuditLogger:
                     if p.is_file() and p.stat().st_mtime < cutoff:
                         p.unlink()
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).debug(
+                        "suppressed exception", exc_info=True
+                    )
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
     def _rotate_jsonl(self) -> None:
         """Rotate self.audit_file into numbered backups (audit_file.1, .2, ...)."""
@@ -466,7 +474,7 @@ class AuditLogger:
                 self._rotate_jsonl()
                 self._prev_hash = "0" * 64
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
         prev = self._prev_hash if self._prev_hash is not None else "0" * 64
         canonical = json.dumps(entry, sort_keys=True, ensure_ascii=False)
         entry_hash = hmac.new(
@@ -486,12 +494,14 @@ class AuditLogger:
                 try:
                     self._listener.stop()
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).debug(
+                        "suppressed exception", exc_info=True
+                    )
             # Give writer thread a moment
             if hasattr(self, "_writer_thread") and self._writer_thread.is_alive():
                 self._writer_thread.join(timeout=1.0)
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
     def get_correlation_id(self) -> str:
         """P2 #128: Get the correlation ID for this logger."""
@@ -506,7 +516,7 @@ class AuditLogger:
         try:
             self.close()
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
 
 class DebugReporter:
@@ -548,7 +558,7 @@ class DebugReporter:
             try:
                 return self.tls_manager.get_profile()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
         if self.tls_manager and hasattr(self.tls_manager, "region"):
             return {
                 "region": getattr(self.tls_manager, "region", "global"),

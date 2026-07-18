@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import ipaddress
 import json
+import logging
 import os
 import socket
 import sys
@@ -100,7 +101,7 @@ def is_url_safe(url: str) -> bool:
                 if ip in network:
                     return True
         except ValueError:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
         return False
 
     try:
@@ -182,7 +183,7 @@ def is_loopback_host(url: str) -> bool:
         ip = ipaddress.ip_address(host)
         return ip.is_loopback
     except ValueError:
-        pass
+        logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
     # Hostname — try DNS.
     try:
         for family, _, _, _, sockaddr in socket.getaddrinfo(host, None):
@@ -311,7 +312,7 @@ class StealthMCPServer:
         try:
             self._policy_engine.load_policies()
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
         active_policy = os.getenv("STEALTH_MCP_POLICY")
         if active_policy:
             self._policy_engine.set_active(active_policy)
@@ -792,7 +793,7 @@ class StealthMCPServer:
             try:
                 await browser.close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
             finally:
                 self._sessions.pop(name, None)
                 self._tab_ids.pop(name, None)
@@ -895,7 +896,7 @@ class StealthMCPServer:
             try:
                 stale.unlink(missing_ok=True)
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
     def _guard_observability_payload(
         self, payload: Dict[str, Any], endpoint: str
@@ -951,7 +952,7 @@ class StealthMCPServer:
             try:
                 await self._sessions[session_name].close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
             finally:
                 self._sessions.pop(session_name, None)
 
@@ -1337,14 +1338,16 @@ class StealthMCPServer:
                             "these are rejected.",
                         )
             except (ValueError, TypeError, ipaddress.AddressValueError):
-                pass  # hostname or parse issue; will surface later or was already validated
+                logging.getLogger(__name__).debug(
+                    "suppressed exception", exc_info=True
+                )  # hostname or parse issue; will surface later or was already validated
 
         session_name = str(args.get("session_name") or "default")
         if session_name in self._sessions:
             try:
                 await self._sessions[session_name].close()
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
             finally:
                 self._sessions.pop(session_name, None)
 
@@ -1438,9 +1441,11 @@ class StealthMCPServer:
                         if asyncio.iscoroutine(val):
                             val = await val
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).debug(
+                        "suppressed exception", exc_info=True
+                    )
         except Exception:
-            pass
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
         recorder = WorkflowRecorder()
 

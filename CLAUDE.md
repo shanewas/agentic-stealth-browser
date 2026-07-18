@@ -75,5 +75,5 @@ Two run modes: **launch** (spawn fresh Chromium, full stealth incl. TLS) vs **at
 
 - pytest `asyncio_mode = auto` — no `@pytest.mark.asyncio` needed on async tests.
 - Markers: `e2e`, `live_network`, `slow`, `contract`, `mcp`. Default local `pytest` runs everything under `tests/`; CI narrows to `not e2e and not live_network`.
-- `test_recovery_phase1.py`, `test_basic.py`, `test_phase7_fixes.py` excluded from CI test job — don't rely on them gating.
+- `test_recovery_phase1.py` and `test_phase7_fixes.py` now run in CI (`-m "not e2e"` excludes their browser-launching tests). Only `test_basic.py` stays excluded from the CI test job, as a manual browser smoke — don't rely on it gating.
 - Detection canary runs every 4h (`docs/canary.md`, `canary/`); "zero-flag" = snapshot, not guarantee.

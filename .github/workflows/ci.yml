@@ -35,9 +35,8 @@ jobs:
       - name: Run ruff format check (blocking)
         run: ruff format --check .
 
-      - name: Run mypy gradual type checking (non-blocking, informative)
-        run: mypy core/ --ignore-missing-imports --exclude 'tests' || true
-        continue-on-error: true
+      - name: Run mypy (blocking, core/)
+        run: mypy core/ --ignore-missing-imports --exclude 'tests'
 
       - name: Run bandit SAST (blocking, baseline-ratcheted)
         run: bandit -r core stealth behavior recovery sessions audit proxy production scraping ai plugins workflows mcp_security.py --severity-level medium --confidence-level medium -b bandit-baseline.json
@@ -63,13 +62,17 @@ jobs:
   test:
     name: Test (pytest)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python 3.11
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: "pip"
 
       - name: Install project with dev dependencies
@@ -81,15 +84,14 @@ jobs:
 
       - name: Run tests with coverage
         run: |
+          # ratchet: +5 each release, never lower
           python -m pytest tests/ \
             -m "not e2e and not live_network" \
-            --ignore=tests/test_recovery_phase1.py \
             --ignore=tests/test_basic.py \
-            --ignore=tests/test_phase7_fixes.py \
             -q --tb=short \
-            --cov=core --cov=stealth --cov=behavior --cov=recovery --cov=proxy --cov=production \
+            --cov=core --cov=stealth --cov=behavior --cov=recovery --cov=proxy --cov=production --cov=sessions --cov=workflows --cov=audit --cov=mcp_security \
             --cov-report=xml --cov-report=term-missing \
-            --cov-fail-under=45
+            --cov-fail-under=55
         env:
           PYTEST_ADDOPTS: "-p no:timeout"
 
@@ -129,7 +131,11 @@ jobs:
 
   build:
     name: Build / Docker smoke test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -144,18 +150,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install --require-hashes -r requirements.lock
           pip install --no-deps -e .
-          playwright install --with-deps chromium
+          playwright install chromium
 
       - name: Verify core imports
         run: |
           python -c "from core.agent_browser import AgentBrowser; from stealth.advanced_stealth import get_stealth_script; from sessions.cookie_manager import CookieManager; print('OK')"
 
       - name: Docker build smoke test
+        if: runner.os == 'Linux'
         run: |
           docker build -t agentic-stealth-browser:ci-check -f production/Dockerfile .
           echo "Docker build succeeded"
 
       - name: Docker healthcheck test
+        if: runner.os == 'Linux'
         run: |
           docker run --rm agentic-stealth-browser:ci-check python -c "from core.agent_browser import AgentBrowser; print('Runtime OK')"
 

@@ -9,11 +9,11 @@ Provides:
 """
 
 import re
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 
 
 # Common Playwright error patterns and their user-friendly explanations
-PLAYWRIGHT_ERROR_PATTERNS = [
+PLAYWRIGHT_ERROR_PATTERNS: List[Dict[str, Any]] = [
     {
         "pattern": r"Timeout\s+(\d+)ms exceeded",
         "friendly": "Operation timed out after {0}ms.",

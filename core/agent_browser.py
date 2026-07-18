@@ -2572,20 +2572,24 @@ class AgentBrowser:
         """
         if not self.browser:
             # Default launch parameters — callers can still call launch() explicitly first
-            await self.launch(
-                light_mode=getattr(self, "light_mode", None),
-                use_pooled_context=getattr(
-                    self, "use_pooled_context", None
-                ),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
-                resume=getattr(self, "_resume", False),  # P2 resume preservation
-                launch_options=getattr(
-                    self, "_custom_launch_options", None
-                ),  # #143: preserve custom opts on implicit launch
-                preset=getattr(
-                    self, "current_preset", None
-                ),  # #457: support preset/region via ctor + implicit aenter for CLI
-                region=getattr(self, "current_region", None),
-            )
+            try:
+                await self.launch(
+                    light_mode=getattr(self, "light_mode", None),
+                    use_pooled_context=getattr(
+                        self, "use_pooled_context", None
+                    ),  # #57 etc: preserve pooled opt-in on contextmanager implicit launch
+                    resume=getattr(self, "_resume", False),  # P2 resume preservation
+                    launch_options=getattr(
+                        self, "_custom_launch_options", None
+                    ),  # #143: preserve custom opts on implicit launch
+                    preset=getattr(
+                        self, "current_preset", None
+                    ),  # #457: support preset/region via ctor + implicit aenter for CLI
+                    region=getattr(self, "current_region", None),
+                )
+            except Exception:
+                await self.close()
+                raise
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

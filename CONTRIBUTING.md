@@ -36,10 +36,9 @@ pytest tests/ -v
 # Run specific test files
 pytest tests/test_stealth_modules.py -v
 pytest tests/test_contract_agent_browser.py -v
-pytest tests/test_recovery_phase1.py -v
 
-# Run with coverage
-pytest tests/ --cov=core --cov=stealth --cov=recovery --cov=behavior
+# Run with coverage (CI-equivalent; coverage gate ratchets +5 each release)
+python -m pytest tests/ -m "not e2e and not live_network" --ignore=tests/test_basic.py -q --cov=core --cov=stealth --cov=behavior --cov=recovery --cov=proxy --cov=production --cov=sessions --cov=workflows --cov=audit --cov=mcp_security --cov-fail-under=55
 ```
 
 ---
@@ -200,7 +199,7 @@ agentic-stealth-browser/
 ### New Recovery Strategy
 
 1. Update `PLATFORM_STRATEGIES` in `recovery/anti_block_orchestrator.py`
-2. Add tests to `tests/test_recovery_phase1.py`
+2. Add tests to `tests/test_recovery_state_machine.py`
 3. Document rate limiting behavior changes in README.md or relevant code comments
 
 ### New Human Behavior
