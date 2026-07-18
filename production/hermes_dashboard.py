@@ -42,11 +42,12 @@ class DashboardSettings:
     password: str = "change-me"
     secret_key: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     cookie_name: str = "hermes_dashboard_session"
-    cookie_secure: bool = False
+    cookie_secure: bool = True
     idle_timeout_seconds: int = 30 * 60
     allowed_origins: List[str] = field(
         default_factory=lambda: ["http://127.0.0.1:8443", "http://localhost:8443"]
     )
+    users: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -682,6 +683,19 @@ def devtools_url_from_cdp(cdp: Dict[str, Any]) -> Optional[str]:
     return f"http://{parsed.netloc}/devtools/inspector.html?ws={quote(ws_target, safe='/:-')}"
 
 
+def audit_append(user: str, action: str, details: Dict[str, Any]) -> None:
+    record = {"ts": time.time(), "user": user, "action": action, "details": details}
+    path = DEFAULT_STORAGE_ROOT / "audit.jsonl"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 5_000_000:
+            path.replace(path.with_suffix(".jsonl.1"))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
+
+
 class SessionAuth:
     def __init__(self, settings: DashboardSettings):
         self.settings = settings
@@ -690,11 +704,34 @@ class SessionAuth:
     def verify_password(self, password: str) -> bool:
         return hmac.compare_digest(password, self.settings.password)
 
-    def create_session(self) -> Dict[str, str]:
+    def resolve_user(self, username: str, password: str) -> Optional[Dict[str, str]]:
+        if self.settings.users:
+            entry = self.settings.users.get(username)
+            if entry and hmac.compare_digest(password, entry.get("password", "")):
+                return {"user": username, "role": entry.get("role", "viewer")}
+            return None
+        if hmac.compare_digest(password, self.settings.password):
+            return {"user": "admin", "role": "operator"}
+        return None
+
+    def create_session(
+        self, user: str = "admin", role: str = "operator"
+    ) -> Dict[str, str]:
         session_id = secrets.token_urlsafe(24)
         csrf = secrets.token_urlsafe(24)
-        self.sessions[session_id] = {"csrf": csrf, "last_seen": time.time()}
-        return {"session_id": session_id, "signed": self.sign(session_id), "csrf": csrf}
+        self.sessions[session_id] = {
+            "csrf": csrf,
+            "last_seen": time.time(),
+            "user": user,
+            "role": role,
+        }
+        return {
+            "session_id": session_id,
+            "signed": self.sign(session_id),
+            "csrf": csrf,
+            "user": user,
+            "role": role,
+        }
 
     def sign(self, value: str) -> str:
         sig = hmac.new(
@@ -729,6 +766,8 @@ class SessionAuth:
             return None
         session["last_seen"] = time.time()
         session["id"] = session_id
+        session.setdefault("role", "operator")
+        session.setdefault("user", "admin")
         return session
 
     def destroy(self, signed: Optional[str]) -> None:
@@ -778,6 +817,11 @@ LOGIN_TEMPLATE = """<!doctype html>
         </div>
 
         <form method="post" action="/login" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-zinc-400 mb-1.5 tracking-wider">USERNAME</label>
+            <input type="text" name="username" placeholder="username" value="admin"
+              class="w-full bg-zinc-950 border border-zinc-800 focus:border-blue-500/70 focus:ring-1 focus:ring-blue-500/30 text-sm rounded-xl px-4 py-3 outline-none transition placeholder:text-zinc-600 mb-4">
+          </div>
           <div>
             <label class="block text-xs font-medium text-zinc-400 mb-1.5 tracking-wider">PASSWORD</label>
             <div class="relative">
@@ -1687,6 +1731,10 @@ def create_app(
             raise HTTPException(status_code=401, detail="Authentication required")
         return session
 
+    def require_operator(session: Dict[str, Any]) -> None:
+        if session.get("role") != "operator":
+            raise HTTPException(status_code=403, detail="Operator role required")
+
     async def require_csrf(request: Request, session: Dict[str, Any]) -> Dict[str, Any]:
         token = request.headers.get("x-csrf-token")
         if not token:
@@ -1711,10 +1759,13 @@ def create_app(
     @app.post("/login")
     async def login(request: Request):
         raw = (await request.body()).decode("utf-8", errors="replace")
-        password = parse_qs(raw).get("password", [""])[0]
-        if not auth.verify_password(password):
-            raise HTTPException(status_code=401, detail="Invalid password")
-        created = auth.create_session()
+        parsed = parse_qs(raw)
+        username = parsed.get("username", ["admin"])[0]
+        password = parsed.get("password", [""])[0]
+        resolved = auth.resolve_user(username, password)
+        if not resolved:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        created = auth.create_session(user=resolved["user"], role=resolved["role"])
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(
             settings.cookie_name,
@@ -1763,6 +1814,7 @@ def create_app(
     @app.post("/api/browser/start")
     async def api_start(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
         return await manager.start(
             profile=data.get("profile", "default"),
@@ -1772,72 +1824,97 @@ def create_app(
     @app.post("/api/browser/stop")
     async def api_stop(request: Request):
         session = current_session(request)
+        require_operator(session)
         await require_csrf(request, session)
         return await manager.stop()
 
     @app.post("/api/browser/restart")
     async def api_restart(request: Request):
         session = current_session(request)
+        require_operator(session)
         await require_csrf(request, session)
         return await manager.restart()
 
     @app.post("/api/browser/navigate")
     async def api_navigate(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
-        return await manager.navigate(str(data.get("url") or "about:blank"))
+        url = str(data.get("url") or "about:blank")
+        audit_append(session.get("user", "unknown"), "navigate", {"url": url})
+        return await manager.navigate(url)
 
     @app.post("/api/browser/click")
     async def api_click(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
-        return await manager.click(str(data.get("selector") or ""))
+        selector = str(data.get("selector") or "")
+        audit_append(session.get("user", "unknown"), "click", {"selector": selector})
+        return await manager.click(selector)
 
     @app.post("/api/browser/fill")
     async def api_fill(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
-        return await manager.fill(
-            str(data.get("selector") or ""), str(data.get("value") or "")
-        )
+        selector = str(data.get("selector") or "")
+        audit_append(session.get("user", "unknown"), "fill", {"selector": selector})
+        return await manager.fill(selector, str(data.get("value") or ""))
 
     @app.post("/api/backend/switch")
     async def api_switch(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
-        return await manager.switch_backend(str(data.get("backend") or ""))
+        backend = str(data.get("backend") or "")
+        audit_append(
+            session.get("user", "unknown"), "backend_switch", {"backend": backend}
+        )
+        return await manager.switch_backend(backend)
 
     @app.post("/api/control/mode")
     async def api_mode(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
         return manager.set_control_mode(str(data.get("mode") or "shared"))
 
     @app.post("/api/control/pause")
     async def api_pause(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
         return manager.pause(str(data.get("reason") or "manual"))
 
     @app.post("/api/control/resume")
     async def api_resume(request: Request):
         session = current_session(request)
+        require_operator(session)
         await require_csrf(request, session)
         return manager.resume()
 
     @app.post("/api/intervention/request")
     async def api_intervention_request(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
-        return manager.request_intervention(
-            str(data.get("reason") or "manual_review"), str(data.get("message") or "")
+        reason = str(data.get("reason") or "manual_review")
+        audit_append(
+            session.get("user", "unknown"), "intervention_request", {"reason": reason}
         )
+        return manager.request_intervention(reason, str(data.get("message") or ""))
 
     @app.post("/api/intervention/resolve")
     async def api_intervention_resolve(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
-        return manager.resolve_intervention(str(data.get("note") or ""))
+        note = str(data.get("note") or "")
+        audit_append(
+            session.get("user", "unknown"), "intervention_resolve", {"note": note}
+        )
+        return manager.resolve_intervention(note)
 
     @app.post("/api/workflows/record/start")
     async def api_record_start(request: Request):
@@ -1862,6 +1939,7 @@ def create_app(
     @app.post("/api/workflows/replay")
     async def api_replay(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
         return await manager.replay_workflow(
             str(data.get("path") or ""), dict(data.get("variables") or {})
@@ -1875,6 +1953,7 @@ def create_app(
     @app.post("/api/schedules")
     async def api_schedule(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
         return manager.create_schedule(
             workflow_path=str(data.get("workflow_path") or ""),
@@ -1895,6 +1974,7 @@ def create_app(
     @app.post("/api/browser/screenshot")
     async def api_screenshot(request: Request):
         session = current_session(request)
+        require_operator(session)
         await require_csrf(request, session)
         try:
             data = await request.json()
@@ -1912,6 +1992,30 @@ def create_app(
     async def api_workflow_delete(request: Request, name: str):
         current_session(request)
         return manager.delete_workflow(name)
+
+    @app.get("/metrics")
+    async def api_metrics():
+        from fastapi.responses import PlainTextResponse
+
+        browser = manager.browser
+        if browser is not None and hasattr(browser, "metrics"):
+            return PlainTextResponse(
+                browser.metrics.get_prometheus_metrics(), media_type="text/plain"
+            )
+        return PlainTextResponse("", media_type="text/plain")
+
+    @app.get("/api/usage")
+    async def api_usage(request: Request):
+        current_session(request)
+        browser = manager.browser
+        if browser is not None and hasattr(browser, "metrics"):
+            return browser.metrics.get_summary()
+        return {
+            "total_requests": 0,
+            "success_rate": 0.0,
+            "counters": {},
+            "note": "no active browser",
+        }
 
     @app.exception_handler(Exception)
     async def error_handler(request: Request, exc: Exception):
@@ -1960,6 +2064,12 @@ def run_dashboard(
             f"with default/empty password. Set a strong --password (or HERMES_DASHBOARD_PASSWORD env) "
             "or use --host 127.0.0.1 / localhost / ::1 for local dev. "
             "Remote deployment requires TLS reverse proxy and non-default secret."
+        )
+
+    if not settings.users and settings.password in (None, "", "change-me"):
+        raise RuntimeError(
+            "Hermes dashboard refuses to boot with the default 'change-me' password. "
+            "Set --password / HERMES_DASHBOARD_PASSWORD, or configure DashboardSettings.users."
         )
 
     app = create_app(settings=settings)

@@ -158,7 +158,9 @@ def test_dashboard_requires_auth_and_csrf(tmp_path):
     )
     app = create_app(
         manager=manager,
-        settings=DashboardSettings(password="secret", secret_key="test-secret"),
+        settings=DashboardSettings(
+            password="secret", secret_key="test-secret", cookie_secure=False
+        ),
     )
     client = TestClient(app)
 

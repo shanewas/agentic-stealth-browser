@@ -831,6 +831,7 @@ class AgentBrowser:
         # so that the next execute_with_recovery iteration'\''s _navigate func sees fresh context. Safe, no reentrancy on recovery itself.
         if self.recovery:
             self.recovery._rotation_relaunch_hook = self._perform_rotation_relaunch
+            self.recovery.metrics = self.metrics
 
         # Store playwright instance for proper cleanup (only in non-pooled classic path)
         if not getattr(self, "_using_pool", False):
@@ -1263,7 +1264,8 @@ class AgentBrowser:
             wait_time = await rl.wait_if_needed(effective_account, domain)
             if wait_time > 0:
                 print(f"[Rate Limit] Waited {wait_time:.1f}s for {domain}")
-            self.metrics.increment("requests_total")
+
+        self.metrics.increment("requests_total")
 
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
@@ -2400,6 +2402,8 @@ class AgentBrowser:
                 )
             except Exception:
                 self.recovery = None
+            if self.recovery:
+                self.recovery.metrics = self.metrics
 
             # Best-effort version probe (non-fatal)
             browser_version = "unknown"

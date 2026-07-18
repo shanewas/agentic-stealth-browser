@@ -181,6 +181,7 @@ class AntiBlockOrchestrator:
         recovery_mode: str = "aggressive",
     ):
         self.browser = browser  # usually the BrowserContext (for future use)
+        self.metrics = None  # set by AgentBrowser; None-safe
         self.session_manager = session_manager
         self.proxy_manager = proxy_manager
         self._get_page = page_getter  # callable that returns current Playwright Page (for content checks)
@@ -728,6 +729,11 @@ class AntiBlockOrchestrator:
             self._reset_circuit(key)  # success path clears circuit
             return True
 
+        if getattr(self, "metrics", None):
+            self.metrics.increment("blocks_total")
+            if block_type == BlockType.CAPTCHA:
+                self.metrics.increment("captcha_total")
+
         # Decide structured action using full decision engine (all P2 features)
         action = self._decide_recovery_action(context, block_type)
         context.recovery_action = action
@@ -798,6 +804,11 @@ class AntiBlockOrchestrator:
         if self.safe_mode or self.recovery_mode in ("safe", "fail_fast"):
             should_rotate_session = False
             should_rotate_proxy = False
+
+        if getattr(self, "metrics", None) and (
+            should_rotate_session or should_rotate_proxy
+        ):
+            self.metrics.increment("rotations_total")
 
         if action == RecoveryAction.FAIL_FAST:
             self._update_recovery_history(context, action, success=False)
