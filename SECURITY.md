@@ -31,6 +31,10 @@ When using this framework in production:
 6. **Isolate accounts** — Never share proxies or browser contexts across accounts
 7. **Keep dependencies updated** — Regularly update Playwright and Python dependencies
 
+## MCP Approval Mode
+
+The MCP server ships fail-closed: sensitive actions (`execute_js`, `stealth_launch`, navigate to unknown domains, `run_workflow`, `stealth_replay`) return `MCP_APPROVAL_REQUIRED` until approved. Set `STEALTH_APPROVAL_MODE=permissive` to auto-approve all sensitive actions (previous default; not recommended for shared/production deployments).
+
 ## Known Limitations
 
 - TLS fingerprint spoofing is limited to browser launch arguments; true ClientHello manipulation requires lower-level network stack access

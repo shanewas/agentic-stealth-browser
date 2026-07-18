@@ -38,6 +38,9 @@ jobs:
       - name: Run mypy (blocking, core/)
         run: mypy core/ --ignore-missing-imports --exclude 'tests'
 
+      - name: Run mypy on security modules (blocking)
+        run: mypy production/approval_gate.py production/policy_engine.py production/mcp_input_validator.py production/mcp_session_isolation.py mcp_security.py --ignore-missing-imports
+
       - name: Run bandit SAST (blocking, baseline-ratcheted)
         run: bandit -r core stealth behavior recovery sessions audit proxy production scraping ai plugins workflows mcp_security.py --severity-level medium --confidence-level medium -b bandit-baseline.json
 

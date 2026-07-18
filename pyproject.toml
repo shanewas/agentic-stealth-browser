@@ -110,6 +110,23 @@ check_untyped_defs = false
 module = ["core.agent_browser"]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = [
+    "production.approval_gate",
+    "production.policy_engine",
+    "production.mcp_input_validator",
+    "production.mcp_session_isolation",
+    "mcp_security",
+]
+ignore_errors = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+disallow_any_generics = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+warn_return_any = false
+
 [tool.ruff]
 # Target Python 3.10+
 target-version = "py310"

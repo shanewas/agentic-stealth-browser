@@ -7,6 +7,14 @@ pytestmark = pytest.mark.mcp
 from production.mcp_server import StealthMCPServer
 
 
+@pytest.fixture(autouse=True)
+def _permissive_approval(monkeypatch):
+    # These tests exercise workflow teach/replay functionality, not the approval
+    # gate. SEC-09 made the gate fail-closed by default, so opt into the legacy
+    # permissive mode here (the gate itself is covered by test_approval_mode.py).
+    monkeypatch.setenv("STEALTH_APPROVAL_MODE", "permissive")
+
+
 class _FakePage:
     def __init__(self):
         self.url = "about:blank"

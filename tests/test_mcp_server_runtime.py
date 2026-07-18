@@ -8,6 +8,14 @@ pytestmark = pytest.mark.mcp
 from production.mcp_server import StealthMCPServer, main
 
 
+@pytest.fixture(autouse=True)
+def _permissive_approval(monkeypatch):
+    # SEC-09 made the MCP approval gate fail-closed by default. These runtime
+    # tests exercise navigate/scrape/snapshot functionality, not the gate, so
+    # opt into permissive (the gate itself is covered by test_approval_mode.py).
+    monkeypatch.setenv("STEALTH_APPROVAL_MODE", "permissive")
+
+
 class _FakePage:
     def __init__(self):
         self.url = "about:blank"

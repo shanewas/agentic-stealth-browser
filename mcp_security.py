@@ -295,7 +295,7 @@ def sanitize_tool_description(description: str) -> tuple[str, list[str]]:
 
     Returns (sanitized_description, list_of_warnings).
     """
-    warnings = []
+    warnings: list[str] = []
 
     if not description:
         return "", warnings

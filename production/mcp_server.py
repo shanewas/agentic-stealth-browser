@@ -303,11 +303,11 @@ class StealthMCPServer:
         #     policy YAML in ~/.agentic-browser/policies. With no policy files the
         #     default policy allows everything (fail-open), so normal flows are unchanged.
         #     Set STEALTH_MCP_POLICY to activate a named loaded policy.
-        #   - ApprovalGate: sensitive-action approval. Permissive by default — there is
-        #     no human in the loop over headless stdio, so we auto-approve to avoid
-        #     deadlocking launch/navigate/replay. An operator (SDK/dashboard) enables
-        #     real enforcement by installing an approval callback via
-        #     self._approval_gate.set_allow_callback(...).
+        #   - ApprovalGate: sensitive-action approval. Fail-closed by default — sensitive
+        #     actions on unknown domains return PENDING, surfaced to the caller as
+        #     MCP_APPROVAL_REQUIRED, until resolved via resolve_pending(request_id).
+        #     Set STEALTH_APPROVAL_MODE=permissive to restore the pre-3.0 auto-approve
+        #     (fail-open) behavior for headless/no-human-in-the-loop deployments.
         self._policy_engine = PolicyEngine()
         try:
             self._policy_engine.load_policies()
@@ -316,8 +316,11 @@ class StealthMCPServer:
         active_policy = os.getenv("STEALTH_MCP_POLICY")
         if active_policy:
             self._policy_engine.set_active(active_policy)
+        approval_mode = os.getenv("STEALTH_APPROVAL_MODE", "enforce").strip().lower()
         self._approval_gate = ApprovalGate(auto_approve_known_domains=True)
-        self._approval_gate.set_allow_callback(lambda req: ApprovalDecision.ALLOWED)
+        if approval_mode == "permissive":
+            # Legacy fail-open posture: auto-approve every sensitive action.
+            self._approval_gate.set_allow_callback(lambda req: ApprovalDecision.ALLOWED)
 
     def _get_agent_browser_cls(self):
         if self._agent_browser_cls is not None:
@@ -1566,7 +1569,8 @@ class StealthMCPServer:
                 if appr.decision != ApprovalDecision.ALLOWED:
                     raise ToolError(
                         "MCP_APPROVAL_REQUIRED",
-                        f"Workflow step {idx} ('{step.type}') requires approval: {appr.reason}",
+                        f"Workflow step {idx} ('{step.type}') requires approval: {appr.reason}"
+                        " — approve via resolve_pending(request_id) or set STEALTH_APPROVAL_MODE=permissive",
                         {
                             "step_index": idx,
                             "step_type": step.type,
@@ -1831,7 +1835,8 @@ class StealthMCPServer:
             if gate.decision != ApprovalDecision.ALLOWED:
                 payload = self._tool_error_payload(
                     "MCP_APPROVAL_REQUIRED",
-                    f"Action '{tool_name}' requires approval: {gate.reason}",
+                    f"Action '{tool_name}' requires approval: {gate.reason}"
+                    " — approve via resolve_pending(request_id) or set STEALTH_APPROVAL_MODE=permissive",
                     {
                         "tool": tool_name,
                         "request_id": gate.request_id,

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **BREAKING:** MCP approval gate is now fail-closed by default; set STEALTH_APPROVAL_MODE=permissive to restore auto-approval.
+
 ## [2.7.0] — Enterprise Hardening (2026-07-18)
 
 Auditability, supply-chain, and business-facing hardening from a full enterprise
