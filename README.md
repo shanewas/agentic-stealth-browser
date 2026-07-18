@@ -189,12 +189,41 @@ live E2E (`RUN_E2E_ANTI_BLOCK=1` to enable).
 | **Account Warming** | 14-day gradual ramp-up for new accounts |
 | **Workflow Orchestrator** | Queue, schedule, domain concurrency, retries, persistence |
 | **Python SDK** | `StealthClient` — async API without MCP |
-| **Security Governance** | Input validation, session isolation, policy engine, approval gates |
+| **Security Governance** | Input validation, session isolation, policy engine, fail-closed MCP approval gate, per-user dashboard RBAC |
+| **Auditability** | Redacted, HMAC tamper-evident audit log with rotation/retention |
+| **Observability** | Prometheus `/metrics`, `/api/usage` rollup, success/block/rotation counters |
 | **Adaptive Stealth** | Per-domain behavior profiles with FeedbackStore telemetry |
 | **Plugin System** | Lifecycle hooks via `BasePlugin` |
 | **Operator Dashboard** | Live DevTools, CAPTCHA intervention, workflow recording |
 | **Feature Flags** | Runtime capability discovery per browser backend |
 | **Performance Profiling** | Timing decorators + `perf_benchmark.py` |
+
+---
+
+## New in v3.0.0 — Enterprise Hardening
+
+> **⚠️ Breaking:** the MCP approval gate is now **fail-closed by default**.
+> Sensitive actions (`execute_js`, `stealth_launch`, navigate to unknown
+> domains, `run_workflow`, `stealth_replay`) return `MCP_APPROVAL_REQUIRED`
+> until approved. Set `STEALTH_APPROVAL_MODE=permissive` to restore the previous
+> auto-approve behavior.
+
+- **Auditability** — tamper-evident HMAC-keyed audit chain (`verify_audit_chain`,
+  `AGENTIC_AUDIT_HMAC_KEY`), success-path audit records, log rotation/retention,
+  and recursive + token (GitHub/Slack/JWT) redaction
+- **Dashboard RBAC** — per-user viewer/operator roles replace the shared
+  password (boot refuses the default `change-me`); attributable operator audit
+  log; `GET /metrics` (Prometheus) and `GET /api/usage`
+- **Supply chain** — hash-pinned reproducible install (`requirements.lock`),
+  blocking `pip-audit` + `bandit` + `gitleaks`, SBOM + build-provenance
+  attestation, SHA-pinned Actions
+- **Real CI gate** — blocking `mypy` on `core/`, 55% coverage floor, a
+  Python 3.10–3.13 + ubuntu/windows/macOS matrix
+- **Reliability** — launch-failure driver-leak fix, opt-in `respect_robots`
+  guard, `AGENTIC_MAX_REQUESTS_PER_SESSION` per-session request budget
+- **Stable facade** — `from core import AgentBrowser`
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ---
 
