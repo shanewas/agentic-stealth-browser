@@ -9,7 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **BREAKING:** MCP approval gate is now fail-closed by default; set STEALTH_APPROVAL_MODE=permissive to restore auto-approval.
+## [3.0.0] — Enterprise Hardening, Part 2 (2026-07-18)
+
+A large enterprise-readiness pass across reliability, auditability, security/
+supply-chain, observability, and maintainability. One breaking change (MCP
+approval default); everything else is additive or behavior-preserving.
+
+### Breaking
+- **MCP approval gate is now fail-closed by default.** Sensitive actions
+  (`execute_js`, `stealth_launch`, navigate to unknown domains, `run_workflow`,
+  `stealth_replay`) return `MCP_APPROVAL_REQUIRED` until approved. Set
+  `STEALTH_APPROVAL_MODE=permissive` to restore the previous auto-approve
+  behavior. (`production/mcp_server.py`; covered by `tests/test_approval_mode.py`.)
+
+### Added
+- **Auditability:** success-path audit records at every AgentBrowser choke point
+  and the MCP scrape handler; a `level` field on every entry; log rotation +
+  retention purge (`AGENTIC_AUDIT_*` env); an **HMAC-keyed tamper-evidence chain**
+  (`AGENTIC_AUDIT_HMAC_KEY`) with `verify_audit_chain()`; recursive secret
+  redaction into list/tuple values; GitHub/Slack/JWT token redaction patterns.
+- **Observability:** recovery `blocks_total`/`rotations_total`/`captcha_total`
+  counters; a scrapeable `GET /metrics` Prometheus endpoint and `GET /api/usage`
+  business rollup on the dashboard; `docs/SLO.md` and `docs/RUNBOOK.md`.
+- **Dashboard RBAC:** per-user viewer/operator roles replacing the single shared
+  password; mutating routes require the operator role; attributable operator
+  actions persisted to an append-only `audit.jsonl`; boot refuses the default
+  `change-me` password; `cookie_secure` defaults on.
+- **Supply chain:** a hash-pinned, universal `requirements.lock`; a blocking
+  `pip-audit` CVE job; blocking `bandit` SAST (baseline-ratcheted); a `gitleaks`
+  secret-scan workflow; CycloneDX SBOM + build-provenance attestation on publish;
+  `py.typed` markers for every shipped package; a post-publish PyPI install smoke.
+- **Compliance/governance:** `ACCEPTABLE_USE.md`, `GOVERNANCE.md`, `ROADMAP.md`,
+  `SUPPORT.md`, `DCO.txt` + sign-off, `docs/RELEASING.md`, `docs/INCIDENT_RESPONSE.md`,
+  `docs/KEY_MANAGEMENT.md`, `docs/DATA_HANDLING.md`, `docs/BACKUP_RESTORE.md` +
+  `scripts/backup_sessions.py`.
+- **Reliability:** a launch-failure driver-leak guard in `__aenter__`; an opt-in
+  `respect_robots` guard (stdlib `robotparser`) on `safe_goto`/MCP navigate; an
+  `AGENTIC_MAX_REQUESTS_PER_SESSION` per-session navigation budget; a `perf`-marked
+  concurrency load smoke test.
+- **API:** a stable public facade — `from core import AgentBrowser`.
+
+### Changed
+- **CI is now a real gate:** blocking (relaxed) `mypy` on `core/` and on the five
+  MCP security modules; coverage gate raised to **55%** over a widened package set;
+  a Python **3.10–3.13** test matrix plus ubuntu/windows/macOS import-smoke; all
+  GitHub Actions pinned to commit SHAs; the three previously-excluded test files
+  un-gated; the nightly job no longer masks failures.
+- **Architecture:** `rate_limiter.py`/`metrics.py` moved into `core/` (inverted
+  layering resolved, back-compat shims kept); ~830 lines of dashboard HTML extracted
+  to `production/templates/*.html`; the 18 `_tool_stealth_*` MCP handlers extracted
+  to a `_MCPToolHandlers` mixin; the 5 exception classes moved to `core/errors.py`.
+- Swallowed (`pass`-only) exception handlers now log at debug with `exc_info`.
+- Removed the dead `plugin_system` capability flag and unused `otel_export.py`.
+
+### Security
+- Dependency lower bounds pinned to CVE-safe floors; Docker installs from the
+  hash-pinned lockfile and runs as a non-root user; `twine check --strict` before
+  every PyPI upload; `SECURITY.md` supported-versions corrected.
 
 ## [2.7.0] — Enterprise Hardening (2026-07-18)
 

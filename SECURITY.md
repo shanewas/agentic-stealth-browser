@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 2.7.x   | :white_check_mark: |
-| < 2.7   | :x:                |
+| 3.0.x   | :white_check_mark: |
+| < 3.0   | :x:                |
 
 This table is updated as part of every release; a release is not complete until the current minor version appears here.
 
