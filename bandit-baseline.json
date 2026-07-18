@@ -983,7 +983,7 @@
       "code": "705                         probe_url = f\"http://127.0.0.1:{port}/json/version\"\n706                         with urllib.request.urlopen(probe_url, timeout=3) as r:\n707                             ver = json.loads(r.read().decode(\"utf-8\", errors=\"replace\"))\n",
       "col_offset": 29,
       "end_col_offset": 73,
-      "filename": "core\\agent_browser.py",
+      "filename": "core/agent_browser.py",
       "issue_confidence": "HIGH",
       "issue_cwe": {
         "id": 22,
@@ -1003,7 +1003,7 @@
       "code": "1029                             probe_url = f\"http://127.0.0.1:{port}/json/version\"\n1030                             with urllib.request.urlopen(probe_url, timeout=3) as r:\n1031                                 ver = json.loads(\n",
       "col_offset": 33,
       "end_col_offset": 77,
-      "filename": "core\\agent_browser.py",
+      "filename": "core/agent_browser.py",
       "issue_confidence": "HIGH",
       "issue_cwe": {
         "id": 22,
@@ -1023,7 +1023,7 @@
       "code": "1973                         probe_url = f\"http://127.0.0.1:{port}/json/version\"\n1974                         with urllib.request.urlopen(probe_url, timeout=3) as r:\n1975                             ver = json.loads(r.read().decode(\"utf-8\", errors=\"replace\"))\n",
       "col_offset": 29,
       "end_col_offset": 73,
-      "filename": "core\\agent_browser.py",
+      "filename": "core/agent_browser.py",
       "issue_confidence": "HIGH",
       "issue_cwe": {
         "id": 22,
@@ -1043,7 +1043,7 @@
       "code": "23             try:\n24                 urllib.request.urlopen(f\"http://127.0.0.1:{port}/metrics\", timeout=5)\n25             except urllib.error.HTTPError:\n",
       "col_offset": 16,
       "end_col_offset": 85,
-      "filename": "production\\docker-healthcheck.py",
+      "filename": "production/docker-healthcheck.py",
       "issue_confidence": "HIGH",
       "issue_cwe": {
         "id": 22,
@@ -1063,7 +1063,7 @@
       "code": "125         \"\"\"Generate MD5 hash of JA3 string.\"\"\"\n126         return hashlib.md5(ja3_string.encode()).hexdigest()\n127 \n",
       "col_offset": 15,
       "end_col_offset": 47,
-      "filename": "stealth\\tls_ja3_ja4.py",
+      "filename": "stealth/tls_ja3_ja4.py",
       "issue_confidence": "HIGH",
       "issue_cwe": {
         "id": 327,
