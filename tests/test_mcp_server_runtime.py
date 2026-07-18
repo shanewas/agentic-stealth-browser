@@ -74,10 +74,11 @@ class _FakeBrowser:
         warm_up=True,
         platform="unknown",
         rate_limit=True,
+        respect_robots=False,
         domain=None,
         account=None,
     ):
-        _ = (warm_up, platform, rate_limit, domain, account)
+        _ = (warm_up, platform, rate_limit, respect_robots, domain, account)
         self._page.url = url
         self._page._title = f"Visited {url}"
         return True

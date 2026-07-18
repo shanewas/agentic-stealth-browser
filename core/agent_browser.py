@@ -43,6 +43,18 @@ from production.metrics import MetricsCollector
 from stealth.profiles import Persona, DEFAULT_PERSONA
 
 
+def robots_allows(robots_txt: str, url: str, user_agent: str = "*") -> bool:
+    """Return True if robots_txt permits user_agent to fetch url. Empty/unparseable => allowed."""
+    from urllib.robotparser import RobotFileParser
+
+    rp = RobotFileParser()
+    try:
+        rp.parse((robots_txt or "").splitlines())
+        return rp.can_fetch(user_agent, url)
+    except Exception:
+        return True
+
+
 # Lightweight library-specific exception hierarchy for #249 DX improvement.
 # Users can now do: from core.agent_browser import StealthBrowserError, LaunchError, ...
 # Base catches all library errors; specific ones for targeted handling.
@@ -829,6 +841,13 @@ class AgentBrowser:
         # P2 #97: Record launch in metrics
         self.metrics.increment("launches_total")
         self.metrics.set_gauge("browser_launched", 1)
+        self.logger.log_action(
+            "browser_launched",
+            {
+                "preset": getattr(self, "current_preset", None),
+                "region": getattr(self, "current_region", None),
+            },
+        )
 
         return self.browser
 
@@ -1166,6 +1185,7 @@ class AgentBrowser:
         rate_limit: bool = True,
         domain: str = None,
         account: str = None,
+        respect_robots: bool = False,
     ):
         """
         Navigate with full anti-block recovery.
@@ -1190,6 +1210,27 @@ class AgentBrowser:
                 domain = urlparse(url).netloc
             except Exception:
                 domain = "unknown"
+
+        # ponytail: robots fetched per-call, no cache; add lru_cache/TTL if it becomes a hot path
+        if respect_robots:
+            try:
+                import aiohttp
+                from urllib.parse import urljoin
+
+                robots_url = urljoin(url, "/robots.txt")
+                async with aiohttp.ClientSession() as _s:
+                    async with _s.get(
+                        robots_url, timeout=aiohttp.ClientTimeout(total=10)
+                    ) as _r:
+                        _txt = await _r.text() if _r.status == 200 else ""
+                if not robots_allows(_txt, url):
+                    if getattr(self, "logger", None):
+                        self.logger.log_action(
+                            "navigate_blocked_by_robots", {"url": url}, level="warning"
+                        )
+                    return False
+            except Exception:
+                pass
 
         # P3: Account warming check - stop session if limits exceeded
         if self.account_warming.days_elapsed > 0:
@@ -1272,6 +1313,10 @@ class AgentBrowser:
                 self.account_warming.record_page_visit(url)
             self.connection_pool.release_context(domain)
             self.adaptive_tuner.record_feedback(blocked=False, platform=platform)
+            self.logger.log_action(
+                "navigate_succeeded",
+                {"url": url, "platform": platform, "domain": domain},
+            )
             self.metrics.increment("requests_success")
             return True
         except Exception as e:
@@ -1413,6 +1458,11 @@ class AgentBrowser:
         if result.get("status") == "success":
             # Also initialize session orchestrator
             self.session_orchestrator = SessionOrchestrator()
+            if getattr(self, "logger", None):
+                self.logger.log_action(
+                    "cookies_loaded",
+                    {"path": cookies_path, "count": result.get("count")},
+                )
 
         return result
 
@@ -2023,6 +2073,10 @@ class AgentBrowser:
                 result["note"] = "Relaunch performed for full region/TLS effect."
             except Exception as e:
                 result["relaunch_error"] = str(e)
+        if getattr(self, "logger", None):
+            self.logger.log_action(
+                "region_switched", {"relaunch": result.get("relaunch_performed", False)}
+            )
         return result
 
     def get_stealth_score(self) -> Dict[str, Any]:
@@ -2494,6 +2548,10 @@ class AgentBrowser:
             self.recovery = None
             self._owns_page = False
             if getattr(self, "logger", None):
+                try:
+                    self.logger.log_action("browser_closed", {})
+                except Exception:
+                    pass
                 try:
                     self.logger.close()
                 except Exception:

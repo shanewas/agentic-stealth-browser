@@ -13,6 +13,8 @@ P2 #128: Added correlation_id support for multi-account run tracing.
 All log entries now include a correlation_id for cross-session traceability.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import logging.handlers
@@ -69,6 +71,7 @@ class AuditLogger:
 
         # P2 #128: Correlation ID for multi-account run tracing
         self.correlation_id: str = correlation_id or str(uuid.uuid4())[:8]
+        self._prev_hash: Optional[str] = None
 
         # === Non-blocking queued writers for #44 P1 perf ===
         # audit JSONL uses dedicated queue + background drainer thread (single writer, no per-call threads)
@@ -99,7 +102,11 @@ class AuditLogger:
         qhandler = logging.handlers.QueueHandler(self._std_log_queue)
         self.logger.addHandler(qhandler)
 
-        file_handler = logging.FileHandler(self.log_file)
+        file_handler = logging.handlers.RotatingFileHandler(
+            self.log_file,
+            maxBytes=int(os.getenv("AGENTIC_AUDIT_MAX_BYTES", str(10 * 1024 * 1024))),
+            backupCount=int(os.getenv("AGENTIC_AUDIT_BACKUP_COUNT", "5")),
+        )
         formatter = logging.Formatter(
             "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
@@ -111,6 +118,8 @@ class AuditLogger:
 
         self._debug_enabled = False
         self._debug_log_file = self.log_dir / f"{session_name}_debug.jsonl"
+
+        self._purge_old_logs()
 
     def enable_debug_mode(self):
         """Enable verbose debug logging for fingerprint/stealth analysis (DX #265)."""
@@ -245,6 +254,15 @@ class AuditLogger:
                 redacted[k] = AuditLogger._redact_sensitive(v)
             elif isinstance(v, str):
                 redacted[k] = AuditLogger._redact_sensitive_values(v)
+            elif isinstance(v, (list, tuple)):
+                redacted[k] = [
+                    AuditLogger._redact_sensitive(item)
+                    if isinstance(item, dict)
+                    else AuditLogger._redact_sensitive_values(item)
+                    if isinstance(item, str)
+                    else item
+                    for item in v
+                ]
             else:
                 redacted[k] = v
         return redacted
@@ -266,6 +284,7 @@ class AuditLogger:
             "session": self.session_name,
             "correlation_id": self.correlation_id,  # P2 #128
             "action": action,
+            "level": level,
             "details": safe_details,
         }
 
@@ -370,8 +389,7 @@ class AuditLogger:
                     self._audit_queue.task_done()
                     continue
                 try:
-                    with open(self.audit_file, "a", encoding="utf-8") as f:
-                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    self._write_audit_line(entry)
                 except Exception:
                     pass  # never crash writer
                 finally:
@@ -385,13 +403,79 @@ class AuditLogger:
             while True:
                 entry = self._audit_queue.get_nowait()
                 try:
-                    with open(self.audit_file, "a", encoding="utf-8") as f:
-                        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    self._write_audit_line(entry)
                 except Exception:
                     pass
                 self._audit_queue.task_done()
         except queue.Empty:
             pass
+
+    def _purge_old_logs(self) -> None:
+        """Retention: delete log files for this session older than AGENTIC_AUDIT_RETENTION_DAYS."""
+        try:
+            days = int(os.getenv("AGENTIC_AUDIT_RETENTION_DAYS", "30"))
+            if days <= 0:
+                return
+            cutoff = datetime.now(timezone.utc).timestamp() - (days * 86400)
+            for p in self.log_dir.glob(f"{self.session_name}*"):
+                try:
+                    if p.is_file() and p.stat().st_mtime < cutoff:
+                        p.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _rotate_jsonl(self) -> None:
+        """Rotate self.audit_file into numbered backups (audit_file.1, .2, ...)."""
+        backup = int(os.getenv("AGENTIC_AUDIT_BACKUP_COUNT", "5"))
+        for i in range(backup - 1, 0, -1):
+            src = Path(f"{self.audit_file}.{i}")
+            dst = Path(f"{self.audit_file}.{i + 1}")
+            if src.exists():
+                os.replace(src, dst)
+        if self.audit_file.exists():
+            os.replace(self.audit_file, Path(f"{self.audit_file}.1"))
+
+    def _read_last_hash(self) -> str:
+        genesis = "0" * 64
+        if not self.audit_file.exists():
+            return genesis
+        last = None
+        try:
+            with open(self.audit_file, encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        last = line
+        except Exception:
+            return genesis
+        if not last:
+            return genesis
+        try:
+            return json.loads(last).get("entry_hash", genesis)
+        except Exception:
+            return genesis
+
+    def _write_audit_line(self, entry) -> None:
+        key = os.getenv("AGENTIC_AUDIT_HMAC_KEY", "").encode("utf-8")
+        if self._prev_hash is None:
+            self._prev_hash = self._read_last_hash()
+        try:
+            max_bytes = int(os.getenv("AGENTIC_AUDIT_MAX_BYTES", str(10 * 1024 * 1024)))
+            if self.audit_file.exists() and self.audit_file.stat().st_size >= max_bytes:
+                self._rotate_jsonl()
+                self._prev_hash = "0" * 64
+        except Exception:
+            pass
+        prev = self._prev_hash if self._prev_hash is not None else "0" * 64
+        canonical = json.dumps(entry, sort_keys=True, ensure_ascii=False)
+        entry_hash = hmac.new(
+            key, (prev + canonical).encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        chained = {**entry, "prev_hash": prev, "entry_hash": entry_hash}
+        with open(self.audit_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(chained, ensure_ascii=False) + "\n")
+        self._prev_hash = entry_hash
 
     def close(self) -> None:
         """Graceful shutdown of background writers and listeners (call from cleanup paths)."""
@@ -541,3 +625,41 @@ class DebugReporter:
             for e in safe_report["recent_audit"][-5:]:
                 print(f"  {e}")
         print("=" * 60 + "\n")
+
+
+# ponytail: HMAC-keyed chain (env AGENTIC_AUDIT_HMAC_KEY). Chain resets on rotation; cross-file continuity not verified.
+def verify_audit_chain(audit_file: str) -> bool:
+    import hmac as _hm
+    import hashlib as _h
+    import json as _j
+    import os as _os
+    from pathlib import Path as _P
+
+    key = _os.getenv("AGENTIC_AUDIT_HMAC_KEY", "").encode("utf-8")
+    p = _P(audit_file)
+    if not p.exists():
+        return True
+    prev = "0" * 64
+    with open(p, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rec = _j.loads(line)
+            except Exception:
+                return False
+            cp = rec.get("prev_hash")
+            ch = rec.get("entry_hash")
+            if cp is None or ch is None:
+                return False
+            base = {
+                k: v for k, v in rec.items() if k not in ("prev_hash", "entry_hash")
+            }
+            canonical = _j.dumps(base, sort_keys=True, ensure_ascii=False)
+            expected = _hm.new(
+                key, (cp + canonical).encode("utf-8"), _h.sha256
+            ).hexdigest()
+            if cp != prev or ch != expected:
+                return False
+            prev = ch
+    return True

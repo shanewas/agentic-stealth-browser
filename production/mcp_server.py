@@ -998,6 +998,7 @@ class StealthMCPServer:
         platform = str(args.get("platform") or "unknown")
         warm_up = bool(args.get("warm_up", True))
         rate_limit = bool(args.get("rate_limit", True))
+        respect_robots = bool(args.get("respect_robots", False))
         domain = args.get("domain")
         account = args.get("account")
 
@@ -1006,6 +1007,7 @@ class StealthMCPServer:
             warm_up=warm_up,
             platform=platform,
             rate_limit=rate_limit,
+            respect_robots=respect_robots,
             domain=domain,
             account=account,
         )
@@ -1098,6 +1100,10 @@ class StealthMCPServer:
         result = await browser.scraper.scrape_page(
             str(url), extract_images=extract_images, platform=platform
         )
+        if getattr(browser, "logger", None):
+            browser.logger.log_action(
+                "scrape_succeeded", {"url": str(url), "platform": platform}
+            )
         return self._tool_ok_payload({"session_name": session_name, "scrape": result})
 
     async def _tool_stealth_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
