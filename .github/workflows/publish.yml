@@ -19,11 +19,15 @@ jobs:
   build:
     name: Build sdist + wheel
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -35,6 +39,11 @@ jobs:
 
       - name: Build distribution packages
         run: python -m build
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          pip install cyclonedx-bom==4.6.1
+          cyclonedx-py environment -o sbom.cdx.json
 
       - name: Validate distribution metadata
         run: |
@@ -66,11 +75,23 @@ jobs:
           "
 
       - name: Store dist artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
           retention-days: 5
+
+      - name: Attest build provenance for distributions
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: 'dist/*'
+
+      - name: Store SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 30
 
   publish:
     name: Upload to PyPI
@@ -84,10 +105,32 @@ jobs:
     permissions:
       id-token: write  # OIDC must be re-declared per job that uses it
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+
+  smoke:
+    name: Post-publish install smoke
+    needs: [publish]
+    runs-on: ubuntu-latest
+    if: >
+      !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true')
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Wait for index propagation
+        run: sleep 60
+      - name: Install from PyPI and import
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --upgrade pip
+          /tmp/smoke/bin/pip install "agentic-stealth-browser==${VERSION}"
+          /tmp/smoke/bin/python -c "from core.agent_browser import AgentBrowser; from production.mcp_server import StealthMCPServer; print('post-publish import OK')"

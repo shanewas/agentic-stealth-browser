@@ -219,6 +219,19 @@ SENSITIVE_PATTERNS = [
     ),
     # URLs with credentials
     (re.compile(r"(://[^:@/]+:)([^@]+)(@)"), r"\1[REDACTED_CREDENTIALS]\3"),
+    # GitHub tokens (classic + fine-grained)
+    (
+        re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b"),
+        "[REDACTED_GITHUB_TOKEN]",
+    ),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b"), "[REDACTED_GITHUB_TOKEN]"),
+    # Slack tokens
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "[REDACTED_SLACK_TOKEN]"),
+    # JWTs
+    (
+        re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+        "[REDACTED_JWT]",
+    ),
     # Email addresses
     (
         re.compile(r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b"),

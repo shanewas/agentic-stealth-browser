@@ -16,10 +16,10 @@ jobs:
     name: Lint (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -27,7 +27,7 @@ jobs:
       - name: Install linting tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy
+          pip install ruff mypy 'bandit==1.7.9'
 
       - name: Run ruff check (blocking)
         run: ruff check .
@@ -39,14 +39,35 @@ jobs:
         run: mypy core/ --ignore-missing-imports --exclude 'tests' || true
         continue-on-error: true
 
+      - name: Run bandit SAST (blocking, baseline-ratcheted)
+        run: bandit -r core stealth behavior recovery sessions audit proxy production scraping ai plugins workflows mcp_security.py --severity-level medium --confidence-level medium -b bandit-baseline.json
+
+  audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+
+      - name: Audit lockfile for known CVEs (blocking)
+        run: python -m pip_audit -r requirements.lock --require-hashes
+
   test:
     name: Test (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -54,8 +75,8 @@ jobs:
       - name: Install project with dev dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install pytest-cov
+          pip install --require-hashes -r requirements.lock
+          pip install --no-deps -e .
           playwright install --with-deps chromium
 
       - name: Run tests with coverage
@@ -73,7 +94,7 @@ jobs:
           PYTEST_ADDOPTS: "-p no:timeout"
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: coverage-report
@@ -81,7 +102,7 @@ jobs:
           retention-days: 30
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: test-results
@@ -99,7 +120,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload collection audit artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: test-collection-audit
@@ -110,10 +131,10 @@ jobs:
     name: Build / Docker smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -121,7 +142,8 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install --require-hashes -r requirements.lock
+          pip install --no-deps -e .
           playwright install --with-deps chromium
 
       - name: Verify core imports
@@ -142,10 +164,10 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -153,7 +175,8 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install --require-hashes -r requirements.lock
+          pip install --no-deps -e .
           playwright install --with-deps chromium
 
       - name: Run detection tests

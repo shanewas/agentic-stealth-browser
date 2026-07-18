@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
@@ -24,7 +24,7 @@ jobs:
           CANARY_DASHBOARD_PATH: docs/canary/index.html
           CANARY_BADGE_PATH: docs/canary/badge.svg
           CANARY_README_PATH: docs/canary/README.md
-      - uses: stefanzweifel/git-auto-commit-action@v5
+      - uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403 # v5
         with:
           commit_message: "canary: score=${{ steps.canary.outputs.score }} at ${{ steps.canary.outputs.ts }}"
           file_pattern: "docs/canary/*"

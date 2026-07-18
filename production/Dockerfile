@@ -2,6 +2,7 @@
 # Addresses #15/#13: non-root, volumes, healthcheck, entrypoint, proper install
 
 # Stage 1: Install system dependencies
+# ponytail: pin FROM by @sha256 digest at next release (docker inspect); deferred — no docker in authoring env
 FROM python:3.12-slim AS base
 
 # Create non-root user (security)
@@ -29,7 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Playwright and browser
-RUN pip install --no-cache-dir playwright
+COPY requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
@@ -56,7 +58,7 @@ COPY plugins/ ./plugins/
 COPY mcp_security.py ./
 
 # Install the project
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir --no-deps -e .
 
 COPY production/docker-healthcheck.py ./production/
 

@@ -112,6 +112,9 @@ ignore = ["E501"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.bandit]
+exclude_dirs = ["tests", "canary", "examples", "scripts"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
