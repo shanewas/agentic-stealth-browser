@@ -45,7 +45,7 @@ try:
     SERVER_VERSION = importlib.metadata.version("agentic-stealth-browser")
 except Exception:
     SERVER_VERSION = (
-        "2.4.1"  # fallback during dev / editable installs before metadata written
+        "unknown"  # fallback during dev / editable installs before metadata written
     )
 
 

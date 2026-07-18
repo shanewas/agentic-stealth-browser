@@ -1,3 +1,5 @@
+> **Superseded / historical.** This report analyzes v0.8.0 (May 2026). It does not reflect the current 2.7.0 codebase; test counts and module paths here are outdated. Kept for historical context only.
+
 # Agentic Stealth Browser Analysis Report
 
 **Date:** May 21, 2026  

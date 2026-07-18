@@ -235,3 +235,11 @@ If you discover a security vulnerability:
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
+
+All contributions must be signed off under the [Developer Certificate of Origin](DCO.txt). Add a `Signed-off-by: Your Name <you@example.com>` line to each commit (use `git commit -s`).
+
+## Deprecation Policy
+
+The public API surface is: the SDK (`production.sdk.client.StealthClient`), MCP tool names (`stealth_launch`, `stealth_navigate`, `stealth_scrape`, `stealth_close`), the `agentic-stealth-browser` CLI and its flags, and the `plugins.BasePlugin` protocol.
+
+A deprecated public symbol, flag, or tool emits a `DeprecationWarning` (or documented equivalent) for at least one full MINOR release before removal. Every deprecation and removal is listed in the CHANGELOG under `Deprecated` / `Removed`.

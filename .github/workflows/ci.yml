@@ -158,10 +158,11 @@ jobs:
 
       - name: Run detection tests
         run: |
-          python -m pytest tests/ --ignore=tests/test_recovery_phase1.py -q --tb=short || true
+          python -m pytest tests/ --ignore=tests/test_recovery_phase1.py -q --tb=short
         env:
           PYTEST_ADDOPTS: "-p no:timeout"
 
+      # soft canary: live detection may flake; failures surfaced via continue-on-error, not hard-blocking
       - name: Run nightly detection runner
         run: |
           python tests/run_detection_tests.py || echo "Detection tests completed with warnings"

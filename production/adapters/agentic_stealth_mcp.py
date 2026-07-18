@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Optional
 
 from production.adapters._jsonrpc_stdio import JsonRpcStdioClient
@@ -27,6 +28,11 @@ from production.adapters.base import (
     AdapterToolError,
     Capability,
 )
+
+try:
+    _ASB_VERSION = version("agentic-stealth-browser")
+except PackageNotFoundError:
+    _ASB_VERSION = "unknown"
 
 
 # Minimal env allowlist for the mcp_server subprocess. Same rationale as
@@ -119,7 +125,7 @@ class AgenticStealthMCPAdapter:
                     "protocolVersion": "2024-11-05",
                     "clientInfo": {
                         "name": "agentic-stealth-browser-dashboard",
-                        "version": "2.7.0",
+                        "version": _ASB_VERSION,
                     },
                     "capabilities": {},
                 },

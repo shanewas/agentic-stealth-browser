@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/shanewas/agentic-stealth-browser/security/advisories/new
+    about: Please report vulnerabilities privately via a Security Advisory, not a public issue.
+  - name: Question or discussion
+    url: https://github.com/shanewas/agentic-stealth-browser/discussions
+    about: Ask questions and discuss usage in Discussions.

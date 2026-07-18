@@ -36,10 +36,6 @@ def is_adaptive_tuning_enabled() -> bool:
     return _env_flag("ADAPTIVE_TUNING", default=True)
 
 
-def is_plugin_system_enabled() -> bool:
-    return _env_flag("PLUGIN_SYSTEM", default=True)
-
-
 def is_pooled_contexts_enabled() -> bool:
     return _env_flag("POOLED_CONTEXTS", default=True)
 
@@ -84,7 +80,6 @@ def get_client_capabilities(browser_backend: str = "") -> Dict[str, Any]:
         "pooled_contexts": is_chromium and is_pooled_contexts_enabled(),
         "cdp_debug": is_chromium,
         "adaptive_tuning": is_adaptive_tuning_enabled(),
-        "plugin_system": is_plugin_system_enabled(),
         "learning_loop": is_learning_loop_enabled(),
         "firefox_support": is_firefox_supported(),
         "edge_support": is_edge_supported() and is_chromium,

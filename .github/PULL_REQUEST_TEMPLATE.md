@@ -22,3 +22,4 @@ Closes #
 - [ ] Code follows project style
 - [ ] No secrets or credentials in code
 - [ ] Documentation updated if needed
+- [ ] All commits are signed off (`git commit -s`, `Signed-off-by:` present) per the DCO

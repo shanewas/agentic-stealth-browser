@@ -16,6 +16,10 @@
 
 This is an anti-bot-evasion tool. Read the [Acceptable Use Policy](ACCEPTABLE_USE.md) before use — you are responsible for using it lawfully and within the target site's Terms of Service.
 
+This software is for lawful, **authorized** automation and testing only; you are responsible for compliance with applicable laws, target Terms of Service, and **robots.txt** directives.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND; the authors accept no liability for misuse. See [LICENSE](LICENSE).
+
 ## What is this
 
 A production-grade stealth browser automation library for Python, built on Playwright.
@@ -260,6 +264,12 @@ Additional references: [CHANGELOG.md](CHANGELOG.md) · [Workflow Library](workfl
 ├── examples/       Runnable recipes (Cloudflare, LinkedIn, Amazon)
 └── tests/          Contract + integration tests (live E2E opt-in)
 ```
+
+## Governance & Support
+
+- [Governance](GOVERNANCE.md)
+- [Roadmap](ROADMAP.md)
+- [Support](SUPPORT.md)
 
 ## License
 

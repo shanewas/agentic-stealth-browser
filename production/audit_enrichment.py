@@ -41,7 +41,7 @@ class AuditEnricher:
         enriched = dict(details or {})
         enriched["actor"] = self._actor or "unknown"
         enriched["workflow_id"] = self._workflow_id or ""
-        enriched["trace_id"] = uuid.uuid4().hex[:12]
+        enriched["event_id"] = uuid.uuid4().hex[:12]
 
         if self._audit and hasattr(self._audit, "log_action"):
             self._audit.log_action(action, enriched, level=level)

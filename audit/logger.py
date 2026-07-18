@@ -212,8 +212,7 @@ class AuditLogger:
         - String values on all other keys are scanned for sensitive value patterns
           (emails, API keys, URLs with embedded creds, Bearer tokens).
 
-        Redaction is mandatory by default (opt-in to disable via AGENTIC_STEALTH_NO_REDACT
-        env var, intended ONLY for local debugging).
+        Redaction is always on and cannot be disabled.
         """
         SENSITIVE_KEYS = frozenset(
             [

@@ -10,14 +10,9 @@ Operator and contributor reference for `agentic-stealth-browser`.
 - **[canary.md](canary.md)** — the public 4-hourly detection canary. What it
   scores, how to run it locally, where the dashboard is regenerated.
 
-## Reference
-
-- **[agentic-stealth-browser-analysis-report.md](agentic-stealth-browser-analysis-report.md)**
-  — module-by-module architecture walkthrough (v0.8.0 snapshot; still useful
-  as a map of `core/`, `stealth/`, `behavior/`, `recovery/`, `production/`).
-
 ## Planning & historical
 
+- **[agentic-stealth-browser-analysis-report.md](agentic-stealth-browser-analysis-report.md)** — historical v0.8.0 architecture snapshot; superseded, kept for context.
 - **[plans/2026-06-01-v2.4.0-attach-mode-hardening.md](plans/2026-06-01-v2.4.0-attach-mode-hardening.md)**
   — the v2.4.0 attach-mode hardening plan (RFC-1918 gate, `TeardownMode`
   enum, stealth install surface).
