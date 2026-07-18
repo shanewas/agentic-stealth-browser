@@ -57,6 +57,9 @@ COPY workflows/ ./workflows/
 COPY plugins/ ./plugins/
 COPY mcp_security.py ./
 
+# App dir must be writable by non-root user (e.g. workflow_orchestrator checkpoints/)
+RUN chown -R appuser:appuser /app
+
 # Install the project
 RUN pip install --no-cache-dir --no-deps -e .
 

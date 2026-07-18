@@ -42,6 +42,18 @@ from production.metrics import MetricsCollector
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DEFAULT_PERSONA
 
+# Lightweight library-specific exception hierarchy for #249 DX improvement (ARC-07: now in core/errors.py).
+# Users can now do: from core.agent_browser import StealthBrowserError, LaunchError, ... (re-export, back-compat)
+# Base catches all library errors; specific ones for targeted handling.
+# Existing raw Playwright/RuntimeError paths remain for compat; new code prefers these.
+from core.errors import (
+    StealthBrowserError as StealthBrowserError,
+    LaunchError as LaunchError,
+    RecoveryError as RecoveryError,
+    BlockDetectedError as BlockDetectedError,
+    RateLimitError as RateLimitError,
+)
+
 
 def robots_allows(robots_txt: str, url: str, user_agent: str = "*") -> bool:
     """Return True if robots_txt permits user_agent to fetch url. Empty/unparseable => allowed."""
@@ -53,16 +65,6 @@ def robots_allows(robots_txt: str, url: str, user_agent: str = "*") -> bool:
         return rp.can_fetch(user_agent, url)
     except Exception:
         return True
-
-
-# Lightweight library-specific exception hierarchy for #249 DX improvement.
-# Users can now do: from core.agent_browser import StealthBrowserError, LaunchError, ...
-# Base catches all library errors; specific ones for targeted handling.
-# Existing raw Playwright/RuntimeError paths remain for compat; new code prefers these.
-class StealthBrowserError(Exception):
-    """Base exception for all Agentic Stealth Browser library errors (DX #249)."""
-
-    pass
 
 
 class TeardownMode(enum.Enum):
@@ -84,42 +86,6 @@ class TeardownMode(enum.Enum):
     POOLED = "pooled"  # Borrowed a context from _BrowserPool — release, don't kill
     ATTACHED_OWNED_CTX = "attached_owned_ctx"  # Attached + created a new context
     ATTACHED_ADOPTED_CTX = "attached_adopted_ctx"  # Attached + adopted user's context
-
-
-class LaunchError(StealthBrowserError):
-    """Raised when browser launch or context creation fails (stealth, proxy, etc.)."""
-
-    pass
-
-
-class RecoveryError(StealthBrowserError):
-    """Raised or catchable during anti-block recovery orchestration."""
-
-    pass
-
-
-class BlockDetectedError(StealthBrowserError):
-    """Explicit signal that a block/challenge was detected (for user catch blocks)."""
-
-    def __init__(
-        self,
-        block_type: Optional[str] = None,
-        platform: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-    ):
-        self.block_type = block_type
-        self.platform = platform
-        self.details = details or {}
-        msg = (
-            f"Block detected: {block_type or 'unknown'} on {platform or 'unknown site'}"
-        )
-        super().__init__(msg)
-
-
-class RateLimitError(StealthBrowserError):
-    """Raised when rate limiter enforces a wait or limit (informational subclass)."""
-
-    pass
 
 
 class _BrowserPool:
@@ -1199,6 +1165,19 @@ class AgentBrowser:
 
         P3: Integrated with AccountHealth, AccountWarmer, ConnectionPool, and AdaptiveTuner.
         """
+        # ponytail: simple per-session request budget; only counts when the env cap is set
+        _req_cap = os.getenv("AGENTIC_MAX_REQUESTS_PER_SESSION")
+        if _req_cap:
+            self._request_count = getattr(self, "_request_count", 0) + 1
+            if self._request_count > int(_req_cap):
+                if getattr(self, "logger", None):
+                    self.logger.log_action(
+                        "request_budget_exceeded",
+                        {"cap": int(_req_cap), "count": self._request_count},
+                        level="warning",
+                    )
+                return False
+
         # #136: tool-level rate limit check
         if self._rate_limiter:
             await self._rate_limiter.check_and_wait("safe_goto")

@@ -40,7 +40,7 @@ playwright install --with-deps chromium
 ```
 
 ```python
-from core.agent_browser import AgentBrowser
+from core import AgentBrowser
 
 async with AgentBrowser(session_name="demo") as browser:
     await browser.launch(headless=True)
@@ -91,6 +91,10 @@ This library is opinionated and has real limits. Operators should know them up f
 - **Login credentials are not shipped.** Examples that touch authenticated endpoints
   stop at the search/listing stage.
 
+### Cost controls
+
+Set `AGENTIC_MAX_REQUESTS_PER_SESSION=<n>` to cap navigations per session (`safe_goto` returns `False` once exceeded).
+
 ---
 
 ## Quick Start
@@ -108,7 +112,7 @@ agentic-stealth-browser dashboard
 ### Python SDK
 
 ```python
-from core.agent_browser import AgentBrowser
+from core import AgentBrowser
 
 async with AgentBrowser(
     session_name="my-session",

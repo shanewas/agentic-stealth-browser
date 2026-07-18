@@ -156,7 +156,8 @@ markers = [
   "live_network: requires real network or external protected sites",
   "slow: slow or resource-heavy tests",
   "contract: interface/contract tests (pure logic, no browser)",
-  "mcp: MCP server runtime, tools, and contract tests"
+  "mcp: MCP server runtime, tools, and contract tests",
+  "perf: load/performance smoke tests (opt-in, excluded from default CI)"
 ]
 
 [project.urls]
