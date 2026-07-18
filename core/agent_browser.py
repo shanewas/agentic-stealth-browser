@@ -1272,6 +1272,7 @@ class AgentBrowser:
                 self.account_warming.record_page_visit(url)
             self.connection_pool.release_context(domain)
             self.adaptive_tuner.record_feedback(blocked=False, platform=platform)
+            self.metrics.increment("requests_success")
             return True
         except Exception as e:
             # P3: Record failure to all tracking systems
@@ -1284,6 +1285,8 @@ class AgentBrowser:
             self.logger.log_error(
                 "safe_goto_failed", str(e), {"url": url, "platform": platform}
             )
+            self.metrics.increment("requests_failed")
+            self.metrics.record_error("navigation", str(e))
             return False
 
     async def load_cookies(self, cookies_path: str):

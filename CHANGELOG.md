@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] — Enterprise Hardening (2026-07-18)
+
+Auditability, supply-chain, and business-facing hardening from a full enterprise
+audit. No breaking changes; no runtime behavior change on existing flows.
+
+### Added
+- **Acceptable Use Policy** (`ACCEPTABLE_USE.md`) + a `## Legal & Acceptable Use`
+  section in the README — authorized-use scope, prohibited uses (ToS/robots/CFAA/
+  GDPR-CCPA), operator responsibility, and rate-limit good-citizenship, for an
+  anti-bot tool that enterprise/legal review can pass through procurement.
+- **Compliance docs** (`docs/`): `INCIDENT_RESPONSE.md` (credential/key-compromise
+  playbook, triage severities, post-incident), `KEY_MANAGEMENT.md` (secret
+  inventory + env sourcing + rotation), `DATA_HANDLING.md` (what is persisted,
+  data-controller statement, retention + deletion posture).
+- **Navigation success/failure metrics** (`core/agent_browser.py`): `safe_goto`
+  now emits `requests_success` / `requests_failed` counters and calls
+  `metrics.record_error("navigation", …)` on failure, so `MetricsCollector`'s
+  `success_rate` reflects real traffic instead of being permanently 100%.
+
+### Changed
+- **Dependency lower bounds** (`pyproject.toml`): the seven previously-unpinned
+  runtime deps and the four dev deps now carry `>=` floors set to
+  CVE-safe/current releases (e.g. `aiohttp>=3.10.11`, `cryptography>=43.0.1`,
+  `jinja2>=3.1.5`), so a fresh install can no longer resolve a known-vulnerable
+  release. No upper caps — existing installs are unaffected.
+- **README claims hedged** for an enterprise audience: the tagline and the
+  "zero-flag" line are now framed as a point-in-time canary snapshot, not a
+  guarantee.
+- `pyproject.toml` version 2.6.0 → 2.7.0; MCP `clientInfo.version` handshake
+  strings in the two stdio adapters aligned to 2.7.0.
+
+### Security
+- **Release-metadata gate** (`.github/workflows/publish.yml`): the build job now
+  runs `twine check --strict dist/*` before upload, so malformed metadata can no
+  longer burn an immutable PyPI version.
+- **SECURITY.md supported-versions table** corrected from a stale `0.8.x` to
+  `2.7.x` (`< 2.7` unsupported), with a note that the table is updated every
+  release.
+
+### Testing
+- The five live-Chromium attach tests in `tests/test_attach_over_cdp.py` are now
+  marked `@pytest.mark.e2e`, so the default (non-e2e) CI run no longer errors when
+  a browser is unavailable and the deterministic subset stays green.
+
 ## [2.6.0] — Stealth & MCP Hardening (2026-07-12)
 
 ### Added

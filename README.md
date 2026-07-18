@@ -1,6 +1,6 @@
 # Agentic Stealth Browser
 
-**Playwright gets detected. This doesn't.**
+**Playwright gets detected. This is much harder to detect.**
 
 [![CI](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml/badge.svg)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -11,6 +11,10 @@
 <p align="center">
   <img src="assets/hn-demo.gif" alt="Agentic Stealth Browser Demo" width="90%">
 </p>
+
+## Legal & Acceptable Use
+
+This is an anti-bot-evasion tool. Read the [Acceptable Use Policy](ACCEPTABLE_USE.md) before use — you are responsible for using it lawfully and within the target site's Terms of Service.
 
 ## What is this
 
@@ -56,7 +60,8 @@ Sites don't just check your User-Agent anymore. They check *everything*:
 | **Account warming** | Nothing | 14-day graduated ramp-up per account |
 
 Result: **passes bot.sannysoft.com, pixelscan.net, and CreepJS** with zero flags in
-headless mode (detection canaries run every 4 hours via `docs/canary.md`).
+headless mode as of the latest 4-hourly canary run (detection canaries run every 4 hours
+via `docs/canary.md`).
 
 ---
 

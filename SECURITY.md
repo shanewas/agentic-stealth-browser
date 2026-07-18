@@ -4,8 +4,10 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.8.x   | :white_check_mark: |
-| < 0.8   | :x:                |
+| 2.7.x   | :white_check_mark: |
+| < 2.7   | :x:                |
+
+This table is updated as part of every release; a release is not complete until the current minor version appears here.
 
 ## Reporting a Vulnerability
 

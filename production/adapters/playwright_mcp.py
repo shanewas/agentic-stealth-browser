@@ -133,7 +133,7 @@ class PlaywrightMCPAdapter:
                     "protocolVersion": "2024-11-05",
                     "clientInfo": {
                         "name": "agentic-stealth-browser",
-                        "version": "2.6.0",
+                        "version": "2.7.0",
                     },
                     "capabilities": {},
                 },

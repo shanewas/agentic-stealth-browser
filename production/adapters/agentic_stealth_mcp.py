@@ -119,7 +119,7 @@ class AgenticStealthMCPAdapter:
                     "protocolVersion": "2024-11-05",
                     "clientInfo": {
                         "name": "agentic-stealth-browser-dashboard",
-                        "version": "2.6.0",
+                        "version": "2.7.0",
                     },
                     "capabilities": {},
                 },

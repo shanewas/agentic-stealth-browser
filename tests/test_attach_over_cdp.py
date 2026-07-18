@@ -251,6 +251,7 @@ async def remote_chromium(tmp_path):
         await _kill_if_alive()
 
 
+@pytest.mark.e2e
 async def test_attach_over_cdp_live_new_context(remote_chromium):
     port, proc = remote_chromium
     ab = AgentBrowser(session_name="t-attach", anonymous=True, ephemeral=True)
@@ -284,6 +285,7 @@ async def test_attach_over_cdp_live_new_context(remote_chromium):
     assert proc.returncode is None
 
 
+@pytest.mark.e2e
 async def test_attach_over_cdp_reports_stealth_install_failure(
     remote_chromium, monkeypatch
 ):
@@ -321,6 +323,7 @@ async def test_attach_over_cdp_reports_stealth_install_failure(
     assert proc.returncode is None
 
 
+@pytest.mark.e2e
 async def test_attach_over_cdp_stealth_not_requested(remote_chromium):
     """When apply_stealth=False, stealth_applied is False but no error is set."""
     port, proc = remote_chromium
@@ -358,6 +361,7 @@ async def test_teardown_mode_init_is_none():
     assert ab._teardown_mode is None
 
 
+@pytest.mark.e2e
 async def test_teardown_mode_set_to_attached_owned(remote_chromium):
     """attach_over_cdp(new_context=True) sets ATTACHED_OWNED_CTX."""
     from core.agent_browser import TeardownMode
@@ -371,6 +375,7 @@ async def test_teardown_mode_set_to_attached_owned(remote_chromium):
     assert proc.returncode is None
 
 
+@pytest.mark.e2e
 async def test_teardown_mode_set_to_attached_adopted(remote_chromium):
     """attach_over_cdp(adopt existing) sets ATTACHED_ADOPTED_CTX."""
     from core.agent_browser import TeardownMode
