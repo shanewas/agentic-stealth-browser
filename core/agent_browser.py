@@ -36,8 +36,8 @@ from audit.logger import AuditLogger
 from scraping.scraper import StealthScraper
 from ai.ai_hooks import AIHooks
 from sessions.cookie_manager import CookieManager, SessionOrchestrator
-from production.rate_limiter import AccountRateLimiter, ToolRateLimiter
-from production.metrics import MetricsCollector
+from core.rate_limiter import AccountRateLimiter, ToolRateLimiter
+from core.metrics import MetricsCollector
 
 # Persona system scaffolding (#109) - foundation only. Canonical in stealth/profiles.py
 from stealth.profiles import Persona, DEFAULT_PERSONA
@@ -1756,7 +1756,7 @@ class AgentBrowser:
         account: Optional[str] = None,
     ):
         """Configure custom rate limit for a domain (applied to this instance's limiter)."""
-        from production.rate_limiter import RateLimitConfig
+        from core.rate_limiter import RateLimitConfig
 
         config = RateLimitConfig(
             requests_per_minute=requests_per_minute, cooldown_seconds=cooldown_seconds

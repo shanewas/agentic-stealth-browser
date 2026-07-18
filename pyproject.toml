@@ -74,6 +74,7 @@ include = [
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml", "*.yml", "*.toml", "*.cfg", "py.typed"]
 "canary" = ["templates/*.j2"]
+"production" = ["templates/*.html"]
 
 [tool.mypy]
 python_version = "3.11"
