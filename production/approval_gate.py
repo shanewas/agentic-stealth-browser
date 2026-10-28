@@ -41,14 +41,38 @@ class ApprovalResult:
     timestamp: float = field(default_factory=time.time)
 
 
-SENSITIVE_ACTIONS = {
-    "navigate",
-    "stealth_navigate",
-    "execute_js",
-    "stealth_replay",
-    "run_workflow",
-    "stealth_launch",
+MCP_TOOL_CLASSIFICATION: Dict[str, bool] = {
+    "stealth_launch": True,
+    "stealth_navigate": True,
+    "stealth_load_cookies": True,
+    "stealth_set_region": True,
+    "stealth_scrape": True,
+    "stealth_status": False,
+    "stealth_tabs_list": False,
+    "stealth_tab_snapshot": False,
+    "stealth_session_timeline": False,
+    "stealth_debug_report": False,
+    "stealth_get_cdp_endpoint": True,
+    "stealth_attach_over_cdp": True,
+    "stealth_close": True,
+    "stealth_capabilities": False,
+    "stealth_teach": True,
+    "stealth_replay": True,
+    "stealth_workflow_list": False,
+    "stealth_workflow_delete": True,
 }
+
+TOOL_CLASSIFICATION = MCP_TOOL_CLASSIFICATION
+
+_LEGACY_SENSITIVE_ACTIONS = {
+    "navigate",
+    "execute_js",
+    "run_workflow",
+}
+
+SENSITIVE_ACTIONS = {
+    name for name, sensitive in MCP_TOOL_CLASSIFICATION.items() if sensitive
+} | _LEGACY_SENSITIVE_ACTIONS
 
 
 class ApprovalGate:
@@ -105,7 +129,7 @@ class ApprovalGate:
     ) -> ApprovalResult:
         import uuid
 
-        if action not in SENSITIVE_ACTIONS:
+        if not is_sensitive_action(action):
             return ApprovalResult(
                 request_id="",
                 decision=ApprovalDecision.ALLOWED,
@@ -120,7 +144,7 @@ class ApprovalGate:
             session_name=session_name,
         )
 
-        if action in ("navigate", "stealth_navigate"):
+        if action in ("navigate", "stealth_navigate", "stealth_scrape"):
             url = (details or {}).get("url", "")
             domain = self._domain_from_url(url)
             if self._auto_approve_known and domain in self._known_domains:
@@ -190,7 +214,9 @@ class ApprovalGate:
 
 
 def is_sensitive_action(action: str) -> bool:
-    return action in SENSITIVE_ACTIONS
+    if action in MCP_TOOL_CLASSIFICATION:
+        return MCP_TOOL_CLASSIFICATION[action]
+    return True
 
 
 def get_sensitive_actions() -> List[str]:

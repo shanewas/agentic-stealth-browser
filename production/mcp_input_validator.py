@@ -34,6 +34,7 @@ class ParamRule:
     min_value: Optional[int | float] = None
     allowed_values: Optional[Set[str]] = None
     pattern: Optional[str] = None
+    single_component: bool = False
 
     def validate(self, value: Any) -> Optional[str]:
         if value is None:
@@ -53,6 +54,14 @@ class ParamRule:
                 return f"does not match pattern {self.pattern}"
             if self.allowed_values and value not in self.allowed_values:
                 return f"value '{value}' not in allowed set"
+            if self.single_component and value:
+                if (
+                    "/" in value
+                    or "\\" in value
+                    or value in (".", "..")
+                    or re.match(r"^[a-zA-Z]:", value)
+                ):
+                    return "must be a single path component"
 
         if isinstance(value, (int, float)):
             if self.max_value is not None and value > self.max_value:
@@ -227,8 +236,20 @@ MCP_TOOL_SCHEMAS: Dict[str, ToolInputSchema] = {
     "stealth_teach": ToolInputSchema(
         "stealth_teach",
         [
-            ParamRule("session_name", str, required=True, max_length=128),
-            ParamRule("workflow_name", str, required=True, max_length=128),
+            ParamRule(
+                "session_name",
+                str,
+                required=True,
+                max_length=128,
+                single_component=True,
+            ),
+            ParamRule(
+                "workflow_name",
+                str,
+                required=True,
+                max_length=128,
+                single_component=True,
+            ),
             ParamRule("description", str, max_length=1024),
             ParamRule("capture_seconds", int, min_value=1, max_value=600),
         ],
@@ -244,7 +265,7 @@ MCP_TOOL_SCHEMAS: Dict[str, ToolInputSchema] = {
     "stealth_workflow_list": ToolInputSchema(
         "stealth_workflow_list",
         [
-            ParamRule("platform", str, max_length=32),
+            ParamRule("platform", str, max_length=32, single_component=True),
             ParamRule("pattern", str, max_length=256),
         ],
     ),
