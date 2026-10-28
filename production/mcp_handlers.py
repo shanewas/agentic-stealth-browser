@@ -495,6 +495,19 @@ class _MCPToolHandlers:
             }
         )
 
+    def _resolve_teach_output_path(
+        self, session_name: str, workflow_name: str
+    ) -> Path:
+        root = self._workflow_library_root.resolve()
+        output_path = (root / session_name / f"{workflow_name}.yaml").resolve()
+        if root not in output_path.parents:
+            raise ToolError(
+                "MCP_SECURITY_PATH_DENIED",
+                "Workflow path resolved outside allowed library root.",
+                {"session_name": session_name, "workflow_name": workflow_name},
+            )
+        return output_path
+
     async def _tool_stealth_teach(self, args: Dict[str, Any]) -> Dict[str, Any]:
         from workflows.recorder import WorkflowRecorder
 
@@ -516,6 +529,8 @@ class _MCPToolHandlers:
             raise ToolError("MCP_VALIDATION_ERROR", "workflow_name is required")
 
         resolved_name, browser = await self._resolve_browser(session_name)
+        output_path = self._resolve_teach_output_path(resolved_name, workflow_name)
+        output_dir = output_path.parent
 
         current_url = ""
         try:
@@ -551,9 +566,7 @@ class _MCPToolHandlers:
                 or f"Recorded workflow for session '{resolved_name}' — URL: {current_url}",
             )
 
-            output_dir = self._workflow_library_root / resolved_name
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"{workflow_name}.yaml"
             output_path.write_text(workflow_to_yaml_str(workflow))
 
             return self._tool_ok_payload(
@@ -572,9 +585,7 @@ class _MCPToolHandlers:
         workflow = recorder.to_workflow(name=workflow_name, description=description)
         steps = workflow.steps
 
-        output_dir = self._workflow_library_root / resolved_name
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{workflow_name}.yaml"
         workflow_yaml = recorder.to_workflow_yaml(
             name=workflow_name, description=description
         )
@@ -695,7 +706,17 @@ class _MCPToolHandlers:
         search_root = self._workflow_library_root
         if platform:
             platform = str(platform)
-            search_root = self._workflow_library_root / platform
+            search_root = (self._workflow_library_root / platform).resolve()
+            resolved_root = self._workflow_library_root.resolve()
+            if (
+                resolved_root not in search_root.parents
+                and search_root != resolved_root
+            ):
+                raise ToolError(
+                    "MCP_SECURITY_PATH_DENIED",
+                    "Workflow platform resolved outside allowed library root.",
+                    {"platform": platform},
+                )
             if not search_root.exists():
                 # fall back to bundled in wheel
                 if self._bundled_workflow_root:

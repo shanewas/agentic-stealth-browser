@@ -776,6 +776,23 @@ class SessionAuth:
             self.sessions.pop(session_id, None)
 
 
+def _validate_dashboard_credentials(settings: DashboardSettings) -> None:
+    if settings.users:
+        for username, entry in settings.users.items():
+            password = entry.get("password") if isinstance(entry, dict) else None
+            if not password:
+                raise RuntimeError(
+                    f"Hermes dashboard user '{username}' has an empty password. "
+                    "Set a non-empty password for every DashboardSettings.users entry."
+                )
+        return
+    if not settings.password or settings.password == "change-me":
+        raise RuntimeError(
+            "Hermes dashboard refuses to start with the default 'change-me' or empty password. "
+            "Set a strong password or configure DashboardSettings.users."
+        )
+
+
 def create_app(
     manager: Optional[BrowserRuntimeManager] = None,
     settings: Optional[DashboardSettings] = None,
@@ -784,6 +801,7 @@ def create_app(
     from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
     settings = settings or DashboardSettings()
+    _validate_dashboard_credentials(settings)
     manager = manager or BrowserRuntimeManager()
     auth = SessionAuth(settings)
     app = FastAPI(title="Hermes Browser Dashboard", version="0.1.0")
@@ -997,6 +1015,7 @@ def create_app(
     @app.post("/api/workflows/record/start")
     async def api_record_start(request: Request):
         session = current_session(request)
+        require_operator(session)
         data = await require_csrf(request, session)
         return manager.start_recording(
             str(data.get("name") or "dashboard-demo"),
@@ -1006,6 +1025,7 @@ def create_app(
     @app.post("/api/workflows/record/save")
     async def api_record_save(request: Request):
         session = current_session(request)
+        require_operator(session)
         await require_csrf(request, session)
         return manager.save_recording()
 
@@ -1046,7 +1066,9 @@ def create_app(
 
     @app.delete("/api/schedules/{schedule_id}")
     async def api_schedule_delete(request: Request, schedule_id: str):
-        current_session(request)
+        session = current_session(request)
+        require_operator(session)
+        await require_csrf(request, session)
         return manager.delete_schedule(schedule_id)
 
     @app.post("/api/browser/screenshot")
@@ -1068,11 +1090,14 @@ def create_app(
 
     @app.delete("/api/workflows/{name}")
     async def api_workflow_delete(request: Request, name: str):
-        current_session(request)
+        session = current_session(request)
+        require_operator(session)
+        await require_csrf(request, session)
         return manager.delete_workflow(name)
 
     @app.get("/metrics")
-    async def api_metrics():
+    async def api_metrics(request: Request):
+        current_session(request)
         from fastapi.responses import PlainTextResponse
 
         browser = manager.browser
