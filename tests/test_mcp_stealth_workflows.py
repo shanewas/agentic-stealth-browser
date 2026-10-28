@@ -507,3 +507,74 @@ async def test_workflow_list_includes_metadata_fields(tmp_path, monkeypatch):
         assert key in meta_workflow, f"Expected key '{key}' in workflow metadata"
     assert isinstance(meta_workflow["size"], int)
     assert meta_workflow["size"] > 0
+
+
+@pytest.mark.parametrize(
+    "tool,args",
+    [
+        (
+            "stealth_teach",
+            {"session_name": "s", "workflow_name": "../../../tmp/pwn"},
+        ),
+        ("stealth_teach", {"session_name": "../escape", "workflow_name": "ok"}),
+        ("stealth_teach", {"session_name": "s", "workflow_name": ".."}),
+        ("stealth_teach", {"session_name": "s", "workflow_name": "a\\b"}),
+        ("stealth_teach", {"session_name": "s", "workflow_name": "/abs/path"}),
+        ("stealth_workflow_list", {"platform": "../../etc"}),
+        ("stealth_workflow_list", {"platform": ".."}),
+        ("stealth_workflow_list", {"platform": "a/b"}),
+    ],
+)
+def test_validator_rejects_path_traversal_in_path_like_fields(tool, args):
+    from production.mcp_input_validator import (
+        InputValidationError,
+        validate_tool_input,
+    )
+
+    with pytest.raises(InputValidationError):
+        validate_tool_input(tool, args)
+
+
+def test_validator_accepts_normal_teach_and_list_names():
+    from production.mcp_input_validator import validate_tool_input
+
+    validate_tool_input(
+        "stealth_teach", {"session_name": "teach-test", "workflow_name": "my-flow_1"}
+    )
+    validate_tool_input("stealth_workflow_list", {"platform": "common"})
+
+
+@pytest.mark.asyncio
+async def test_teach_handler_rejects_traversal_without_writing(
+    tmp_path, monkeypatch
+):
+    from production.mcp_server import ToolError
+
+    monkeypatch.setattr("production.mcp_server.Path.home", lambda: tmp_path)
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+    await _call_tool(
+        server, "stealth_launch", {"session_name": "teach-test"}, msg_id=100
+    )
+
+    # Direct handler call bypasses the validator: containment must still hold.
+    with pytest.raises(ToolError) as exc:
+        await server._tool_stealth_teach(
+            {"session_name": "teach-test", "workflow_name": "../../../tmp/pwn"}
+        )
+    assert exc.value.error_code == "MCP_SECURITY_PATH_DENIED"
+    assert not (tmp_path / "pwn.yaml").exists()
+    assert not list(server._workflow_library_root.rglob("pwn.yaml"))
+
+
+@pytest.mark.asyncio
+async def test_workflow_list_handler_rejects_platform_traversal(
+    tmp_path, monkeypatch
+):
+    from production.mcp_server import ToolError
+
+    monkeypatch.setattr("production.mcp_server.Path.home", lambda: tmp_path)
+    server = StealthMCPServer(agent_browser_cls=_FakeBrowser)
+
+    with pytest.raises(ToolError) as exc:
+        await server._tool_stealth_workflow_list({"platform": "../../etc"})
+    assert exc.value.error_code == "MCP_SECURITY_PATH_DENIED"
