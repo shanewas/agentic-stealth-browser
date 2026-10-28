@@ -76,11 +76,13 @@ class TeardownMode(enum.Enum):
 
     Lifecycle:
         __init__ → None (no browser)
-        launch() → LAUNCHED
+        launch() → LAUNCHED (set before the classic launch call, so a
+            launch failing after context creation is still closed)
         launch() with use_pooled_context=True → POOLED
         attach_over_cdp(new_context=True) → ATTACHED_OWNED_CTX
         attach_over_cdp(adopt existing) → ATTACHED_ADOPTED_CTX
-        close() → dispatches on this value, then None
+        close() → dispatches on this value, then None; pool/attach flags are
+            also reset and this instance's Playwright driver is stopped
     """
 
     LAUNCHED = "launched"  # Owns the browser process — close it
@@ -257,6 +259,15 @@ class AgentBrowser:
         self._using_pool: bool = False
         self._pooled_ctx_id: Optional[int] = None  # track for release
         self._browser_process = None  # set after launch for PID tracking
+        # Teardown-state defaults: every launch/attach path starts clean and
+        # close() returns all of these to the values below.
+        self._pw = None  # Playwright driver started by *this* instance, if any
+        self._pool = None  # shared _BrowserPool when _using_pool is True
+        self._remote_browser = None  # attached CDP Browser, if any
+        self._attached: bool = False
+        self._attached_cdp_url: Optional[str] = None
+        self._attached_context_is_ours: bool = False
+        self._owned_pages: list = []  # pages this instance created (identity)
 
         # #439: TeardownMode state machine — None means "no browser to tear down"
         self._teardown_mode: Optional["TeardownMode"] = None
@@ -288,6 +299,7 @@ class AgentBrowser:
 
         # #161 P2: graceful shutdown support (atexit + signal friendly)
         self._atexit_registered = False
+        self._atexit_callback = None
         self._register_atexit_shutdown()
 
         # P3: New module integrations
@@ -383,15 +395,43 @@ class AgentBrowser:
                     "atexit: unexpected error: %s", e
                 )
 
+        self._atexit_callback = _atexit_cleanup_sync
         try:
             atexit.register(_atexit_cleanup_sync)
             self._atexit_registered = True
         except Exception as e:
+            self._atexit_callback = None
             import logging
 
             logging.getLogger("agent_browser.atexit").warning(
                 "atexit: registration failed: %s", e
             )
+
+    def _unregister_atexit_shutdown(self) -> None:
+        """Remove this instance's atexit callback (idempotent)."""
+        callback = getattr(self, "_atexit_callback", None)
+        if getattr(self, "_atexit_registered", False) and callback is not None:
+            try:
+                atexit.unregister(callback)
+            except Exception:
+                pass
+        self._atexit_callback = None
+        self._atexit_registered = False
+
+    def _track_owned_page(self, page: Any) -> None:
+        """Record a page this instance created, so only it gets _owns_page."""
+        if page is None:
+            return
+        owned = getattr(self, "_owned_pages", None)
+        if owned is None:
+            owned = self._owned_pages = []
+        if not any(existing is page for existing in owned):
+            owned.append(page)
+
+    def _is_owned_page(self, page: Any) -> bool:
+        return any(
+            existing is page for existing in getattr(self, "_owned_pages", []) or []
+        )
 
     async def launch(
         self,
@@ -449,6 +489,19 @@ class AgentBrowser:
             Proxy support: configure via self.proxy_manager.create_decodo_config(...) *before* calling launch()
             (or pass preconfigured ProxyManager in advanced usage); it is now wired into launch_persistent_context (#14, #29).
         """
+        if (
+            getattr(self, "browser", None) is not None
+            or getattr(self, "page", None) is not None
+            or getattr(self, "_pw", None) is not None
+            or getattr(self, "_remote_browser", None) is not None
+            or getattr(self, "_attached", False)
+        ):
+            raise RuntimeError(
+                "AgentBrowser already has an active browser/context. "
+                "Call close() before launch(), or use a fresh instance."
+            )
+        # Re-register if a previous close() unregistered it (instance reuse).
+        self._register_atexit_shutdown()
         if persona is not None:
             self.persona = persona
         if light_mode is not None:
@@ -648,6 +701,9 @@ class AgentBrowser:
             for k, v in (custom or {}).items():
                 if k not in ("user_data_dir",):  # never override critical
                     lp_kwargs[k] = v
+            # Set before the call (mirroring rotation): if launch or a later
+            # step fails after the context exists, close() must close it.
+            self._teardown_mode = TeardownMode.LAUNCHED
             self.browser = await pw.chromium.launch_persistent_context(**lp_kwargs)
             self.browser_context = self.browser
 
@@ -716,6 +772,7 @@ class AgentBrowser:
         # Create main page (critical fix)
         self.page = await self.browser.new_page()
         self._owns_page = True
+        self._track_owned_page(self.page)
         self.context = self.browser  # alias for clarity (BUG-03 naming hygiene)
 
         # #182: initialize default page_getter (overridable); recovery and internal now prefer via getter
@@ -834,6 +891,9 @@ class AgentBrowser:
         The next retry of _navigate / func in execute_with_recovery will use the fresh live browser.
         Safety: does not recreate recovery (avoids reentrancy), preserves light_mode/persona/rate_limiter.
         Only called on recovery paths; headless defaults to True for recovery relaunches.
+        Raises RecoveryError on failure: the old browser is already closed, so
+        self is left explicitly dead (browser/page/human/scraper None, the old
+        session is kept) and only the staged replacement is closed.
         """
         # Updated guard for pooled mode (#57 etc): allow rotation if we have browser (pooled uses _pool not _pw)
         has_launcher = bool(getattr(self, "browser", None)) and (
@@ -842,9 +902,27 @@ class AgentBrowser:
             or getattr(self, "_using_pool", False)
         )
         if not has_launcher:
-            return
+            raise RecoveryError(
+                "rotation_relaunch_failed: no active browser/launcher to rotate"
+            )
 
         log = getattr(self, "logger", None)
+        # Stage the replacement in locals. Live references on self are only
+        # swapped once the staged page is usable (see swap below).
+        staged_context = None
+        staged_page = None
+        staged_session = (
+            new_session_meta
+            if new_session_meta and isinstance(new_session_meta, dict)
+            else self.session
+        )
+        staged_tls_manager = None
+        staged_browser_process = None
+        staged_mode = (
+            TeardownMode.POOLED
+            if getattr(self, "_using_pool", False)
+            else TeardownMode.LAUNCHED
+        )
         try:
             # 1. Close old page + context (for pooled: release via pool to keep shared browser alive)
             if getattr(self, "page", None):
@@ -852,8 +930,6 @@ class AgentBrowser:
                     await self.page.close()
                 except Exception:
                     pass
-                self.page = None
-                self._owns_page = False
             if getattr(self, "browser", None):
                 try:
                     if getattr(self, "_using_pool", False) and getattr(
@@ -864,26 +940,34 @@ class AgentBrowser:
                         await self.browser.close()
                 except Exception:
                     pass
-                self.browser = None
-                self.browser_context = None
+            # The old browser is gone from here on. Mark that explicitly so a
+            # staging failure cannot leave stale live-looking references.
+            self.page = None
+            self._owns_page = False
+            self.browser = None
+            self.browser_context = None
+            self.context = None
+            self.human = None
+            self.orchestrator = None
+            self.scraper = None
+            self._teardown_mode = None
+            self._browser_process = None
+            if self.recovery:
+                self.recovery.browser = None
 
-            # 2. Adopt rotated session (provides fresh user_data_dir + name)
-            if new_session_meta and isinstance(new_session_meta, dict):
-                self.session = new_session_meta
-                if self.recovery:
-                    self.recovery.set_current_session_name(self.session.get("name"))
-
-            # 3. Recompute everything needed (mirrors launch logic)
-            user_data = Path(self.session["user_data_dir"])
+            # 2. Recompute everything needed (mirrors launch logic), staged.
+            user_data = Path(staged_session["user_data_dir"])
             user_data.mkdir(parents=True, exist_ok=True)
 
             extra_headers = get_extra_http_headers()
 
             # P2/P3: preserve current_region / preset for health/status continuity on rotation
             tls_region = getattr(self, "current_region", "global") or "global"
-            self.tls_manager = get_tls_manager(tls_region, self.session.get("name"))
-            self.tls_manager.log_fingerprint_choice()
-            tls_args = self.tls_manager.get_launch_args()
+            staged_tls_manager = get_tls_manager(
+                tls_region, staged_session.get("name")
+            )
+            staged_tls_manager.log_fingerprint_choice()
+            tls_args = staged_tls_manager.get_launch_args()
 
             base_args = [
                 "--disable-blink-features=AutomationControlled",
@@ -936,11 +1020,11 @@ class AgentBrowser:
             h = opts.get("headless", True)
             sm = opts.get("slow_mo", 0)
             hd = opts.get("headed", False)
-            self._custom_launch_options = (
+            staged_custom_options = (
                 opts.get("launch_options")
                 or getattr(self, "_custom_launch_options", {})
                 or {}
-            )  # #143 preserve across rotation
+            )  # #143 preserve across rotation (assigned on swap)
             if getattr(self, "_using_pool", False) and getattr(self, "_pool", None):
                 context_opts = {
                     "viewport": vp,
@@ -951,12 +1035,11 @@ class AgentBrowser:
                     "proxy": launch_proxy,
                 }
                 # #143 merge custom in rotation too
-                custom = getattr(self, "_custom_launch_options", {}) or {}
+                custom = staged_custom_options or {}
                 for k, v in (custom or {}).items():
                     if k not in ("user_data_dir", "headless", "slow_mo"):
                         context_opts[k] = v
-                self.browser = await self._pool.create_context(**context_opts)
-                self.browser_context = self.browser
+                staged_context = await self._pool.create_context(**context_opts)
             else:
                 # #143: build + merge custom in rotation relaunch
                 lp_kwargs = {
@@ -971,17 +1054,19 @@ class AgentBrowser:
                     "args": all_args,
                     "proxy": launch_proxy,
                 }
-                custom = getattr(self, "_custom_launch_options", {}) or {}
+                custom = staged_custom_options or {}
                 for k, v in (custom or {}).items():
                     if k not in ("user_data_dir",):
                         lp_kwargs[k] = v
-                # #439: mark teardown mode BEFORE the actual launch so any
-                # partial-failure cleanup in close() knows what to do.
-                self._teardown_mode = TeardownMode.LAUNCHED
-                self.browser = await self._pw.chromium.launch_persistent_context(
+                staged_context = await self._pw.chromium.launch_persistent_context(
                     **lp_kwargs
                 )
-                self.browser_context = self.browser
+                try:
+                    pw_browser_obj = staged_context.browser
+                    if pw_browser_obj is not None:
+                        staged_browser_process = pw_browser_obj.process
+                except Exception:
+                    staged_browser_process = None
 
                 # #377 rediscover after rotation relaunch (classic path)
                 if getattr(self, "debug_cdp", False):
@@ -1009,19 +1094,17 @@ class AgentBrowser:
                         self._cdp_port = None
                         self._cdp_browser_version = None
 
-            self.page = await self.browser.new_page()
-            self._owns_page = True
-            self.context = self.browser
+            staged_page = await staged_context.new_page()
 
-            # 5. Re-apply stealth init script on context + fp seed
-            session_name = (self.session or {}).get("name", "default-session")
+            # 5. Re-apply stealth init script on staged context + fp seed
+            session_name = (staged_session or {}).get("name", "default-session")
             fp_seed = f"agentic-{session_name}-canvas-v4"
             # Apply screen profile from persona (rotation must preserve this, matching launch())
             screen_profile = p_over.get(
                 "screen",
                 p_over.get("viewport", {"width": vp["width"], "height": vp["height"]}),
             )
-            await self.browser.add_init_script(
+            await staged_context.add_init_script(
                 get_stealth_script(
                     fingerprint_seed=fp_seed,
                     hardware=hw_fingerprint,
@@ -1035,47 +1118,100 @@ class AgentBrowser:
             except Exception:
                 pass
 
-            # 6. Re-wire human/orchestrator/scraper for the *new* page (so clicks/scrolls etc work post-rotation)
+            # 6. Build human/orchestrator/scraper for the staged page.
             # Pass device for consistent scroll physics across rotation (#244)
             # Use a fresh RNG seeded from session name for independence from pre-rotation state
             rotation_rng = random.Random(session_name)
-            self.human = HumanBehavior(
-                self.page,
+            staged_human = HumanBehavior(
+                staged_page,
                 rng=rotation_rng,
                 device_profile=getattr(self.persona, "device", None),
             )
-            self.orchestrator = BehaviorOrchestrator(self.human, rng=rotation_rng)
-            self.scraper = StealthScraper(self.page, self.human, self.orchestrator)
+            staged_orchestrator = BehaviorOrchestrator(
+                staged_human, rng=rotation_rng
+            )
+            staged_scraper = StealthScraper(
+                staged_page, staged_human, staged_orchestrator
+            )
 
             # Re-init mouse tracker post-rotation for position continuity (#18 related)
             try:
-                await self.human.initialize_mouse_tracker()
+                await staged_human.initialize_mouse_tracker()
             except Exception:
                 pass
 
-            # 7. Update recovery's browser ref and page_getter (#182: now delegates to AgentBrowser.page_getter for pluggability)
+            # 7. Swap: the staged page is usable, so adopt every reference at
+            # once with no awaits in between.
+            self.browser = staged_context
+            self.browser_context = staged_context
+            self.context = staged_context
+            self.page = staged_page
+            self._owns_page = True
+            self._track_owned_page(staged_page)
+            self.session = staged_session
+            self.tls_manager = staged_tls_manager
+            self._custom_launch_options = staged_custom_options
+            self._browser_process = staged_browser_process
+            self._teardown_mode = staged_mode
+            self.human = staged_human
+            self.orchestrator = staged_orchestrator
+            self.scraper = staged_scraper
+            staged_context = None
+            staged_page = None
             if self.recovery:
                 self.recovery.browser = self.browser
                 self.recovery._get_page = (
                     self.page_getter
                 )  # uses the overridable getter (defaults to current self.page)
+                try:
+                    self.recovery.set_current_session_name(self.session.get("name"))
+                except Exception:
+                    pass
 
             if log:
-                log.log_action(
-                    "rotation_relaunch_succeeded",
-                    {
-                        "session": (self.session or {}).get("name"),
-                        "proxy_rotated": bool(launch_proxy),
-                        "new_proxy": new_proxy_name,
-                    },
-                )
+                try:
+                    log.log_action(
+                        "rotation_relaunch_succeeded",
+                        {
+                            "session": (self.session or {}).get("name"),
+                            "proxy_rotated": bool(launch_proxy),
+                            "new_proxy": new_proxy_name,
+                        },
+                    )
+                except Exception:
+                    pass
         except Exception as e:
+            # Close only the staged replacement; the old browser is already
+            # closed and self was already marked dead above.
+            if staged_context is not None:
+                try:
+                    if getattr(self, "_using_pool", False) and getattr(
+                        self, "_pool", None
+                    ):
+                        await self._pool.release_context(staged_context)
+                    else:
+                        await staged_context.close()
+                except Exception:
+                    pass
+            self.page = None
+            self._owns_page = False
+            self.browser = None
+            self.browser_context = None
+            self.context = None
+            self.human = None
+            self.orchestrator = None
+            self.scraper = None
+            self._teardown_mode = None
+            if self.recovery:
+                self.recovery.browser = None
             if log:
-                log.log_error(
-                    "rotation_relaunch_failed", str(e), {"proxy": new_proxy_name}
-                )
-            # Do not raise: let the recovery retry path surface the failure naturally (max_retries etc)
-            # The old context is already closed, but browser may be in partial state; next operation will raise appropriately.
+                try:
+                    log.log_error(
+                        "rotation_relaunch_failed", str(e), {"proxy": new_proxy_name}
+                    )
+                except Exception:
+                    pass
+            raise RecoveryError(f"rotation_relaunch_failed: {e}") from e
 
     async def goto(
         self,
@@ -2135,6 +2271,7 @@ class AgentBrowser:
         if not self.browser:
             raise RuntimeError("Browser not launched. Call launch() first.")
         new_p = await self.browser.new_page()
+        self._track_owned_page(new_p)
         if make_current:
             self.page = new_p
             self._owns_page = True
@@ -2166,33 +2303,45 @@ class AgentBrowser:
                 pass
         return [self.page] if self.page else []
 
-    async def switch_to_page(self, page: Any) -> bool:
+    async def switch_to_page(
+        self, page: Any, *, adopt_foreign_page: bool = False
+    ) -> bool:
         """Switch the 'current' page to the provided one (from get_pages or new_page).
 
         Re-wires human behavior etc. Does not close the previous current page.
         Returns True on success. For #176 multi-tab support.
+
+        The page must belong to ``self.browser.pages``. Foreign pages are
+        rejected with ValueError unless ``adopt_foreign_page=True`` is passed
+        explicitly. Ownership is never transferred by switching: only pages
+        this instance created get ``_owns_page=True``; a pre-existing member
+        page (or an adopted foreign page) keeps ``_owns_page=False``, so
+        close() will not close a page this instance did not create.
         """
         if not self.browser or not page:
             return False
-        try:
-            # validate it belongs? best effort
-            if self.browser and page not in (getattr(self.browser, "pages", []) or []):
-                # still allow, user may have external
-                pass
-            self.page = page
-            self._owns_page = (
-                True  # current page we are driving is now "ours" to manage
+        members = getattr(self.browser, "pages", []) or []
+        if page not in members and not adopt_foreign_page:
+            raise ValueError(
+                "switch_to_page: page does not belong to this browser context; "
+                "pass adopt_foreign_page=True to adopt a foreign page explicitly"
             )
-            self.human = HumanBehavior(
+        try:
+            human = HumanBehavior(
                 page, rng=self.rng, device_profile=getattr(self.persona, "device", None)
             )
-            self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
-            self.scraper = StealthScraper(page, self.human, self.orchestrator)
-            if self.recovery:
-                self.recovery._get_page = self.page_getter
-            return True
+            orchestrator = BehaviorOrchestrator(human, rng=self.rng)
+            scraper = StealthScraper(page, human, orchestrator)
         except Exception:
             return False
+        self.page = page
+        self._owns_page = self._is_owned_page(page)
+        self.human = human
+        self.orchestrator = orchestrator
+        self.scraper = scraper
+        if self.recovery:
+            self.recovery._get_page = self.page_getter
+        return True
 
     async def attach_over_cdp(
         self,
@@ -2253,12 +2402,15 @@ class AgentBrowser:
             )
         if not cdp_url or not isinstance(cdp_url, str):
             raise ValueError("cdp_url must be a non-empty string")
+        # Re-register if a previous close() unregistered it (instance reuse).
+        self._register_atexit_shutdown()
 
         # Normalise bare host:port to http:// form (Playwright accepts http or ws)
         normalised = cdp_url.strip()
         if not normalised.startswith(("http://", "https://", "ws://", "wss://")):
             normalised = f"http://{normalised}"
 
+        self._using_pool = False
         if getattr(self, "_pw", None) is None:
             self._pw = await async_playwright().start()
 
@@ -2351,9 +2503,11 @@ class AgentBrowser:
                 else:
                     self.page = await ctx.new_page()
                     self._owns_page = True
+                    self._track_owned_page(self.page)
             except Exception:
                 self.page = await ctx.new_page()
                 self._owns_page = True
+                self._track_owned_page(self.page)
 
             # #453: initialize runtime helpers (human, logger, scraper, recovery) so that
             # documented safe_goto/safe_click/safe_type and MCP stealth_scrape work on
@@ -2463,80 +2617,123 @@ class AgentBrowser:
         Attach mode (after ``attach_over_cdp``): the externally-launched browser
         process is preserved. Only contexts/pages created by this AgentBrowser
         are closed; adopted user contexts are left untouched.
+
+        Invariant: whatever path got us here, close() leaves the instance in
+        the clean ``__init__`` teardown state — browser/page/context None,
+        teardown mode None, pool/attach flags reset, this instance's
+        Playwright driver stopped (the shared pool's driver is not ours to
+        stop), and the atexit callback unregistered. Safe to call twice.
         """
+        # Unregister first so even a failing teardown cannot leave this
+        # instance retained by atexit for the process lifetime.
+        try:
+            self._unregister_atexit_shutdown()
+        except Exception:
+            pass
         try:
             if self.page and getattr(self, "_owns_page", True):
-                # #451: only close pages we created/own; adopted user tabs and externally
-                # supplied pages via switch_to_page(new) must survive our close().
+                # #451: only close pages we created/own; adopted user tabs and
+                # non-owned pages switched to via switch_to_page() survive.
                 try:
                     await self.page.close()
                 except Exception:
                     pass
-                self.page = None
-            else:
-                # adopted or non-owned page: clear ref but leave the tab alive
-                self.page = None
+            # adopted or non-owned page: clear ref but leave the tab alive
+            self.page = None
 
             if self.browser:
                 try:
-                    # #439: dispatch on TeardownMode enum instead of scattered
-                    # getattr flag checks. Each branch is responsible for
-                    # exactly the teardown it owns.
-                    mode = self._teardown_mode
+                    # #439: dispatch on TeardownMode. Each branch is
+                    # responsible for exactly the teardown it owns.
+                    mode = getattr(self, "_teardown_mode", None)
                     if mode == TeardownMode.ATTACHED_OWNED_CTX:
                         # We created the context → close it.
                         try:
                             await self.browser.close()
                         except Exception:
                             pass
-                        # Then disconnect from the remote browser without killing it.
-                        remote = getattr(self, "_remote_browser", None)
-                        if remote is not None:
-                            try:
-                                await remote.close()
-                            except Exception:
-                                pass
-                            self._remote_browser = None
                     elif mode == TeardownMode.ATTACHED_ADOPTED_CTX:
-                        # Adopted user context → NEVER close it. Just disconnect.
-                        remote = getattr(self, "_remote_browser", None)
-                        if remote is not None:
-                            try:
-                                await remote.close()
-                            except Exception:
-                                pass
-                            self._remote_browser = None
-                    elif mode == TeardownMode.POOLED and getattr(self, "_pool", None):
-                        # Borrowed a context from the pool → release it back.
-                        await self._pool.release_context(self.browser)
+                        # Adopted user context → NEVER close it.
+                        pass
+                    elif mode == TeardownMode.POOLED:
+                        # Borrowed a context from the pool → release it back
+                        # (the shared browser/driver stay alive).
+                        pool = getattr(self, "_pool", None)
+                        if pool is not None:
+                            await pool.release_context(self.browser)
+                        else:
+                            await self.browser.close()
                     elif mode == TeardownMode.LAUNCHED:
                         # We launched the browser process → close it.
                         await self.browser.close()
-                    # mode is None → no browser was ever set up; no-op
+                    elif (
+                        mode is None
+                        and getattr(self, "_using_pool", False)
+                        and getattr(self, "_pool", None) is not None
+                    ):
+                        # Pooled context whose mode was lost → release it.
+                        await self._pool.release_context(self.browser)
+                    elif (
+                        mode is None
+                        and not getattr(self, "_using_pool", False)
+                        and not getattr(self, "_attached", False)
+                    ):
+                        # Defensive fallback: a live non-pooled, non-attached
+                        # context whose mode was never set (e.g. a launch
+                        # that failed part-way) is still ours to close.
+                        await self.browser.close()
+                    # otherwise mode is None with no owned context: no-op;
+                    # an attached context with a lost mode is left alone.
                 except Exception:
                     pass
                 self.browser = None
                 self.browser_context = None
                 self.context = None
-                self._pooled_ctx_id = None
-                self._teardown_mode = None  # reset for potential re-use
 
-            if getattr(self, "_using_pool", False):
-                # do not shutdown shared pool here; individual close only releases its ctx
-                # full shutdown via _pool.shutdown() on app exit if desired
-                pass
-            elif hasattr(self, "_pw") and self._pw:
+            # Disconnect from an attached remote browser without killing it,
+            # whichever attach branch (or fallback) ran above.
+            remote = getattr(self, "_remote_browser", None)
+            if remote is not None:
+                try:
+                    await remote.close()
+                except Exception:
+                    pass
+
+            # Always stop the Playwright driver this instance started. This
+            # must not be skipped on the pooled path: an instance reused for
+            # attach_over_cdp() after a pooled launch owns its attach driver.
+            # (In pooled mode self._pw is None — the driver belongs to the
+            # shared _BrowserPool and is stopped by pool shutdown, not here.)
+            if getattr(self, "_pw", None):
                 try:
                     await self._pw.stop()
                 except Exception:
                     pass
-                self._pw = None
-
-            # Best-effort cleanup of other resources
+        except Exception:
+            # Never let close() itself raise — we want reliable cleanup
+            pass
+        finally:
+            # Reset every teardown-state field even if teardown above failed,
+            # so a reused instance cannot inherit stale pool/attach state.
+            self.page = None
+            self.browser = None
+            self.browser_context = None
+            self.context = None
+            self._pw = None
+            self._remote_browser = None
+            self._browser_process = None
+            self._pooled_ctx_id = None
+            self._teardown_mode = None
+            self._using_pool = False
+            self._attached = False
+            self._attached_cdp_url = None
+            self._attached_context_is_ours = False
+            self._owns_page = False
+            self._owned_pages = []
             self.human = None
             self.orchestrator = None
+            self.scraper = None
             self.recovery = None
-            self._owns_page = False
             if getattr(self, "logger", None):
                 try:
                     self.logger.log_action("browser_closed", {})
@@ -2547,9 +2744,6 @@ class AgentBrowser:
                 except Exception:
                     pass
                 self.logger = None
-        except Exception:
-            # Never let close() itself raise — we want reliable cleanup
-            pass
 
     async def __aenter__(self):
         """Support for `async with AgentBrowser(...) as browser:` usage.
