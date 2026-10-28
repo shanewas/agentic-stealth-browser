@@ -24,6 +24,7 @@ from recovery.anti_block_orchestrator import AntiBlockOrchestrator
 from behavior.human_behavior import HumanBehavior
 from behavior.orchestration import BehaviorOrchestrator
 from sessions.session_manager import SessionManager
+from sessions.validation import resolve_contained_path
 from proxy.proxy_manager import ProxyManager
 
 # P3: New module integrations
@@ -1689,10 +1690,16 @@ class AgentBrowser:
         if not p:
             return None
         try:
-            import os
-
-            os.makedirs("screenshots", exist_ok=True)
-            filename = f"screenshots/{name}_{int(time.time())}.png"
+            # Reduce name to a single safe component, then verify the
+            # resolved target stays under screenshots/ before writing.
+            safe_name = str(name).replace("\\", "/").rstrip("/").split("/")[-1]
+            if safe_name in ("", ".", ".."):
+                safe_name = "error"
+            screenshots_dir = Path("screenshots")
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+            leaf = f"{safe_name}_{int(time.time())}.png"
+            resolve_contained_path(screenshots_dir, leaf)
+            filename = f"screenshots/{leaf}"
             await p.screenshot(path=filename, full_page=True)
             return filename
         except Exception as e:
