@@ -44,6 +44,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 
+from sessions.validation import validate_identifier
+
 
 class SessionManager:
     """Manages browser sessions with isolation (#87: see module header for strong multi-instance warnings)"""
@@ -79,6 +81,10 @@ class SessionManager:
         if anonymous:
             name = f"anon-{uuid.uuid4().hex[:10]}"
 
+        # Validate before any filesystem use: the name becomes a path
+        # component under base_dir (browser profile, cookies included).
+        validate_identifier(name, field="session name")
+
         if ephemeral:
             prefix = "ephemeral-"
             if not name.startswith(prefix):
@@ -104,6 +110,7 @@ class SessionManager:
 
     def get_session(self, name: str) -> Optional[Dict]:
         """Load existing session metadata"""
+        validate_identifier(name, field="session name")
         session_path = self.base_dir / name
         meta_file = session_path / "meta.json"
         if not meta_file.exists():
@@ -129,6 +136,7 @@ class SessionManager:
         Default: marks the session meta with 'compromised' flag (safe, reversible).
         With remove_dir=True: hard delete of the entire session directory (use with caution).
         """
+        validate_identifier(name, field="session name")
         session_path = self.base_dir / name
         if not session_path.exists():
             return {"status": "not_found", "name": name}
@@ -226,6 +234,10 @@ class SessionManager:
         """
         import shutil
 
+        validate_identifier(source_name, field="session name")
+        if new_name is not None:
+            validate_identifier(new_name, field="session name")
+
         src_meta = self.get_session(source_name)
         if not src_meta:
             return {
@@ -235,6 +247,8 @@ class SessionManager:
 
         if new_name is None:
             new_name = f"clone-{uuid.uuid4().hex[:8]}-of-{source_name}"
+
+        validate_identifier(new_name, field="session name")
 
         # ensure not colliding
         if (self.base_dir / new_name).exists():

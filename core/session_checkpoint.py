@@ -17,9 +17,12 @@ import json
 import time
 import base64
 import hashlib
+from glob import escape as glob_escape
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+
+from sessions.validation import resolve_contained_path, validate_identifier
 
 
 @dataclass
@@ -230,19 +233,27 @@ class SessionManager:
             custom_data=custom_data,
         )
 
+    def _checkpoint_path(self, filename: str) -> Path:
+        """Resolve a checkpoint filename contained under data_dir."""
+        return resolve_contained_path(self.data_dir, filename, required_suffix=".json")
+
     def save_checkpoint(
         self, checkpoint: SessionCheckpoint, filename: Optional[str] = None
     ) -> Path:
         """Save checkpoint to disk."""
+        account_id = validate_identifier(
+            checkpoint.metadata.account_id, field="account_id"
+        )
         if filename is None:
-            filename = f"{checkpoint.metadata.account_id}_{int(checkpoint.metadata.created_at)}.json"
+            filename = f"{account_id}_{int(checkpoint.metadata.created_at)}.json"
 
-        filepath = self.data_dir / filename
+        # Resolve both targets before writing anything.
+        filepath = self._checkpoint_path(filename)
+        latest_path = self._checkpoint_path(f"{account_id}_latest.json")
         with open(filepath, "w") as f:
             f.write(checkpoint.to_json())
 
         # Also save as latest for easy resumption
-        latest_path = self.data_dir / f"{checkpoint.metadata.account_id}_latest.json"
         with open(latest_path, "w") as f:
             f.write(checkpoint.to_json())
 
@@ -251,7 +262,7 @@ class SessionManager:
 
     def load_checkpoint(self, filename: str) -> SessionCheckpoint:
         """Load checkpoint from disk."""
-        filepath = self.data_dir / filename
+        filepath = self._checkpoint_path(filename)
         if not filepath.exists():
             raise FileNotFoundError(f"Checkpoint not found: {filepath}")
 
@@ -260,7 +271,8 @@ class SessionManager:
 
     def load_latest(self, account_id: str) -> Optional[SessionCheckpoint]:
         """Load the latest checkpoint for an account."""
-        latest_path = self.data_dir / f"{account_id}_latest.json"
+        validate_identifier(account_id, field="account_id")
+        latest_path = self._checkpoint_path(f"{account_id}_latest.json")
         if not latest_path.exists():
             return None
 
@@ -269,7 +281,11 @@ class SessionManager:
 
     def list_checkpoints(self, account_id: Optional[str] = None) -> List[Path]:
         """List all checkpoints, optionally filtered by account."""
-        pattern = f"{account_id}_*.json" if account_id else "*.json"
+        if account_id is not None:
+            validate_identifier(account_id, field="account_id")
+            pattern = f"{glob_escape(account_id)}_*.json"
+        else:
+            pattern = "*.json"
         return sorted(self.data_dir.glob(pattern))
 
     async def restore_to_browser(self, page, checkpoint: SessionCheckpoint):
@@ -304,8 +320,10 @@ class SessionManager:
             return
 
         try:
-            for key, value in storage.items():
-                await page.evaluate(f"localStorage.setItem('{key}', '{value}')")
+            await page.evaluate(
+                "entries => { for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v); }",
+                dict(storage),
+            )
         except Exception as e:
             self._log(f"Failed to restore localStorage: {e}")
 
@@ -315,14 +333,16 @@ class SessionManager:
             return
 
         try:
-            for key, value in storage.items():
-                await page.evaluate(f"sessionStorage.setItem('{key}', '{value}')")
+            await page.evaluate(
+                "entries => { for (const [k, v] of Object.entries(entries)) sessionStorage.setItem(k, v); }",
+                dict(storage),
+            )
         except Exception as e:
             self._log(f"Failed to restore sessionStorage: {e}")
 
     def delete_checkpoint(self, filename: str):
         """Delete a checkpoint file."""
-        filepath = self.data_dir / filename
+        filepath = self._checkpoint_path(filename)
         if filepath.exists():
             filepath.unlink()
             self._log(f"Checkpoint deleted: {filepath}")
