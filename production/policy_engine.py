@@ -34,11 +34,37 @@ ALLOWED_STEP_TYPES = {
 }
 
 
+def _normalize_domain(value: str) -> str:
+    """Normalize a rule domain or candidate URL/host to a bare host name.
+
+    Lowercases, strips one trailing dot, drops any port, and parses
+    scheme-less inputs (``blocked.example/path``) as host-plus-path.
+    Exact-host semantics are kept: no suffix/subdomain widening.
+    """
+    from urllib.parse import urlparse
+
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw if "://" in raw else f"//{raw}")
+        host = parsed.hostname or ""
+    except Exception:
+        host = raw.split("/", 1)[0].rsplit("@", 1)[-1].split(":", 1)[0]
+    host = host.strip().lower()
+    if host.endswith("."):
+        host = host[:-1]
+    return host
+
+
 @dataclass
 class DomainRule:
     domain: str
     allow: bool = True
     # Note: path-level filtering is not yet implemented — only domain name is checked.
+
+    def __post_init__(self) -> None:
+        self.domain = _normalize_domain(self.domain)
 
 
 @dataclass
@@ -63,17 +89,13 @@ class Policy:
         return False
 
     def is_domain_allowed(self, url: str) -> bool:
-        from urllib.parse import urlparse
-
-        try:
-            parsed = urlparse(url)
-            host = parsed.hostname or parsed.netloc
-        except Exception:
-            host = url
-
-        host_lower = (host or "").lower()
+        host = _normalize_domain(url or "")
+        if not host:
+            return self.default_allow
         for rule in self.domain_rules:
-            if rule.domain.lower() == host_lower:
+            # Normalize again so directly-constructed rules (bypassing
+            # __post_init__ mutations or later edits) compare equally.
+            if _normalize_domain(rule.domain) == host:
                 return rule.allow
         return self.default_allow
 
@@ -129,24 +151,53 @@ class PolicyEngine:
             return self.policies.get(key)
         return Policy(name="default")
 
+    def policy_requested(self, policy_name: Optional[str] = None) -> bool:
+        """True when a policy was explicitly requested (argument or active)."""
+        return bool(policy_name or self.active_policy)
+
     def set_active(self, policy_name: str) -> bool:
         if policy_name in self.policies:
             self.active_policy = policy_name
             return True
-        return False
+        # Record the request before raising so that, if a caller catches
+        # the error and keeps using this engine, check_step still sees an
+        # explicitly requested (but missing) policy and fails closed
+        # instead of silently falling back to the fail-open default.
+        self.active_policy = policy_name
+        raise ValueError(f"policy '{policy_name}' is not loaded")
 
     def check_step(
         self, step_type: str, url: str, policy_name: Optional[str] = None
     ) -> Dict[str, Any]:
+        requested = policy_name or self.active_policy
         policy = self.get_policy(policy_name)
         if policy is None:
-            return {"allowed": True, "reason": "no policy", "approval_required": False}
+            # A policy was explicitly requested (by argument or as the
+            # active policy) but is not loaded: fail closed. The genuinely
+            # unconfigured case is handled by get_policy returning the
+            # default policy, and never reaches this branch.
+            return {
+                "allowed": False,
+                "reason": f"policy '{requested}' is not loaded",
+                "approval_required": True,
+            }
 
         if not policy.is_step_type_allowed(step_type):
             return {
                 "allowed": False,
                 "reason": f"step type '{step_type}' is blocked",
                 "approval_required": False,
+            }
+
+        if requested and url and "{{" in str(url):
+            # A template variable survived resolution, so the real
+            # destination cannot be checked. Fail closed when a policy
+            # was explicitly requested/active; the unconfigured default
+            # policy above keeps its documented fail-open behaviour.
+            return {
+                "allowed": False,
+                "reason": f"unresolved template variable in URL '{url}'",
+                "approval_required": True,
             }
 
         if not policy.is_domain_allowed(url):

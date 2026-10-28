@@ -105,7 +105,7 @@ def is_url_safe(url: str) -> bool:
     try:
         parsed = urllib.parse.urlparse(url)
         scheme = (parsed.scheme or "").lower()
-        if scheme not in ALLOWED_SCHEMES:
+        if scheme and scheme not in ALLOWED_SCHEMES:
             return False
 
         host = parsed.hostname
@@ -319,7 +319,14 @@ class StealthMCPServer(_MCPToolHandlers):
             logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
         active_policy = os.getenv("STEALTH_MCP_POLICY")
         if active_policy:
-            self._policy_engine.set_active(active_policy)
+            try:
+                self._policy_engine.set_active(active_policy)
+            except ValueError as exc:
+                # Surface the misconfiguration loudly instead of silently
+                # disabling enforcement. set_active leaves the requested
+                # name in place, so check_step fails closed (denies) until
+                # a valid policy is loaded/activated.
+                logging.getLogger(__name__).error("Policy activation failed: %s", exc)
         approval_mode = os.getenv("STEALTH_APPROVAL_MODE", "enforce").strip().lower()
         self._approval_gate = ApprovalGate(auto_approve_known_domains=True)
         if approval_mode == "permissive":
