@@ -89,7 +89,13 @@ class AccountWarmer:
         self._session_pages: int = 0
         self._session_domains: set = set()
         self._session_start: Optional[float] = None
+        self._session_active: bool = False
         self._max_scroll_this_session: int = 0
+
+    @property
+    def session_active(self) -> bool:
+        """Whether a warming session is currently active."""
+        return self._session_active
 
     @property
     def days_elapsed(self) -> float:
@@ -151,6 +157,7 @@ class AccountWarmer:
             self.start()
 
         self._session_start = time.time()
+        self._session_active = True
         self._session_actions = 0
         self._session_pages = 0
         self._session_domains = set()
@@ -161,10 +168,12 @@ class AccountWarmer:
     def end_session(self):
         """End current session and save state."""
         if not self._session_start:
+            self._session_active = False
             return
 
         duration = (time.time() - self._session_start) / 60.0
         self._session_start = None
+        self._session_active = False
         self._total_actions += self._session_actions
         self._save_state()
         self._log(
@@ -176,15 +185,42 @@ class AccountWarmer:
         """Record an action during session."""
         self._session_actions += 1
 
+    @staticmethod
+    def _domain_from_url(url: str) -> str:
+        """Extract the domain recorded for a visited URL."""
+        try:
+            return url.split("://")[1].split("/")[0].split(":")[0]
+        except (IndexError, AttributeError):
+            return url
+
+    def _site_variety_exceeded(
+        self,
+        limits: Dict[str, Any],
+        url: Optional[str] = None,
+        domain: Optional[str] = None,
+    ) -> bool:
+        """Whether a prospective visit would exceed the distinct-domain cap.
+
+        Site variety counts DISTINCT domains. A visit to a domain already
+        in this session adds none, so it is always allowed by this check.
+        Without a prospective visit, reaching the cap still reports stop,
+        preserving the no-argument behaviour existing callers rely on.
+        """
+        if domain is not None:
+            prospective = domain.split(":")[0]
+        elif url is not None:
+            prospective = self._domain_from_url(url)
+        else:
+            return len(self._session_domains) >= limits["site_variety"]
+        return (
+            prospective not in self._session_domains
+            and len(self._session_domains) >= limits["site_variety"]
+        )
+
     def record_page_visit(self, url: str):
         """Record a page visit."""
         self._session_pages += 1
-        # Extract domain
-        try:
-            domain = url.split("://")[1].split("/")[0].split(":")[0]
-            self._session_domains.add(domain)
-        except (IndexError, AttributeError):
-            self._session_domains.add(url)
+        self._session_domains.add(self._domain_from_url(url))
 
     def record_scroll(self, depth: int):
         """Record scroll depth."""
@@ -206,8 +242,14 @@ class AccountWarmer:
             "is_warmed": self.is_warmed(),
         }
 
-    def should_stop_session(self) -> bool:
-        """Check if session should end based on warming limits."""
+    def should_stop_session(
+        self, url: Optional[str] = None, domain: Optional[str] = None
+    ) -> bool:
+        """Check if session should end based on warming limits.
+
+        ``url``/``domain`` optionally identify the prospective visit, so
+        the site-variety check can allow a repeat of a known domain.
+        """
         if not self._session_start:
             return False
 
@@ -222,12 +264,14 @@ class AccountWarmer:
             return True
         if self._max_scroll_this_session >= limits["max_scroll_depth"]:
             return True
-        if len(self._session_domains) >= limits["site_variety"]:
+        if self._site_variety_exceeded(limits, url=url, domain=domain):
             return True
 
         return False
 
-    def get_reason_to_stop(self) -> Optional[str]:
+    def get_reason_to_stop(
+        self, url: Optional[str] = None, domain: Optional[str] = None
+    ) -> Optional[str]:
         """Get reason why session should stop, or None."""
         if not self._session_start:
             return None
@@ -243,7 +287,7 @@ class AccountWarmer:
             return f"Page limit reached ({self._session_pages}/{limits['max_pages']})"
         if self._max_scroll_this_session >= limits["max_scroll_depth"]:
             return f"Scroll depth limit reached ({self._max_scroll_this_session}/{limits['max_scroll_depth']})"
-        if len(self._session_domains) >= limits["site_variety"]:
+        if self._site_variety_exceeded(limits, url=url, domain=domain):
             return f"Site variety limit reached ({len(self._session_domains)}/{limits['site_variety']})"
 
         return None
@@ -272,6 +316,7 @@ class AccountWarmer:
         self._session_pages = 0
         self._session_domains = set()
         self._session_start = None
+        self._session_active = False
         self._max_scroll_this_session = 0
         self._save_state()
         self._log("Warming state reset")

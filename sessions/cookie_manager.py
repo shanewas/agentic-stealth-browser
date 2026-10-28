@@ -145,6 +145,14 @@ class CookieManager:
             hmac_salt if hmac_salt is not None else secrets.token_bytes(32)
         )
 
+    async def _refresh_cookies_from_context(self) -> None:
+        """Sync in-memory cookies from the bound live browser context, if any."""
+        if self.browser_context:
+            try:
+                self.cookies = await self.browser_context.cookies()
+            except Exception:
+                pass
+
     def _get_cipher(self, key: Optional[str]) -> Optional["Fernet"]:
         """Return Fernet cipher for optional encryption (supports raw secret or fernet key).
 
@@ -477,6 +485,7 @@ class CookieManager:
 
     async def refresh_cookies_if_needed(self, max_age_hours: int = 8) -> Dict[str, Any]:
         """Check and report on cookie freshness (actual refresh usually requires re-auth)."""
+        await self._refresh_cookies_from_context()
         if not self.cookies:
             return {"status": "no_cookies"}
 
@@ -535,6 +544,7 @@ class CookieManager:
 
     async def get_cookie_health(self) -> Dict[str, Any]:
         """Return detailed health snapshot of current cookies."""
+        await self._refresh_cookies_from_context()
         if not self.cookies:
             return {"status": "no_cookies", "total": 0}
 
@@ -580,6 +590,7 @@ class CookieManager:
         If encryption_key (or encrypt=True + key) provided, uses Fernet authenticated encryption (#82 P1).
         Plaintext format remains compatible. Supports both kwarg styles used by callers.
         """
+        await self._refresh_cookies_from_context()
         if not self.cookies:
             return {"status": "no_cookies"}
 

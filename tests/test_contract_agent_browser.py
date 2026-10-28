@@ -288,3 +288,91 @@ class TestBrowserPoolContract:
         from core.agent_browser import _BrowserPool
 
         assert hasattr(_BrowserPool, "shutdown")
+
+    def _pool_with_live_browser(self, monkeypatch):
+        from core.agent_browser import _BrowserPool
+
+        class _FakeContext:
+            async def close(self):
+                pass
+
+        class _FakeBrowser:
+            def __init__(self):
+                self.contexts = []
+
+            async def new_context(self, **kwargs):
+                ctx = _FakeContext()
+                self.contexts.append(ctx)
+                return ctx
+
+        pool = _BrowserPool()
+        browser = _FakeBrowser()
+        monkeypatch.setattr(pool, "_browser", browser)
+        monkeypatch.setattr(pool, "_headless", True)
+        monkeypatch.setattr(pool, "_launch_args", ["--pool-arg"])
+        monkeypatch.setattr(pool, "_lock", asyncio.Lock())
+        return pool, browser
+
+    def test_pool_no_preference_inherits_live_config(self, monkeypatch):
+        pool, browser = self._pool_with_live_browser(monkeypatch)
+        assert asyncio.run(pool.ensure_browser()) is browser
+        ctx = asyncio.run(pool.create_context())
+        assert ctx is browser.contexts[0]
+
+    def test_pool_matching_config_is_accepted(self, monkeypatch):
+        pool, browser = self._pool_with_live_browser(monkeypatch)
+        result = asyncio.run(
+            pool.ensure_browser(headless=True, args=["--pool-arg"])
+        )
+        assert result is browser
+
+    def test_pool_conflicting_headless_raises(self, monkeypatch):
+        pool, _browser = self._pool_with_live_browser(monkeypatch)
+        with pytest.raises(RuntimeError, match="headless"):
+            asyncio.run(pool.ensure_browser(headless=False))
+
+    def test_pool_conflicting_args_raises(self, monkeypatch):
+        pool, _browser = self._pool_with_live_browser(monkeypatch)
+        with pytest.raises(RuntimeError, match="args"):
+            asyncio.run(pool.ensure_browser(args=["--other-arg"]))
+
+    def test_pool_create_context_conflicting_headless_raises(self, monkeypatch):
+        pool, _browser = self._pool_with_live_browser(monkeypatch)
+        with pytest.raises(RuntimeError, match="headless"):
+            asyncio.run(pool.create_context(headless=False))
+
+    def test_pool_records_effective_config_at_creation(self, monkeypatch):
+        from core.agent_browser import _BrowserPool
+
+        class _FakeBrowser:
+            pass
+
+        class _FakeChromium:
+            def __init__(self, browser):
+                self._browser = browser
+                self.launch_kwargs = None
+
+            async def launch(self, **kwargs):
+                self.launch_kwargs = kwargs
+                return self._browser
+
+        class _FakePW:
+            def __init__(self, browser):
+                self.chromium = _FakeChromium(browser)
+
+        pool = _BrowserPool()
+        browser = _FakeBrowser()
+        fake_pw = _FakePW(browser)
+        monkeypatch.setattr(pool, "_browser", None)
+        monkeypatch.setattr(pool, "_pw", fake_pw)
+        monkeypatch.setattr(pool, "_headless", True)
+        monkeypatch.setattr(pool, "_launch_args", [])
+        monkeypatch.setattr(pool, "_lock", asyncio.Lock())
+        result = asyncio.run(pool.ensure_browser(headless=False, args=["--x"]))
+        assert result is browser
+        assert fake_pw.chromium.launch_kwargs == {
+            "headless": False,
+            "args": ["--x"],
+        }
+        assert pool._headless is False
+        assert pool._launch_args == ["--x"]
