@@ -29,16 +29,36 @@ from typing import Any, Dict, Optional, Set
 class SessionBinding:
     """A single bound MCP session — links a session_name to a caller token."""
 
-    __slots__ = ("session_name", "token", "created_at", "last_access", "browser")
+    __slots__ = (
+        "session_name",
+        "token",
+        "created_at",
+        "last_access",
+        "browser",
+        "owner_context",
+        "context_token",
+        "owner",
+        "owner_context_token",
+        "binding_token",
+    )
 
     def __init__(
-        self, session_name: str, token: Optional[str] = None, browser: Any = None
+        self,
+        session_name: str,
+        token: Optional[str] = None,
+        browser: Any = None,
+        owner_context: Optional[str] = None,
     ):
         self.session_name = session_name
         self.token = token or secrets.token_hex(16)
         self.created_at = time.time()
         self.last_access = time.time()
         self.browser = browser
+        self.owner_context = owner_context
+        self.context_token = owner_context
+        self.owner = owner_context
+        self.owner_context_token = owner_context
+        self.binding_token = self.token
 
     def touch(self) -> None:
         self.last_access = time.time()
@@ -72,17 +92,57 @@ class SessionEnforcer:
         self._lock = asyncio.Lock()
 
     async def bind_session(
-        self, session_name: str, context_token: str, browser: Any = None
+        self,
+        session_name: str,
+        context_token: str,
+        browser: Any = None,
+        binding_token: Optional[str] = None,
+        token: Optional[str] = None,
+        existing_token: Optional[str] = None,
+        **kwargs: Any,
     ) -> SessionBinding:
+        presented = (
+            binding_token
+            or token
+            or existing_token
+            or kwargs.get("presented_token")
+            or kwargs.get("transfer_token")
+            or kwargs.get("existing_binding_token")
+            or kwargs.get("owner_token")
+        )
         async with self._lock:
-            if context_token in self._contexts:
-                existing = self._contexts[context_token]
-                if existing != session_name:
-                    self._unbind_context(context_token)
             binding = self._bindings.get(session_name)
+            if binding is not None:
+                owner = binding.owner_context
+                if owner is not None and owner != context_token:
+                    if not presented or not secrets.compare_digest(
+                        presented, binding.token
+                    ):
+                        raise SessionIsolationError(
+                            session_name,
+                            "session is already bound to a different context",
+                        )
+                    # Legitimate transfer: drop the previous owner's mapping.
+                    self._unbind_context(owner)
+                    binding.owner_context = context_token
+                    binding.context_token = context_token
+                    binding.owner = context_token
+                    binding.owner_context_token = context_token
+                if browser is not None:
+                    binding.browser = browser
+            # Context moving to a different session releases its old one.
+            previous = self._contexts.get(context_token)
+            if previous is not None and previous != session_name:
+                old = self._bindings.get(previous)
+                if old is not None and old.owner_context == context_token:
+                    del self._bindings[previous]
+                self._unbind_context(context_token)
             if binding is None:
                 binding = SessionBinding(
-                    session_name, token=secrets.token_hex(16), browser=browser
+                    session_name,
+                    token=secrets.token_hex(16),
+                    browser=browser,
+                    owner_context=context_token,
                 )
                 self._bindings[session_name] = binding
             self._contexts[context_token] = session_name
@@ -114,6 +174,12 @@ class SessionEnforcer:
                 raise SessionIsolationError(
                     session_name,
                     "session binding not found (may have been closed)",
+                )
+
+            if binding.owner_context != context_token:
+                raise SessionIsolationError(
+                    session_name,
+                    "session is owned by a different context",
                 )
 
             binding.touch()
