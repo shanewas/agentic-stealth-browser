@@ -23,6 +23,124 @@ from production.approval_gate import ApprovalDecision
 # `ruff check` (F401) green; re-add if a future handler needs one.
 
 
+def _step_type_and_params(step: Any) -> tuple[str, Dict[str, Any]]:
+    if isinstance(step, dict):
+        return str(step.get("type", "")), {
+            k: v for k, v in step.items() if k != "type"
+        }
+    return str(getattr(step, "type", "")), dict(getattr(step, "params", {}) or {})
+
+
+def _resolve_nested_workflow_path(ref: str, library_root: Path, base_dir: Path):
+    """Resolve a run_workflow ref only inside the workflow library."""
+    if not ref:
+        return None
+    root = library_root.resolve()
+    candidate = Path(ref)
+    candidates = [candidate] if candidate.is_absolute() else [base_dir / candidate, root / candidate]
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+        except Exception:
+            continue
+        if (resolved == root or root in resolved.parents) and resolved.is_file():
+            return resolved
+    return None
+
+
+def _expand_replay_steps(steps, variables, library_root, base_dir, _stack=()):
+    """Flatten a workflow into every step the player could dispatch.
+
+    Recurses into both ``conditional`` arms and into ``run_workflow``
+    references that resolve inside the workflow library, resolving
+    template variables against ``variables`` (the replay's variable map)
+    the way the player does before dispatch. Container steps are kept in
+    the output (they were checked before); nested leaves follow them.
+    Unresolvable nested references produce an entry with ``error`` set so
+    the caller can fail closed when a policy is active.
+    """
+    from workflows.schema import load_workflow
+    from workflows.variable_resolver import VariableResolver
+
+    resolver = VariableResolver()
+
+    def resolve(value, vars_):
+        if isinstance(value, str):
+            return resolver.resolve(value, vars_)
+        if isinstance(value, list):
+            return [resolve(v, vars_) for v in value]
+        if isinstance(value, dict):
+            return {k: resolve(v, vars_) for k, v in value.items()}
+        return value
+
+    expanded = []
+
+    def walk(step_list, vars_, dir_, stack):
+        for step in step_list or []:
+            step_type, raw_params = _step_type_and_params(step)
+            params = resolve(raw_params, vars_)
+            if not isinstance(params, dict):
+                params = {}
+            expanded.append(
+                {
+                    "type": step_type,
+                    "params": params,
+                    "url": str(params.get("url", "") or ""),
+                    "error": None,
+                }
+            )
+            if step_type == "conditional":
+                for branch_key in ("steps", "else_steps"):
+                    walk(raw_params.get(branch_key) or [], vars_, dir_, stack)
+            elif step_type == "run_workflow":
+                ref = str(params.get("path", "") or "")
+                nested_path = _resolve_nested_workflow_path(ref, library_root, dir_)
+                if nested_path is None:
+                    expanded.append(
+                        {
+                            "type": step_type,
+                            "params": params,
+                            "url": "",
+                            "error": f"nested workflow '{ref}' does not resolve inside the workflow library",
+                        }
+                    )
+                elif str(nested_path) in stack:
+                    expanded.append(
+                        {
+                            "type": step_type,
+                            "params": params,
+                            "url": "",
+                            "error": f"nested workflow cycle via '{ref}'",
+                        }
+                    )
+                else:
+                    try:
+                        nested = load_workflow(str(nested_path))
+                    except Exception as exc:
+                        expanded.append(
+                            {
+                                "type": step_type,
+                                "params": params,
+                                "url": "",
+                                "error": f"nested workflow '{ref}' could not be loaded: {exc}",
+                            }
+                        )
+                        continue
+                    nested_vars = dict(vars_)
+                    step_vars = params.get("variables")
+                    if isinstance(step_vars, dict):
+                        nested_vars.update(step_vars)
+                    walk(
+                        nested.steps,
+                        nested_vars,
+                        nested_path.parent,
+                        stack + (str(nested_path),),
+                    )
+
+    walk(steps, dict(variables or {}), Path(base_dir), tuple(_stack))
+    return expanded
+
+
 class _MCPToolHandlers:
     async def _tool_stealth_launch(self, args: Dict[str, Any]) -> Dict[str, Any]:
         session_name = str(args.get("session_name") or "default")
@@ -641,35 +759,62 @@ class _MCPToolHandlers:
 
         workflow = load_workflow(str(resolved_workflow_path))
 
-        # Security gate: enforce policy (step-type / domain allow-lists) on every step
-        # before executing any of them. Default policy is fail-open; operator policy
-        # YAML makes this deny blocked step types / domains and require approval.
-        for idx, step in enumerate(workflow.steps):
-            decision = self._policy_engine.check_step(
-                step.type, str(step.params.get("url", ""))
-            )
+        # Security gate: enforce policy (step-type / domain allow-lists) on every
+        # leaf step before executing any of them. The workflow is expanded
+        # first — conditional branches (both arms) and nested run_workflow
+        # references inside the library are flattened, and template variables
+        # are resolved against the replay's `variables` (available here, and
+        # the same map the player receives) — so nested/variable-carried
+        # steps cannot bypass the checks the player would dispatch unchecked.
+        # Default policy is fail-open; operator policy YAML makes this deny
+        # blocked step types / domains and require approval. A leaf whose URL
+        # still contains an unresolved variable, or a nested reference that
+        # cannot be expanded, fails closed when a policy was requested
+        # (PolicyEngine.check_step handles the URL case).
+        leaf_steps = _expand_replay_steps(
+            workflow.steps,
+            variables,
+            self._workflow_library_root,
+            resolved_workflow_path.parent,
+            _stack=(str(resolved_workflow_path),),
+        )
+        for idx, step in enumerate(leaf_steps):
+            step_type = step["type"]
+            if step.get("error"):
+                if self._policy_engine.policy_requested():
+                    raise ToolError(
+                        "MCP_POLICY_DENIED",
+                        f"Workflow step {idx} ('{step_type}') denied by policy: {step['error']}",
+                        {
+                            "step_index": idx,
+                            "step_type": step_type,
+                            "reason": step["error"],
+                        },
+                    )
+                continue
+            decision = self._policy_engine.check_step(step_type, step["url"])
             if not decision["allowed"]:
                 raise ToolError(
                     "MCP_POLICY_DENIED",
-                    f"Workflow step {idx} ('{step.type}') denied by policy: {decision['reason']}",
+                    f"Workflow step {idx} ('{step_type}') denied by policy: {decision['reason']}",
                     {
                         "step_index": idx,
-                        "step_type": step.type,
+                        "step_type": step_type,
                         "reason": decision["reason"],
                     },
                 )
             if decision.get("approval_required"):
                 appr = self._approval_gate.check_sensitive(
-                    step.type, step.params, str(session_name or "")
+                    step_type, step["params"], str(session_name or "")
                 )
                 if appr.decision != ApprovalDecision.ALLOWED:
                     raise ToolError(
                         "MCP_APPROVAL_REQUIRED",
-                        f"Workflow step {idx} ('{step.type}') requires approval: {appr.reason}"
+                        f"Workflow step {idx} ('{step_type}') requires approval: {appr.reason}"
                         " — approve via resolve_pending(request_id) or set STEALTH_APPROVAL_MODE=permissive",
                         {
                             "step_index": idx,
-                            "step_type": step.type,
+                            "step_type": step_type,
                             "request_id": appr.request_id,
                         },
                     )
