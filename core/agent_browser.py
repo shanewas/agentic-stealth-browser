@@ -126,27 +126,56 @@ class _BrowserPool:
         return cls._instance
 
     async def ensure_browser(
-        self, headless: bool = True, args: Optional[list] = None
+        self, headless: Optional[bool] = None, args: Optional[list] = None
     ) -> Browser:
+        """Return the shared browser, creating it on first use.
+
+        ``headless=None`` / ``args=None`` mean "no preference": the caller
+        inherits the pool's effective launch configuration. An explicit
+        value that differs from the configuration the live browser was
+        created with raises RuntimeError naming the mismatch.
+        """
         async with self._lock:
             if self._browser is None:
                 if self._pw is None:
                     self._pw = await async_playwright().start()
-                self._headless = headless
-                self._launch_args = args or []
+                self._headless = True if headless is None else headless
+                self._launch_args = list(args) if args is not None else []
                 self._browser = await self._pw.chromium.launch(
-                    headless=headless,
+                    headless=self._headless,
                     args=self._launch_args,
                     # proxy not at browser level; per-context below
                 )
+            else:
+                mismatches = []
+                pool_headless = getattr(self, "_headless", True)
+                pool_args = getattr(self, "_launch_args", [])
+                if headless is not None and headless != pool_headless:
+                    mismatches.append(
+                        f"headless: requested {headless!r}, pool browser uses {pool_headless!r}"
+                    )
+                if args is not None and list(args) != list(pool_args):
+                    mismatches.append(
+                        f"args: requested {list(args)!r}, pool browser uses {list(pool_args)!r}"
+                    )
+                if mismatches:
+                    raise RuntimeError(
+                        "Pooled browser launch configuration mismatch ("
+                        + "; ".join(mismatches)
+                        + "). The shared _BrowserPool browser is already running "
+                        "with its original configuration; call pool.shutdown() "
+                        "before launching with a different configuration."
+                    )
             return self._browser
 
-    async def create_context(self, **context_options) -> BrowserContext:
+    async def create_context(
+        self,
+        headless: Optional[bool] = None,
+        args: Optional[list] = None,
+        **context_options,
+    ) -> BrowserContext:
         """Create (or conceptually obtain) a fresh isolated context on the shared browser."""
-        browser = await self.ensure_browser(
-            headless=getattr(self, "_headless", True),
-            args=getattr(self, "_launch_args", None),
-        )
+        browser = await self.ensure_browser(headless=headless, args=args)
         # new_context is the cheap/fast path (vs launch_persistent_context)
         ctx = await browser.new_context(**context_options)
         self._active_contexts.add(ctx)  # WeakSet tracks context objects directly
@@ -177,6 +206,8 @@ class _BrowserPool:
                 except Exception:
                     pass
                 self._browser = None
+            self._headless = True
+            self._launch_args = []
             if self._pw:
                 try:
                     await self._pw.stop()
@@ -435,7 +466,7 @@ class AgentBrowser:
 
     async def launch(
         self,
-        headless: bool = True,
+        headless: Optional[bool] = None,
         slow_mo: int = 0,
         headed: bool = False,
         persona: Optional[Persona] = None,
@@ -471,7 +502,7 @@ class AgentBrowser:
             # automatic reliable cleanup even on exceptions
 
         Args:
-            headless: Run without browser window (default True)
+            headless: Run without browser window. None (default) = no explicit preference: classic launch defaults to True, pooled launch inherits the shared pool browser's configuration. An explicit True/False (or headed=True) that conflicts with a live pooled browser raises RuntimeError.
             slow_mo: Slow down actions by milliseconds
             headed: Force headed mode even if headless=True (for debugging)
             light_mode: Enable light mode (#174/#113) to reduce launch/warm-up cost/latency (skips heavy warm-ups + auto-downgrades warm_up_before_work).
@@ -521,6 +552,14 @@ class AgentBrowser:
         if env_headless is not None:
             headless = str(env_headless).lower() not in ("0", "false", "no", "")
 
+        # Pooled launches: None = no explicit preference (inherit pool config);
+        # headed=True is an explicit headed request. Classic launch resolves
+        # no-preference to True below via _effective_headless.
+        _requested_headless: Optional[bool] = False if headed else headless
+        _effective_headless = (
+            not headed if headed else (True if headless is None else headless)
+        )
+
         env_region = os.getenv("STEALTH_REGION")
         if env_region:
             # TLS manager will be (re)created below; store for selection
@@ -546,7 +585,7 @@ class AgentBrowser:
         self._custom_launch_options = launch_options or {}  # #143
         # store for rotation relaunch
         self._launch_options = {
-            "headless": headless,
+            "headless": _effective_headless,
             "slow_mo": slow_mo,
             "headed": headed,
             "light_mode": light_mode,
@@ -674,9 +713,15 @@ class AgentBrowser:
                     "user_data_dir",
                     "headless",
                     "slow_mo",
+                    "args",
                 ):  # protect launch-time ones for pooled path
                     context_opts[k] = v
-            self.browser = await pool.create_context(**context_opts)
+            pool_args = custom.get("args", all_args)
+            self.browser = await pool.create_context(
+                headless=_requested_headless,
+                args=list(pool_args),
+                **context_opts,
+            )
             self.browser_context = self.browser
         else:
             # Classic (default, fully backward compatible): per-instance persistent context + own playwright
@@ -687,7 +732,7 @@ class AgentBrowser:
             # #143 support: build kwargs dict then merge custom options
             lp_kwargs = {
                 "user_data_dir": str(user_data),
-                "headless": not headed if headed else headless,
+                "headless": _effective_headless,
                 "slow_mo": slow_mo,
                 "viewport": vp,
                 "user_agent": ua,
@@ -873,6 +918,18 @@ class AgentBrowser:
                 "region": getattr(self, "current_region", None),
             },
         )
+
+        # Warming session starts once per browser lifecycle (only when a
+        # warming schedule is already running); safe_goto lazily covers
+        # lifecycles that did not go through launch().
+        try:
+            if (
+                self.account_warming.days_elapsed > 0
+                and not self.account_warming.session_active
+            ):
+                self.account_warming.start_session()
+        except Exception:
+            pass
 
         return self.browser
 
@@ -1349,11 +1406,19 @@ class AgentBrowser:
             except Exception:
                 pass
 
-        # P3: Account warming check - stop session if limits exceeded
+        # P3: Account warming check - stop session if limits exceeded.
+        # Start the warming session lazily once per browser lifecycle;
+        # later navigations record against the same session so its
+        # per-session limits accumulate instead of resetting each time.
         if self.account_warming.days_elapsed > 0:
-            self.account_warming.start_session()
-            if self.account_warming.should_stop_session():
-                reason = self.account_warming.get_reason_to_stop()
+            if not getattr(
+                self.account_warming,
+                "session_active",
+                getattr(self.account_warming, "_session_start", None),
+            ):
+                self.account_warming.start_session()
+            if self.account_warming.should_stop_session(url):
+                reason = self.account_warming.get_reason_to_stop(url)
                 self.account_health.record_event(
                     "warming_limit", severity=0.1, details={"reason": reason}
                 )
@@ -2631,6 +2696,13 @@ class AgentBrowser:
         except Exception:
             pass
         try:
+            # End the per-lifecycle warming session (saves its totals).
+            try:
+                _warmer = getattr(self, "account_warming", None)
+                if _warmer is not None and getattr(_warmer, "session_active", False):
+                    _warmer.end_session()
+            except Exception:
+                pass
             if self.page and getattr(self, "_owns_page", True):
                 # #451: only close pages we created/own; adopted user tabs and
                 # non-owned pages switched to via switch_to_page() survive.

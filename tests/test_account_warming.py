@@ -139,6 +139,27 @@ class TestAccountWarmerSessions:
         warmer.record_scroll(300)
         assert warmer._max_scroll_this_session == 500
 
+    def test_session_active_flag_lifecycle(self):
+        warmer = AccountWarmer("test_account", data_dir="/tmp/test_warming")
+        assert not warmer.session_active
+        warmer.start_session()
+        assert warmer.session_active
+        warmer.end_session()
+        assert not warmer.session_active
+        assert warmer._session_start is None
+
+    def test_explicit_start_session_still_resets_counters(self):
+        warmer = AccountWarmer("test_account", data_dir="/tmp/test_warming")
+        warmer.start_session()
+        warmer.record_action()
+        warmer.record_page_visit("https://example.com")
+        # Explicit callers keep the original reset behaviour.
+        warmer.start_session()
+        assert warmer._session_actions == 0
+        assert warmer._session_pages == 0
+        assert warmer._total_sessions == 2
+        assert warmer.session_active
+
     def test_end_session_saves_state(self):
         warmer = AccountWarmer("test_account", data_dir="/tmp/test_warming")
         warmer.start_session()
@@ -179,6 +200,20 @@ class TestAccountWarmerLimits:
         for i in range(4):
             warmer.record_page_visit(f"https://example.com/{i}")
         assert warmer.should_stop_session()
+
+    def test_site_variety_allows_repeat_domain_but_rejects_new_domain(self):
+        warmer = AccountWarmer("test_account", data_dir="/tmp/test_warming")
+        warmer.start_session()
+        # Phase 0 has site_variety=1.
+        warmer.record_page_visit("https://example.com/page1")
+        # A repeat visit adds no distinct domain, so variety must not trip.
+        assert not warmer.should_stop_session("https://example.com/page2")
+        assert warmer.get_reason_to_stop("https://example.com/page2") is None
+        # A genuinely second distinct domain beyond the limit is rejected.
+        assert warmer.should_stop_session("https://other.example/page")
+        reason = warmer.get_reason_to_stop("https://other.example/page")
+        assert reason is not None
+        assert "Site variety limit" in reason
 
     def test_get_reason_to_stop(self):
         warmer = AccountWarmer("test_account", data_dir="/tmp/test_warming")

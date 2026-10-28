@@ -4,13 +4,16 @@ Tests that AccountHealth, AccountWarmer, ConnectionPool, and AdaptiveTuner
 are properly initialized and wired into safe_goto.
 """
 
+import asyncio
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.account_warming import AccountWarmer
 from core.agent_browser import AgentBrowser
 
 
@@ -65,6 +68,93 @@ class TestModuleIntegration:
         assert browser.adaptive_tuner.get_success_rate() == 1.0
         browser.adaptive_tuner.record_feedback(blocked=True, platform="test")
         assert browser.adaptive_tuner.get_success_rate() == 0.5
+
+
+class TestWarmingSessionLifecycle:
+    """safe_goto must start one warming session per browser lifecycle."""
+
+    def test_navigations_accumulate_and_close_ends_session(self, tmp_path):
+        class _Page:
+            async def goto(self, url, **kwargs):
+                return None
+
+            async def close(self):
+                pass
+
+        class _Human:
+            async def think(self, *args, **kwargs):
+                pass
+
+        class _Recovery:
+            async def execute_with_recovery(self, func, **kwargs):
+                return await func()
+
+        class _Logger:
+            def log_action(self, *args, **kwargs):
+                pass
+
+            def log_error(self, *args, **kwargs):
+                pass
+
+            def close(self):
+                pass
+
+        class _Health:
+            is_cooling_off = False
+
+            def record_event(self, *args, **kwargs):
+                pass
+
+            def record_success(self):
+                pass
+
+            def record_action(self):
+                pass
+
+        class _Pool:
+            def should_reuse(self, url):
+                return False
+
+            def record_navigation(self, url):
+                pass
+
+            def release_context(self, domain):
+                pass
+
+        class _RateLimiter:
+            async def wait_if_needed(self, account, domain):
+                return 0
+
+        async def _run():
+            browser = AgentBrowser(session_name="warming-lifecycle-test")
+            warmer = AccountWarmer("warming-lifecycle-test", data_dir=str(tmp_path))
+            warmer.start()
+            warmer._started_at = time.time() - 86400  # days_elapsed > 0
+            browser.account_warming = warmer
+            browser.account_health = _Health()
+            browser.connection_pool = _Pool()
+            browser.rate_limiter = _RateLimiter()
+            browser.browser = object()
+            browser.page = _Page()
+            browser.human = _Human()
+            browser.recovery = _Recovery()
+            browser.logger = _Logger()
+
+            assert await browser.safe_goto("https://example.com/a", warm_up=False)
+            assert await browser.safe_goto("https://example.com/b", warm_up=False)
+
+            # One session for both navigations; counters accumulate.
+            assert warmer.session_active
+            assert warmer._total_sessions == 1
+            assert warmer._session_pages == 2
+            assert warmer._session_actions == 2
+
+            await browser.close()
+            assert not warmer.session_active
+            assert warmer._session_start is None
+            assert warmer._total_actions == 2
+
+        asyncio.run(_run())
 
 
 class TestModuleStatusReporting:

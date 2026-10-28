@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 pytestmark = pytest.mark.asyncio
 
-from core.agent_browser import AgentBrowser, RecoveryError, TeardownMode
+from core.agent_browser import AgentBrowser, RecoveryError, TeardownMode, _BrowserPool
 from recovery.anti_block_orchestrator import (
     AntiBlockOrchestrator,
     RecoveryAction,
@@ -148,6 +148,39 @@ class FakePool:
     async def release_context(self, ctx):
         self.released.append(ctx)
         await ctx.close()
+
+
+class FakePoolBrowser:
+    def __init__(self):
+        self.closed = False
+        self.contexts = []
+
+    async def new_context(self, **kwargs):
+        ctx = FakeContext()
+        self.contexts.append(ctx)
+        return ctx
+
+    async def close(self):
+        self.closed = True
+
+
+class FakePoolChromium:
+    def __init__(self, browser):
+        self._browser = browser
+        self.launch_kwargs = None
+
+    async def launch(self, **kwargs):
+        self.launch_kwargs = kwargs
+        return self._browser
+
+
+class FakePoolPW:
+    def __init__(self, browser):
+        self.chromium = FakePoolChromium(browser)
+        self.stop_count = 0
+
+    async def stop(self):
+        self.stop_count += 1
 
 
 def _patch_collaborators(monkeypatch):
@@ -515,3 +548,46 @@ async def test_close_unregisters_atexit_callback(monkeypatch):
 
     await ab.close()  # double-close must stay safe, no second unregister
     assert calls == [callback]
+
+
+# ---------------------------------------------------------------------------
+# #12: pooled launches must not silently ignore headless/args configuration
+# ---------------------------------------------------------------------------
+
+
+async def test_pooled_launch_conflict_and_no_preference(monkeypatch):
+    import asyncio as _asyncio
+    import weakref as _weakref
+
+    _patch_collaborators(monkeypatch)
+    pool = _BrowserPool()
+    pool_browser = FakePoolBrowser()
+    pool_pw = FakePoolPW(pool_browser)
+    monkeypatch.setattr(pool, "_browser", None)
+    monkeypatch.setattr(pool, "_pw", pool_pw)
+    monkeypatch.setattr(pool, "_headless", True)
+    monkeypatch.setattr(pool, "_launch_args", [])
+    monkeypatch.setattr(pool, "_lock", _asyncio.Lock())
+    monkeypatch.setattr(pool, "_active_contexts", _weakref.WeakSet())
+
+    first = _make_browser("t12-pool-first")
+    await first.launch(headless=True, use_pooled_context=True)
+    assert pool._headless is True
+    assert pool_pw.chromium.launch_kwargs["headless"] is True
+    assert pool_pw.chromium.launch_kwargs["args"] == pool._launch_args
+
+    # No explicit headless preference inherits the pool configuration.
+    second = _make_browser("t12-pool-no-pref")
+    await second.launch(use_pooled_context=True)
+    await second.close()
+
+    # An explicit conflicting request errors instead of silently reusing.
+    third = _make_browser("t12-pool-conflict")
+    with pytest.raises(RuntimeError, match="headless"):
+        await third.launch(headless=False, use_pooled_context=True)
+    await third.close()
+
+    await first.close()
+    await pool.shutdown()
+    assert pool_browser.closed is True
+    assert pool_pw.stop_count == 1

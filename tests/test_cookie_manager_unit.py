@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import json
 import tempfile
 import asyncio
 from datetime import datetime, timezone
@@ -248,6 +249,76 @@ class TestCookieManagerSaveLoad:
         mgr = CookieManager()
         result = asyncio.run(mgr.load_cookies(""))
         assert result["status"] == "error"
+
+
+class _FakeContext:
+    def __init__(self, cookies):
+        self._cookies = cookies
+        self.calls = 0
+
+    async def cookies(self):
+        self.calls += 1
+        return list(self._cookies)
+
+
+class TestCookieManagerLiveContextSync:
+    def test_save_refreshes_stale_in_memory_cookies(self, tmp_path):
+        live = [{"name": "live", "value": "1", "domain": "example.com"}]
+        ctx = _FakeContext(live)
+        mgr = CookieManager(browser_context=ctx)
+        mgr.cookies = [{"name": "stale", "value": "old", "domain": "example.com"}]
+        path = str(tmp_path / "cookies.json")
+        result = asyncio.run(mgr.save_cookies_to_file(path))
+        assert result["status"] == "success"
+        assert result["saved"] == 1
+        assert ctx.calls == 1
+        assert mgr.cookies == live
+        with open(path) as f:
+            payload = json.load(f)
+        assert payload["cookies"] == live
+
+    def test_save_succeeds_when_only_live_context_has_cookies(self, tmp_path):
+        ctx = _FakeContext([{"name": "live", "value": "1"}])
+        mgr = CookieManager(browser_context=ctx)
+        result = asyncio.run(mgr.save_cookies_to_file(str(tmp_path / "c.json")))
+        assert result["status"] == "success"
+        assert result["saved"] == 1
+
+    def test_save_no_context_keeps_no_cookies(self, tmp_path):
+        mgr = CookieManager()
+        result = asyncio.run(mgr.save_cookies_to_file(str(tmp_path / "c.json")))
+        assert result["status"] == "no_cookies"
+
+    def test_save_live_empty_context_is_no_cookies(self, tmp_path):
+        mgr = CookieManager(browser_context=_FakeContext([]))
+        mgr.cookies = [{"name": "stale"}]
+        result = asyncio.run(mgr.save_cookies_to_file(str(tmp_path / "c.json")))
+        assert result["status"] == "no_cookies"
+
+    def test_agent_browser_wrapper_saves_live_cookies(self, tmp_path):
+        from core.agent_browser import AgentBrowser
+
+        live = [{"name": "live", "value": "1", "domain": "example.com"}]
+        ctx = _FakeContext(live)
+        browser = AgentBrowser(session_name="cookie-live-sync-test")
+        browser.browser = ctx
+        browser.cookie_manager = CookieManager()
+        browser.cookie_manager.cookies = [{"name": "stale"}]
+        path = str(tmp_path / "wrapped.json")
+        result = asyncio.run(browser.save_cookies_to_file(path))
+        assert result["status"] == "success"
+        assert ctx.calls == 1
+        with open(path) as f:
+            assert json.load(f)["cookies"] == live
+
+    def test_get_cookie_health_refreshes_from_context(self):
+        future = int(datetime.now(timezone.utc).timestamp()) + 86400
+        ctx = _FakeContext([{"name": "live", "expires": future, "secure": True}])
+        mgr = CookieManager(browser_context=ctx)
+        mgr.cookies = []
+        health = asyncio.run(mgr.get_cookie_health())
+        assert health["total"] == 1
+        assert health["secure"] == 1
 
 
 class TestCookieManagerClear:
