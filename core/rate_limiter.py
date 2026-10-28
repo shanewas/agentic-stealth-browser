@@ -36,6 +36,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -57,6 +58,10 @@ class DomainRateLimiter:
     def __init__(self):
         self.configs: Dict[str, RateLimitConfig] = {}
         self.request_times: Dict[str, list] = defaultdict(list)
+        # Hour window, tracked alongside the minute window in request_times.
+        self.hour_request_times: Dict[str, list] = defaultdict(list)
+        self.request_times_hour: Dict[str, list] = self.hour_request_times
+        self.hourly_request_times: Dict[str, list] = self.hour_request_times
         self.last_request: Dict[str, datetime] = {}
 
     def set_limit(
@@ -66,15 +71,38 @@ class DomainRateLimiter:
         key = self._key(domain, namespace)
         self.configs[key] = config
 
+    @staticmethod
+    def _normalize_domain(domain: str) -> str:
+        """Normalize a hostname / host:port / netloc / URL to a lowercase host."""
+        value = str(domain).strip() if domain is not None else ""
+        if not value:
+            return value
+        host = None
+        try:
+            if "://" in value:
+                host = urlparse(value).hostname
+            else:
+                host = urlparse(f"//{value}").hostname
+        except Exception:
+            host = None
+        if not host:
+            host = value.split("@")[-1].split(":")[0].split("/")[0]
+        host = host.strip().lower()
+        if host.endswith("."):
+            host = host[:-1]
+        return host
+
     def _key(self, domain: str, namespace: Optional[str] = None) -> str:
-        return f"{namespace}:{domain}" if namespace else domain
+        host = self._normalize_domain(domain)
+        return f"{namespace}:{host}" if namespace else host
 
     def _get_config(
         self, domain: str, namespace: Optional[str] = None
     ) -> RateLimitConfig:
         """Get config for domain or return default (namespaced lookup first)."""
         key = self._key(domain, namespace)
-        return self.configs.get(key, self.configs.get(domain, RateLimitConfig()))
+        host = self._normalize_domain(domain)
+        return self.configs.get(key, self.configs.get(host, RateLimitConfig()))
 
     async def wait_if_needed(
         self, domain: str, namespace: Optional[str] = None
@@ -84,57 +112,65 @@ class DomainRateLimiter:
         P2 deprecation/compat fix (#104, #67, #58): timezone-aware utc datetimes.
         """
 
-        now = datetime.now(
-            timezone.utc
-        )  # P2 #104/#67: timezone-aware (no naive/deprecated patterns)
         config = self._get_config(domain, namespace)
         key = self._key(domain, namespace)
+        total_wait = 0.0
 
-        # Clean old requests
-        minute_ago = now - timedelta(minutes=1)
+        while True:
+            now = datetime.now(timezone.utc)
+            minute_ago = now - timedelta(minutes=1)
+            hour_ago = now - timedelta(hours=1)
+            # Pick up timestamps seeded/recorded only in the minute list.
+            for _t in list(self.request_times[key]):
+                if _t not in self.hour_request_times[key]:
+                    self.hour_request_times[key].append(_t)
+            self.hour_request_times[key].sort()
+            self.request_times[key] = [
+                t for t in self.request_times[key] if t > minute_ago
+            ]
+            self.hour_request_times[key] = [
+                t for t in self.hour_request_times[key] if t > hour_ago
+            ]
 
-        self.request_times[key] = [t for t in self.request_times[key] if t > minute_ago]
+            wait_time = 0.0
+            if (
+                config.requests_per_hour
+                and self.hour_request_times[key]
+                and len(self.hour_request_times[key]) >= config.requests_per_hour
+            ):
+                wait_time = max(
+                    wait_time,
+                    (
+                        self.hour_request_times[key][0] + timedelta(hours=1) - now
+                    ).total_seconds(),
+                )
+            if (
+                config.requests_per_minute
+                and self.request_times[key]
+                and len(self.request_times[key]) >= config.requests_per_minute
+            ):
+                wait_time = max(
+                    wait_time,
+                    (
+                        self.request_times[key][0] + timedelta(minutes=1) - now
+                    ).total_seconds(),
+                )
+            if key in self.last_request:
+                time_since_last = (now - self.last_request[key]).total_seconds()
+                if time_since_last < config.cooldown_seconds:
+                    wait_time = max(
+                        wait_time, config.cooldown_seconds - time_since_last
+                    )
 
-        # Check per-minute limit
-        if len(self.request_times[key]) >= config.requests_per_minute:
-            wait_time = (
-                self.request_times[key][0] + timedelta(minutes=1) - now
-            ).total_seconds()
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
-                now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware
-                # Re-clean after sleep so the waited request is recorded without off-by-one (expired entries linger otherwise)
-                # Fixes #116 while preserving exact namespace isolation and per-account logic
-                minute_ago = now - timedelta(minutes=1)
-                self.request_times[key] = [
-                    t for t in self.request_times[key] if t > minute_ago
-                ]
-                self.request_times[key].append(now)
-                self.last_request[key] = now
-                return wait_time
+                total_wait += wait_time
+                continue
 
-        # Check cooldown
-        if key in self.last_request:
-            time_since_last = (now - self.last_request[key]).total_seconds()
-            if time_since_last < config.cooldown_seconds:
-                wait_time = config.cooldown_seconds - time_since_last
-                await asyncio.sleep(wait_time)
-                now = datetime.now(timezone.utc)  # P2 #104/#67: timezone-aware
-                # Re-clean after sleep so the waited request is recorded without off-by-one (expired entries linger otherwise)
-                # Fixes #116 while preserving exact namespace isolation and per-account logic
-                minute_ago = now - timedelta(minutes=1)
-                self.request_times[key] = [
-                    t for t in self.request_times[key] if t > minute_ago
-                ]
-                self.request_times[key].append(now)
-                self.last_request[key] = now
-                return wait_time
-
-        # Record this request (happy path, no wait)
-        self.request_times[key].append(now)
-        self.last_request[key] = now
-
-        return 0.0
+            self.request_times[key].append(now)
+            self.hour_request_times[key].append(now)
+            self.last_request[key] = now
+            return total_wait
 
 
 class AccountRateLimiter:
@@ -211,88 +247,75 @@ class ToolRateLimiter:
         Raises ``RateLimitExceeded`` when the total session cap is exceeded.
         Emits an audit-warning log at 80 % of the per-tool and total caps.
         """
-        async with self._lock:
-            now = datetime.now(timezone.utc)
-            minute_ago = now - timedelta(minutes=1)
-            hour_ago = now - timedelta(hours=1)
-
-            # --- total session cap ---
-            self._total_calls = [t for t in self._total_calls if t > hour_ago]
-            total_utilization = (
-                len(self._total_calls) / self.total_calls_cap
-                if self.total_calls_cap
-                else 0
-            )
-
-            if total_utilization >= 0.8:
-                self._logger.warning(
-                    "Tool rate limiter: %.0f%% of total hourly cap reached (%d/%d) [tool=%s]",
-                    total_utilization * 100,
-                    len(self._total_calls),
-                    self.total_calls_cap,
-                    tool_name,
-                )
-
-            if len(self._total_calls) >= self.total_calls_cap:
-                raise RateLimitExceeded(
-                    tool_name,
-                    reason=f"total hourly cap reached ({self.total_calls_cap})",
-                )
-
-            # --- per-tool limit ---
-            self._tool_calls[tool_name] = [
-                t for t in self._tool_calls[tool_name] if t > minute_ago
-            ]
-            tool_utilization = (
-                len(self._tool_calls[tool_name]) / self.tool_calls_per_minute
-                if self.tool_calls_per_minute
-                else 0
-            )
-
-            if tool_utilization >= 0.8:
-                self._logger.warning(
-                    "Tool rate limiter: %.0f%% of per-minute cap for '%s' reached (%d/%d)",
-                    tool_utilization * 100,
-                    tool_name,
-                    len(self._tool_calls[tool_name]),
-                    self.tool_calls_per_minute,
-                )
-
+        # Recheck-after-sleep loop: no slot is reserved before sleeping, so
+        # after waking we must re-prune and re-check both limits under the
+        # lock and only record/return when a slot is genuinely free.
+        total_wait = 0.0
+        while True:
             wait_time = 0.0
-            if len(self._tool_calls[tool_name]) >= self.tool_calls_per_minute:
-                # Would exceed per-tool per-minute limit – wait until the oldest call falls off
-                oldest = self._tool_calls[tool_name][0]
-                wait_time = (oldest + timedelta(minutes=1) - now).total_seconds()
-                if wait_time > 0:
-                    # Release lock while sleeping so other coroutines aren't blocked
-                    pass  # we'll sleep outside the lock
-                else:
-                    wait_time = 0.0
-
-            # Record this call even if we're going to wait (the wait is
-            # accounted for, and the call will proceed after waiting)
-            # Actually, don't record yet – we'll record after the wait so
-            # the timestamp reflects when the call actually proceeds.
-            # But we must record *something* now so concurrent callers
-            # also see the limit.  We'll append after the wait below.
-
-            if wait_time > 0:
-                # Must release lock before sleeping
-                pass
-            else:
-                # No wait – record immediately under the lock
-                self._tool_calls[tool_name].append(now)
-                self._total_calls.append(now)
-
-        # Sleep outside the lock so other coroutines can proceed
-        if wait_time > 0:
-            await asyncio.sleep(wait_time)
             async with self._lock:
-                after_wait = datetime.now(timezone.utc)
-                self._tool_calls[tool_name].append(after_wait)
-                self._total_calls.append(after_wait)
+                now = datetime.now(timezone.utc)
+                minute_ago = now - timedelta(minutes=1)
+                hour_ago = now - timedelta(hours=1)
 
-        return wait_time
+                self._total_calls = [t for t in self._total_calls if t > hour_ago]
+                total_utilization = (
+                    len(self._total_calls) / self.total_calls_cap
+                    if self.total_calls_cap
+                    else 0
+                )
+                if total_utilization >= 0.8:
+                    self._logger.warning(
+                        "Tool rate limiter: %.0f%% of total hourly cap reached (%d/%d) [tool=%s]",
+                        total_utilization * 100,
+                        len(self._total_calls),
+                        self.total_calls_cap,
+                        tool_name,
+                    )
+                if (
+                    self.total_calls_cap is not None
+                    and len(self._total_calls) >= self.total_calls_cap
+                ):
+                    raise RateLimitExceeded(
+                        tool_name,
+                        reason=f"total hourly cap reached ({self.total_calls_cap})",
+                    )
+
+                self._tool_calls[tool_name] = [
+                    t for t in self._tool_calls[tool_name] if t > minute_ago
+                ]
+                tool_utilization = (
+                    len(self._tool_calls[tool_name]) / self.tool_calls_per_minute
+                    if self.tool_calls_per_minute
+                    else 0
+                )
+                if tool_utilization >= 0.8:
+                    self._logger.warning(
+                        "Tool rate limiter: %.0f%% of per-minute cap for '%s' reached (%d/%d)",
+                        tool_utilization * 100,
+                        tool_name,
+                        len(self._tool_calls[tool_name]),
+                        self.tool_calls_per_minute,
+                    )
+
+                if (
+                    self.tool_calls_per_minute
+                    and len(self._tool_calls[tool_name])
+                    >= self.tool_calls_per_minute
+                ):
+                    oldest = self._tool_calls[tool_name][0]
+                    wait_time = (
+                        oldest + timedelta(minutes=1) - now
+                    ).total_seconds()
+                    if wait_time <= 0:
+                        wait_time = 0.0
+                if wait_time == 0.0:
+                    self._tool_calls[tool_name].append(now)
+                    self._total_calls.append(now)
+                    return total_wait
+
+            await asyncio.sleep(wait_time)
+            total_wait += wait_time
 
 
 # Global instances (still work for single-process simple cases and tests)
