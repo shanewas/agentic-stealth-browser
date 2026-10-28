@@ -170,6 +170,125 @@ class TestToolRateLimiter:
         assert "hourly cap" in exc.reason
 
 
+class TestToolRateLimiterConcurrency:
+    def test_concurrent_callers_never_exceed_limit_in_window(self):
+        limiter = ToolRateLimiter(tool_calls_per_minute=3, total_calls_cap=1000)
+
+        async def _run():
+            tasks = [
+                asyncio.ensure_future(limiter.check_and_wait("goto"))
+                for _ in range(10)
+            ]
+            # Admitted calls return at once; the rest must be sleeping on a
+            # fresh re-check, not burst through together.
+            await asyncio.sleep(0.2)
+            done = [t for t in tasks if t.done() and not t.cancelled()]
+            assert len(done) == 3
+            assert len(limiter._tool_calls["goto"]) == 3
+            assert len(limiter._total_calls) == 3
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run(_run())
+
+    def test_concurrent_waiters_recheck_after_waking(self):
+        limiter = ToolRateLimiter(tool_calls_per_minute=3, total_calls_cap=1000)
+
+        async def _run():
+            # Seed a full window that expires in ~0.2s: all waiters wake
+            # together, but only 3 may be admitted in the new window.
+            old = datetime.now(timezone.utc) - timedelta(seconds=59.8)
+            limiter._tool_calls["goto"] = [old, old, old]
+            tasks = [
+                asyncio.ensure_future(limiter.check_and_wait("goto"))
+                for _ in range(10)
+            ]
+            await asyncio.sleep(0.5)
+            done = [t for t in tasks if t.done() and not t.cancelled()]
+            assert len(done) == 3
+            assert len(limiter._tool_calls["goto"]) == 3
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run(_run())
+
+
+class TestDomainRateLimiterHourly:
+    def test_hourly_cap_waits_even_when_minute_allows(self):
+        limiter = DomainRateLimiter()
+        cfg = RateLimitConfig(
+            requests_per_minute=100,
+            requests_per_hour=2,
+            cooldown_seconds=0,
+        )
+        limiter.set_limit("hourly.com", cfg)
+
+        async def _run():
+            assert await limiter.wait_if_needed("hourly.com") == 0.0
+            assert await limiter.wait_if_needed("hourly.com") == 0.0
+            assert len(limiter.hour_request_times["hourly.com"]) == 2
+            # Age the hour entries to just before expiry so the enforced
+            # hourly wait is ~0.3s instead of ~1h, and they are outside
+            # the minute window (minute limit alone would allow this).
+            near_expiry = datetime.now(timezone.utc) - timedelta(seconds=3599.7)
+            limiter.request_times["hourly.com"] = []
+            limiter.hour_request_times["hourly.com"] = [
+                near_expiry,
+                near_expiry,
+            ]
+            wait = await limiter.wait_if_needed("hourly.com")
+            assert 0 < wait < 5
+            assert len(limiter.hour_request_times["hourly.com"]) == 1
+
+        asyncio.run(_run())
+
+    def test_minute_behavior_unchanged_by_hour_tracking(self):
+        limiter = DomainRateLimiter()
+        cfg = RateLimitConfig(
+            requests_per_minute=100,
+            requests_per_hour=1000,
+            cooldown_seconds=0,
+        )
+        limiter.set_limit("minute.com", cfg)
+        wait = asyncio.run(limiter.wait_if_needed("minute.com"))
+        assert wait == 0.0
+        assert len(limiter.request_times["minute.com"]) == 1
+        assert len(limiter.hour_request_times["minute.com"]) == 1
+
+
+class TestDomainNormalization:
+    def test_variants_share_one_bucket_and_config(self):
+        limiter = DomainRateLimiter()
+        cfg = RateLimitConfig(
+            requests_per_minute=100,
+            requests_per_hour=1000,
+            cooldown_seconds=0,
+        )
+        limiter.set_limit("EXAMPLE.COM:443", cfg)
+
+        async def _run():
+            for variant in [
+                "example.com",
+                "EXAMPLE.COM.",
+                "example.com:443",
+                "user:pass@Example.Com:8443",
+                "https://user@EXAMPLE.COM./path?q=1",
+            ]:
+                assert await limiter.wait_if_needed(variant) == 0.0
+
+        asyncio.run(_run())
+        assert list(limiter.request_times.keys()) == ["example.com"]
+        assert len(limiter.request_times["example.com"]) == 5
+        assert list(limiter.hour_request_times.keys()) == ["example.com"]
+        assert list(limiter.last_request.keys()) == ["example.com"]
+        assert limiter._get_config("EXAMPLE.COM.") is cfg
+        assert limiter._get_config("https://example.com:443/x") is cfg
+        assert limiter._key("user@example.com.") == "example.com"
+        assert limiter._key("Example.COM:443", namespace="ns") == "ns:example.com"
+
+
 class TestDomainRateLimiterWindowCleanup:
     def test_old_requests_cleaned(self):
         limiter = DomainRateLimiter()
