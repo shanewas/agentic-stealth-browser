@@ -911,6 +911,12 @@ class AntiBlockOrchestrator:
                 )
             except Exception as e:
                 self.logger.log_error("rotation_relaunch_hook_failed", str(e))
+                # A failed relaunch means the rotation did not take effect
+                # (the old browser may already be closed). Record it as a
+                # failed rotation, like session/proxy rotation failures
+                # above, instead of counting it as success via backoff.
+                self._update_recovery_history(context, action, success=False)
+                return False
 
         # Calculate and apply backoff (uses rng + transient multiplier)
         delay = self.calculate_backoff(context)
