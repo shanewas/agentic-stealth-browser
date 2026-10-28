@@ -66,8 +66,15 @@ class MockPage:
         self._calls.append(("goto", url))
         self._url = url
 
-    async def evaluate(self, js):
-        self._calls.append(("evaluate", js))
+    async def evaluate(self, js, arg=None):
+        self._calls.append(("evaluate", js, arg))
+        if arg is not None:
+            # Argument-passing restore: apply entries verbatim.
+            if "localStorage" in js:
+                self._local_storage.update(arg)
+            elif "sessionStorage" in js:
+                self._session_storage.update(arg)
+            return None
         if "localStorage" in js:
             return self._local_storage
         if "sessionStorage" in js:
@@ -280,6 +287,116 @@ class TestSessionManagerBrowser:
         asyncio.run(manager.restore_cookies(page, cookies))
 
         assert len(page.context._added_cookies) == 1
+
+
+class TestRestoreStorageInjection:
+    """Restore must pass storage as data, never interpolate into JS."""
+
+    PAYLOAD = {
+        "ke'y": "va'l\\ue\nnext",
+        "x'; globalThis.pwned = 1; //": "v\\'\n",
+    }
+
+    def _assert_argument_passing(self, page, storage, script_marker):
+        calls = [c for c in page._calls if c[0] == "evaluate"]
+        assert len(calls) == 1
+        _, script, arg = calls[0]
+        assert script_marker in script
+        assert arg == self.PAYLOAD
+        for key, value in self.PAYLOAD.items():
+            assert key not in script
+            assert value not in script
+        assert storage == self.PAYLOAD
+
+    def test_restore_local_storage_payload_verbatim(self, tmp_path):
+        import asyncio
+
+        manager = SessionManager(data_dir=str(tmp_path))
+        page = MockPage()
+        page._local_storage = {}
+        asyncio.run(manager.restore_local_storage(page, dict(self.PAYLOAD)))
+        self._assert_argument_passing(page, page._local_storage, "localStorage")
+
+    def test_restore_session_storage_payload_verbatim(self, tmp_path):
+        import asyncio
+
+        manager = SessionManager(data_dir=str(tmp_path))
+        page = MockPage()
+        page._session_storage = {}
+        asyncio.run(manager.restore_session_storage(page, dict(self.PAYLOAD)))
+        self._assert_argument_passing(
+            page, page._session_storage, "sessionStorage"
+        )
+
+
+class TestCheckpointPathTraversal:
+    """Checkpoint filenames and account IDs must stay under data_dir."""
+
+    BAD_FILENAMES = [
+        "../evil.json",
+        "..\\evil.json",
+        "/abs/evil.json",
+        "sub/../../evil.json",
+        "evil.txt",
+        "",
+    ]
+    BAD_ACCOUNT_IDS = ["../evil", "/abs", "a/b", "a\\b", "", ".."]
+
+    def test_save_checkpoint_traversal_filename_refused(self, tmp_path):
+        manager = SessionManager(data_dir=str(tmp_path / "data"))
+        cp = manager.create_checkpoint(account_id="test")
+        for name in self.BAD_FILENAMES:
+            with pytest.raises(ValueError):
+                manager.save_checkpoint(cp, filename=name)
+        assert not (tmp_path / "evil.json").exists()
+        assert list((tmp_path / "data").iterdir()) == []
+
+    def test_load_and_delete_traversal_filename_refused(self, tmp_path):
+        manager = SessionManager(data_dir=str(tmp_path / "data"))
+        victim = tmp_path / "victim.json"
+        victim.write_text('{"metadata": {"account_id": "victim"}}')
+        for name in self.BAD_FILENAMES:
+            with pytest.raises(ValueError):
+                manager.load_checkpoint(name)
+            with pytest.raises(ValueError):
+                manager.delete_checkpoint(name)
+        with pytest.raises(ValueError):
+            manager.load_checkpoint("../victim.json")
+        with pytest.raises(ValueError):
+            manager.delete_checkpoint("../victim.json")
+        # Never read or unlinked outside data_dir.
+        assert victim.exists()
+
+    def test_save_checkpoint_traversal_account_id_refused(self, tmp_path):
+        manager = SessionManager(data_dir=str(tmp_path / "data"))
+        for account_id in self.BAD_ACCOUNT_IDS:
+            cp = manager.create_checkpoint(account_id=account_id)
+            with pytest.raises(ValueError):
+                manager.save_checkpoint(cp)
+        assert not (tmp_path / "evil.json").exists()
+        assert list((tmp_path / "data").iterdir()) == []
+
+    def test_latest_and_list_traversal_account_id_refused(self, tmp_path):
+        manager = SessionManager(data_dir=str(tmp_path / "data"))
+        for account_id in self.BAD_ACCOUNT_IDS:
+            with pytest.raises(ValueError):
+                manager.load_latest(account_id)
+            with pytest.raises(ValueError):
+                manager.list_checkpoints(account_id)
+            with pytest.raises(ValueError):
+                manager.cleanup_old_checkpoints(account_id)
+
+    def test_normal_checkpoint_round_trip_still_works(self, tmp_path):
+        manager = SessionManager(data_dir=str(tmp_path))
+        cp = manager.create_checkpoint(
+            account_id="user-1", local_storage={"k": "v"}
+        )
+        filepath = manager.save_checkpoint(cp, filename="user-1_manual.json")
+        assert filepath.exists()
+        assert manager.load_checkpoint(filepath.name).local_storage == {"k": "v"}
+        assert manager.load_latest("user-1") is not None
+        manager.delete_checkpoint(filepath.name)
+        assert not filepath.exists()
 
 
 class TestSessionManagerTransfer:
