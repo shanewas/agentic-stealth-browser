@@ -63,12 +63,20 @@ class StealthCache:
             while len(self._cache) > self.maxsize:
                 self._cache.popitem(last=False)
 
-    def get_or_generate(self, key: str, generator) -> Any:
-        """Get cached value or generate and cache new one."""
+    def get_or_generate(self, key: str, generator=None) -> Any:
+        """Get cached value or generate and cache new one.
+
+        Raises ValueError on a cache miss when no generator is provided.
+        """
         value = self.get(key)
         if value is not None:
             return value
 
+        if generator is None:
+            raise ValueError(
+                f"StealthCache.get_or_generate: no generator provided for uncached key {key!r}; "
+                "pass a generator callable or populate the cache first"
+            )
         value = generator()
         self.put(key, value)
         return value
@@ -146,11 +154,30 @@ def get_cached_script(
         Cached or newly generated stealth script
     """
     key = make_cache_key(profile, fingerprint_seed, hardware, screen)
+    if generator is None:
+        try:
+            return _script_cache.get_or_generate(key, generator)
+        except ValueError as exc:
+            raise ValueError(
+                f"get_cached_script: no generator provided for uncached profile {profile!r}; "
+                "pass a generator callable or populate the cache first"
+            ) from exc
     return _script_cache.get_or_generate(key, generator)
 
 
 def get_cached_profile(profile_name: str, generator=None) -> Any:
-    """Get device profile from cache or generate and cache it."""
+    """Get device profile from cache or generate and cache it.
+
+    Raises ValueError on a cache miss when no generator is provided.
+    """
+    if generator is None:
+        try:
+            return _profile_cache.get_or_generate(profile_name, generator)
+        except ValueError as exc:
+            raise ValueError(
+                f"get_cached_profile: no generator provided for uncached profile {profile_name!r}; "
+                "pass a generator callable or populate the cache first"
+            ) from exc
     return _profile_cache.get_or_generate(profile_name, generator)
 
 

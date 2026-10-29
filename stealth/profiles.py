@@ -21,8 +21,8 @@ Usage (foundation only):
 Keep this file dependency-free (no Playwright, no internal cycles).
 """
 
+import copy
 from dataclasses import dataclass, field, asdict
-import functools
 from typing import Dict, Any, Optional
 
 
@@ -45,8 +45,9 @@ class DeviceProfile:
     locale: str = "en-US"
     timezone_id: str = "America/New_York"
     platform: str = "Win32"
-    hardware_concurrency: int = 8
-    device_memory: int = 8  # GB, for future navigator.deviceMemory spoof
+    # None means "not explicitly set": fall back to the power_level mapping.
+    hardware_concurrency: Optional[int] = None
+    device_memory: Optional[int] = None  # GB, for future navigator.deviceMemory spoof
     power_level: str = "medium"  # "low"|"medium"|"high" -> correlates hardware for #255
     # screen profile for #124 viewport variety + #198 screen/orient/DPR consistency (per-persona stable)
     screen: Dict[str, Any] = field(
@@ -62,19 +63,90 @@ class DeviceProfile:
         }
     )
 
+    _POWER_LEVELS = ("low", "medium", "high")
+    _ORIENTATIONS = (
+        "landscape-primary",
+        "landscape-secondary",
+        "portrait-primary",
+        "portrait-secondary",
+        "landscape",
+        "portrait",
+    )
+
+    def __post_init__(self) -> None:
+        if self.power_level not in self._POWER_LEVELS:
+            raise ValueError(
+                f"Unknown power_level {self.power_level!r}; valid power levels: {sorted(self._POWER_LEVELS)}"
+            )
+        for field_name, value in (
+            ("hardware_concurrency", self.hardware_concurrency),
+            ("device_memory", self.device_memory),
+        ):
+            if value is not None and value <= 0:
+                raise ValueError(f"{field_name} must be positive, got {value!r}")
+        viewport = self.viewport
+        if not isinstance(viewport, dict) or viewport.get("width", 0) <= 0 or viewport.get("height", 0) <= 0:
+            raise ValueError(f"viewport must have positive width/height, got {viewport!r}")
+        screen = self.screen
+        if screen is not None:
+            if not isinstance(screen, dict):
+                raise ValueError(f"screen must be a dict, got {screen!r}")
+            screen_width = screen.get("width")
+            screen_height = screen.get("height")
+            if screen_width is not None and screen_width <= 0:
+                raise ValueError(f"screen width must be positive, got {screen_width!r}")
+            if screen_height is not None and screen_height <= 0:
+                raise ValueError(f"screen height must be positive, got {screen_height!r}")
+            for avail_key, limit_key in (("availWidth", "width"), ("availHeight", "height")):
+                avail = screen.get(avail_key)
+                limit = screen.get(limit_key)
+                if avail is not None and avail <= 0:
+                    raise ValueError(f"screen {avail_key} must be positive, got {avail!r}")
+                if avail is not None and limit is not None and avail > limit:
+                    raise ValueError(
+                        f"screen {avail_key} ({avail!r}) cannot exceed {limit_key} ({limit!r})"
+                    )
+            dpr = screen.get("devicePixelRatio")
+            if dpr is not None and dpr <= 0:
+                raise ValueError(f"devicePixelRatio must be positive, got {dpr!r}")
+            orientation = screen.get("orientation")
+            if orientation is not None and orientation not in self._ORIENTATIONS:
+                raise ValueError(
+                    f"Unknown orientation {orientation!r}; valid orientations: {sorted(self._ORIENTATIONS)}"
+                )
+            if screen_width is not None and viewport["width"] > screen_width:
+                raise ValueError(
+                    f"viewport width ({viewport['width']!r}) cannot exceed screen width ({screen_width!r})"
+                )
+            if screen_height is not None and viewport["height"] > screen_height:
+                raise ValueError(
+                    f"viewport height ({viewport['height']!r}) cannot exceed screen height ({screen_height!r})"
+                )
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     def get_hardware_fingerprint(self) -> Dict[str, Any]:
         """Return hardware dict correlated to power_level (implements #255 correlation).
         Called from AgentBrowser for dynamic navigator.deviceMemory / hardwareConcurrency.
+        Explicitly set hardware_concurrency/device_memory win over the mapping.
         """
         mapping = {
             "low": {"hardwareConcurrency": 4, "deviceMemory": 4},
             "medium": {"hardwareConcurrency": 8, "deviceMemory": 8},
             "high": {"hardwareConcurrency": 12, "deviceMemory": 16},
         }
-        return mapping.get(getattr(self, "power_level", "medium"), mapping["medium"])
+        power_level = getattr(self, "power_level", "medium")
+        if power_level not in mapping:
+            raise ValueError(
+                f"Unknown power_level {power_level!r}; valid power levels: {sorted(mapping)}"
+            )
+        result = dict(mapping[power_level])
+        if getattr(self, "hardware_concurrency", None) is not None:
+            result["hardwareConcurrency"] = self.hardware_concurrency
+        if getattr(self, "device_memory", None) is not None:
+            result["deviceMemory"] = self.device_memory
+        return result
 
     def get_screen_profile(self) -> Dict[str, Any]:
         """Return screen/dpr/orient profile for #124 realistic viewport+screen variety per persona + #198.
@@ -92,7 +164,7 @@ class DeviceProfile:
                 "devicePixelRatio": 1.0,
                 "orientation": "landscape-primary",
             }
-        return base
+        return copy.deepcopy(base)
 
     @classmethod
     def default(cls) -> "DeviceProfile":
@@ -126,7 +198,7 @@ class Persona:
     def to_launch_overrides(self) -> Dict[str, Any]:
         """Return the minimal dict consumed by AgentBrowser.launch and similar."""
         return {
-            "viewport": self.device.viewport,
+            "viewport": copy.deepcopy(self.device.viewport),
             "user_agent": self.device.user_agent,
             "locale": self.effective_locale(),
             "timezone_id": self.effective_timezone(),
@@ -215,15 +287,24 @@ PERSONAS: Dict[str, Persona] = {
 }
 
 
-@functools.lru_cache(maxsize=64)
 def get_persona(name: str = "default") -> Persona:
-    """Lookup by short name / alias. Always returns a valid Persona (never None).
-    Cached (P2 perf) for repeated lookups during fleet launches / device profile use.
+    """Lookup by exact short name / alias and return a deep copy.
+
+    Empty input raises ValueError; unknown names raise KeyError listing
+    valid names instead of silently returning the US default.
     """
-    if not name:
-        return DEFAULT_PERSONA
-    key = name.lower().strip().replace("-", "_").replace(" ", "_")
-    return PERSONAS.get(key, DEFAULT_PERSONA)
+    if not name or not str(name).strip():
+        raise ValueError(
+            f"Persona name must be a non-empty string; valid personas: {sorted(PERSONAS)}"
+        )
+    key = str(name).lower().strip().replace("-", "_").replace(" ", "_")
+    try:
+        persona = PERSONAS[key]
+    except KeyError:
+        raise KeyError(
+            f"Unknown persona {name!r}; valid personas: {sorted(PERSONAS)}"
+        ) from None
+    return copy.deepcopy(persona)
 
 
 def list_personas() -> list[str]:

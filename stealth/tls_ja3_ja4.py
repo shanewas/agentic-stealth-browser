@@ -185,6 +185,11 @@ class JA4Fingerprint:
     Reference: https://github.com/FoxIO-LLC/ja4
     """
 
+    _SUPPORTED_PROTOCOLS = ("q", "t")
+    _SUPPORTED_TLS_VERSIONS = ("10", "11", "12", "13")
+    _SUPPORTED_SNI = ("d", "i")
+    _SUPPORTED_ALPN = ("h1", "h2", "h3", "h2c", "hq", "http/1.0", "http/1.1", "00")
+
     @classmethod
     def generate_ja4(
         cls,
@@ -197,6 +202,26 @@ class JA4Fingerprint:
         sig_algs: List[str] = None,
     ) -> str:
         """Generate JA4 fingerprint string."""
+        for token_name, token, supported in (
+            ("protocol", protocol, cls._SUPPORTED_PROTOCOLS),
+            ("tls_version", tls_version, cls._SUPPORTED_TLS_VERSIONS),
+            ("sni", sni, cls._SUPPORTED_SNI),
+            ("alpn", alpn, cls._SUPPORTED_ALPN),
+        ):
+            if not token or not str(token).strip():
+                raise ValueError(
+                    f"JA4 {token_name} must be a non-empty supported token; "
+                    f"supported {token_name} values: {sorted(supported)}"
+                )
+            if str(token).strip() not in supported:
+                raise ValueError(
+                    f"Unsupported JA4 {token_name} {token!r}; "
+                    f"supported {token_name} values: {sorted(supported)}"
+                )
+        protocol = str(protocol).strip()
+        tls_version = str(tls_version).strip()
+        sni = str(sni).strip()
+        alpn = str(alpn).strip()
         ciphers = ciphers or ["1301", "1302", "1303"]
         extensions = extensions or ["0000", "0005", "000a"]
         sig_algs = sig_algs or ["0403", "0804", "0401"]
