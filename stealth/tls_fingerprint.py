@@ -12,8 +12,10 @@ See also README table and https://github.com/shanewas/agentic-stealth-browser/is
 This module handles profile selection, logging, and launch arg recommendations. High-quality profiles based on real Chrome 124+.
 """
 
-from typing import Dict, Any, Optional
+import copy
 from enum import Enum
+from typing import Dict, Any, Optional
+
 from audit.logger import AuditLogger
 
 
@@ -251,11 +253,11 @@ class TLSFingerprintManager:
 
     def get_profile(self) -> Dict[str, Any]:
         """Returns the current TLS profile for the selected region."""
-        return self.current_profile
+        return copy.deepcopy(self.current_profile)
 
     def get_launch_args(self) -> list:
         """Returns recommended Chromium launch arguments for this TLS profile."""
-        args = self.current_profile.get("recommended_args", [])
+        args = copy.deepcopy(self.current_profile.get("recommended_args", []))
         # Add some entropy reduction
         args.extend(
             [
