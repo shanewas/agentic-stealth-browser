@@ -1071,8 +1071,12 @@ class WorkflowPlayer:
                 self.browser.page, "screenshot"
             ):
                 buf = await self.browser.page.screenshot()
-                if buf:
-                    return f"screenshots/{name}_{int(time.time())}.png"
+                if isinstance(buf, (bytes, bytearray)) and buf:
+                    filename = f"{name}_{int(time.time())}.png"
+                    path = self.screenshots_dir / filename
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(bytes(buf))
+                    return str(path)
         except Exception:
             pass
         return None

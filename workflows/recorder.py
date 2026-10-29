@@ -56,23 +56,104 @@ _VARIABLE_PATTERNS = [
 
 _KNOWN_PLACEHOLDER_ATTRS = {"placeholder", "aria-placeholder", "name", "title", "label"}
 
+_SECRET_AUTOCOMPLETE_VALUES = {
+    "current-password",
+    "new-password",
+    "one-time-code",
+    "cc-number",
+    "cc-csc",
+    "cc-exp",
+    "cc-exp-month",
+    "cc-exp-year",
+}
+
+_SECRET_NAME_HINTS = ("password", "passwd", "pwd")
+
+_IDENTIFYING_ATTRS = ("type", "autocomplete", "name", "id")
+
+
+def _normalized_attrs(element_info: Optional[Dict]) -> Dict[str, str]:
+    if not element_info:
+        return {}
+    attrs = element_info.get("attributes", {})
+    if isinstance(attrs, list):
+        normalized = {
+            str(k).lower(): str(v)
+            for item in attrs
+            for k, v in (item.items() if isinstance(item, dict) else [])
+        }
+    elif isinstance(attrs, dict):
+        normalized = {str(k).lower(): str(v) for k, v in attrs.items()}
+    else:
+        normalized = {}
+    for key in _IDENTIFYING_ATTRS:
+        if key not in normalized and element_info.get(key) not in (None, ""):
+            normalized[key] = str(element_info[key])
+    return normalized
+
+
+def _is_secret_element(element_info: Optional[Dict]) -> bool:
+    attrs = _normalized_attrs(element_info)
+    if not attrs:
+        return False
+    if attrs.get("type", "").strip().lower() == "password":
+        return True
+    autocomplete_tokens = attrs.get("autocomplete", "").lower().split()
+    if any(token in _SECRET_AUTOCOMPLETE_VALUES for token in autocomplete_tokens):
+        return True
+    for key in ("name", "id"):
+        val = attrs.get(key, "").lower()
+        if val and any(hint in val for hint in _SECRET_NAME_HINTS):
+            return True
+    return False
+
+
+def _element_info_from_params(params: dict) -> Optional[Dict]:
+    """Build element_info from a CDP event's params, if it carries any."""
+    # Note: params["type"] is the CDP event subtype, not the element's
+    # type attribute, so it is not used as an identifying attribute here.
+    if not any(
+        key in params
+        for key in (
+            "tagName",
+            "id",
+            "className",
+            "textContent",
+            "attributes",
+            "autocomplete",
+            "name",
+        )
+    ):
+        return None
+    raw_attributes = params.get("attributes", {})
+    if isinstance(raw_attributes, dict):
+        attributes = dict(raw_attributes)
+    elif isinstance(raw_attributes, list):
+        attributes = raw_attributes
+    else:
+        attributes = {}
+    if isinstance(attributes, dict):
+        for key in ("autocomplete", "name", "id"):
+            if key in params and key not in attributes:
+                attributes[key] = params[key]
+    return {
+        "tagName": params.get("tagName", "input"),
+        "id": params.get("id", ""),
+        "className": params.get("className", ""),
+        "textContent": params.get("textContent", ""),
+        "attributes": attributes,
+    }
+
 
 def _detect_variable(text: str, element_info: Optional[Dict] = None) -> Optional[str]:
     if not text:
         return None
 
+    if _is_secret_element(element_info):
+        return "{{password}}"
+
     if element_info:
-        attrs = element_info.get("attributes", {})
-        if isinstance(attrs, list):
-            attrs = {
-                k.lower(): v
-                for item in attrs
-                for k, v in (item.items() if isinstance(item, dict) else [])
-            }
-        elif isinstance(attrs, dict):
-            attrs = {k.lower(): v for k, v in attrs.items()}
-        else:
-            attrs = {}
+        attrs = _normalized_attrs(element_info)
 
         for attr_key in _KNOWN_PLACEHOLDER_ATTRS:
             if attr_key in attrs:
@@ -189,6 +270,7 @@ class WorkflowRecorder:
         self._current_group: List[RecordedEvent] = []
         self._current_group_type: Optional[str] = None
         self._current_element_info: Optional[Dict] = None
+        self._focused_element_info: Optional[Dict] = None
         self._last_input_time: float = 0.0
         self._last_scroll_time: float = 0.0
         self._last_click_target: Optional[str] = None
@@ -228,6 +310,11 @@ class WorkflowRecorder:
             if isinstance(frame, dict):
                 url = frame.get("url", "")
             self._commit_group()
+            # Focus does not survive a page change; otherwise typing on
+            # the new page would inherit the old page's element info
+            # (e.g. redacting ordinary text typed after navigating away
+            # from a password field).
+            self._focused_element_info = None
             evt = RecordedEvent(
                 type="navigation",
                 timestamp=now,
@@ -239,13 +326,16 @@ class WorkflowRecorder:
             return
 
         if _is_mouse_click_event(method, params):
-            element_info = {
+            element_info = _element_info_from_params(params) or {
                 "tagName": params.get("tagName", "button"),
                 "id": params.get("id", ""),
                 "className": params.get("className", ""),
                 "textContent": params.get("textContent", ""),
                 "attributes": params.get("attributes", {}),
             }
+            if "tagName" not in params:
+                element_info["tagName"] = "button"
+            self._focused_element_info = element_info
             target_key = SelectorGenerator.get_best_selector(element_info)
 
             if (
@@ -278,6 +368,19 @@ class WorkflowRecorder:
 
         if _is_keyboard_event(method):
             text = self._extract_text(params, method)
+            # Focus may have arrived via click or via this event itself
+            # (tab-into-field); capture it before _commit_group() clears
+            # _current_element_info, and keep it in _focused_element_info.
+            element_info = (
+                _element_info_from_params(params)
+                or self._current_element_info
+                or self._focused_element_info
+            )
+            if element_info is not None:
+                self._focused_element_info = element_info
+                self._current_element_info = element_info
+            if _is_secret_element(element_info) and text not in (None, "Enter", "\n"):
+                text = "{{password}}"
 
             if (
                 self._current_group_type == "input"
@@ -288,7 +391,7 @@ class WorkflowRecorder:
                         type="input",
                         timestamp=now,
                         value=text,
-                        element_info=self._current_element_info,
+                        element_info=element_info,
                     )
                 )
                 self._last_input_time = now
@@ -296,12 +399,14 @@ class WorkflowRecorder:
 
             self._commit_group()
             self._current_group_type = "input"
+            self._current_element_info = element_info
+            self._focused_element_info = element_info
             self._last_input_time = now
             evt = RecordedEvent(
                 type="input",
                 timestamp=now,
                 value=text,
-                element_info=self._current_element_info,
+                element_info=element_info,
             )
             self._current_group = [evt]
             return
@@ -479,14 +584,38 @@ class WorkflowRecorder:
                     i = j
                     continue
 
-                variable = _detect_variable(full_text, event.element_info)
+                # Element info is attached to input events only for secret
+                # detection. It must not activate _detect_variable's
+                # attribute-based parameterization for ordinary fields:
+                # before it was attached, input events usually carried no
+                # element info (``_commit_group`` cleared it), so a field
+                # named e.g. "username" now wrongly yielded "{{name}}".
+                # Value-pattern detection (email/number/url in the typed
+                # text itself) fired pre-batch and is preserved by calling
+                # _detect_variable without element info. Callers that
+                # explicitly supply field context can still call
+                # _detect_variable(text, element_info) directly.
+                secret_event = next(
+                    (e for e in group if _is_secret_element(e.element_info)),
+                    None,
+                )
+                variable = (
+                    "{{password}}"
+                    if secret_event is not None
+                    else _detect_variable(full_text)
+                )
 
+                # Likewise, selector/confidence generation for fill/type
+                # steps only applies to secret fields (whose redacted step
+                # needs a target, e.g. tab-into-field with no prior click
+                # step). Ordinary fields keep their pre-batch empty
+                # selector and default confidence.
                 selector = ""
                 confidence = 0.5
-                if event.element_info:
+                if secret_event is not None and secret_event.element_info:
                     selector, confidence = (
                         SelectorGenerator.get_best_selector_with_confidence(
-                            event.element_info
+                            secret_event.element_info
                         )
                     )
 

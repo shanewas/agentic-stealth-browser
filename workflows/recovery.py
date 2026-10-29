@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 
@@ -24,9 +25,12 @@ class RecoveryResult:
 
 
 class FallbackController:
-    def __init__(self, browser, anti_block_orchestrator=None):
+    def __init__(self, browser, anti_block_orchestrator=None, screenshots_dir=None):
         self.browser = browser
         self.anti_block_orchestrator = anti_block_orchestrator
+        self.screenshots_dir = (
+            Path(screenshots_dir) if screenshots_dir is not None else None
+        )
 
     async def handle_step_error(
         self,
@@ -428,8 +432,16 @@ class FallbackController:
                 self.browser.page, "screenshot"
             ):
                 buf = await self.browser.page.screenshot()
-                if buf:
-                    return f"screenshots/{name}_{int(time.time())}.png"
+                if isinstance(buf, (bytes, bytearray)) and buf:
+                    screenshots_dir = (
+                        self.screenshots_dir
+                        or getattr(self.browser, "screenshots_dir", None)
+                        or Path("screenshots")
+                    )
+                    path = Path(screenshots_dir) / f"{name}_{int(time.time())}.png"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(bytes(buf))
+                    return str(path)
         except Exception:
             pass
         return None

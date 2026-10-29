@@ -497,6 +497,38 @@ class TestFallbackControllerTimeout:
         assert result.action_taken == "abort"
 
 
+class _BytesPageBrowser:
+    """Browser stub without screenshot_on_error; page returns raw bytes."""
+
+    def __init__(self, screenshot_result):
+        self.page = AsyncMock()
+        self.page.screenshot = AsyncMock(return_value=screenshot_result)
+        self.page.url = "https://example.com"
+
+
+@pytest.mark.asyncio
+class TestRecoveryScreenshotBytes:
+    async def test_bytes_are_written_to_returned_path(self, tmp_path):
+        controller = FallbackController(
+            _BytesPageBrowser(b"png"), screenshots_dir=tmp_path / "shots"
+        )
+        path = await controller._try_screenshot(0, 0)
+        assert path is not None
+        assert Path(path).read_bytes() == b"png"
+
+    async def test_no_bytes_returns_none(self, tmp_path):
+        controller = FallbackController(
+            _BytesPageBrowser(None), screenshots_dir=tmp_path / "shots"
+        )
+        assert await controller._try_screenshot(0, 0) is None
+
+    async def test_screenshot_error_returns_none(self, tmp_path):
+        browser = _BytesPageBrowser(b"png")
+        browser.page.screenshot = AsyncMock(side_effect=RuntimeError("boom"))
+        controller = FallbackController(browser, screenshots_dir=tmp_path / "shots")
+        assert await controller._try_screenshot(0, 0) is None
+
+
 class TestRecoveryActionDataclass:
     def test_defaults(self):
         ra = RecoveryAction(action_type="retry")
