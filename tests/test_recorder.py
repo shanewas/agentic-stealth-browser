@@ -253,6 +253,152 @@ class TestVariableDetection:
         assert result is None
 
 
+class TestSecretInputRecording:
+    def _click_password_field(self, recorder):
+        recorder.on_cdp_event(
+            _make_click_event(
+                tag="input",
+                el_id="pwd",
+                class_name="",
+                text="",
+                attributes={"type": "password", "name": "pwd"},
+            )
+        )
+
+    def test_password_typing_is_placeholder_everywhere(self):
+        recorder = WorkflowRecorder()
+        self._click_password_field(recorder)
+        recorder.on_cdp_event(_make_key_event(text="hunter2"))
+        steps = recorder.to_steps()
+        fill_steps = [s for s in steps if s.step_type == "fill"]
+        assert len(fill_steps) == 1
+        assert fill_steps[0].params["value"] == "{{password}}"
+        assert fill_steps[0].params["selector"] == "#pwd"
+        assert all(
+            e.value == "{{password}}"
+            for s in steps
+            for e in s.raw_events
+            if e.type == "input"
+        )
+        yaml_str = recorder.to_workflow_yaml(name="secret-test")
+        assert "{{password}}" in yaml_str
+        assert "hunter2" not in yaml_str
+
+    def test_autocomplete_credential_is_placeholder(self):
+        recorder = WorkflowRecorder()
+        recorder.on_cdp_event(
+            _make_click_event(
+                tag="input",
+                el_id="otp",
+                class_name="",
+                text="",
+                attributes={"type": "text", "autocomplete": "one-time-code"},
+            )
+        )
+        recorder.on_cdp_event(_make_key_event(text="123456"))
+        steps = recorder.to_steps()
+        fill_steps = [s for s in steps if s.step_type == "fill"]
+        assert len(fill_steps) == 1
+        assert fill_steps[0].params["value"] == "{{password}}"
+        assert "123456" not in recorder.to_workflow_yaml(name="otp-test")
+
+    def test_tab_into_password_field_is_placeholder(self):
+        recorder = WorkflowRecorder()
+        recorder.on_cdp_event(
+            {
+                "method": "Input.insertText",
+                "params": {
+                    "text": "hunter2",
+                    "tagName": "input",
+                    "id": "pwd",
+                    "attributes": {"type": "password", "name": "pwd"},
+                },
+            }
+        )
+        steps = recorder.to_steps()
+        fill_steps = [s for s in steps if s.step_type == "fill"]
+        assert len(fill_steps) == 1
+        assert fill_steps[0].params["value"] == "{{password}}"
+        assert "hunter2" not in recorder.to_workflow_yaml(name="tab-test")
+
+    def test_normal_text_field_unchanged(self):
+        recorder = WorkflowRecorder()
+        recorder.on_cdp_event(
+            _make_click_event(
+                tag="input",
+                el_id="username",
+                class_name="",
+                text="",
+                attributes={"type": "text", "name": "username"},
+            )
+        )
+        recorder.on_cdp_event(_make_key_event(text="hello"))
+        steps = recorder.to_steps()
+        fill_steps = [s for s in steps if s.step_type == "fill"]
+        assert len(fill_steps) == 1
+        assert fill_steps[0].params["value"] == "hello"
+        # Pre-batch step shape for ordinary fields: no selector/confidence
+        # is derived from the element info attached for secret detection.
+        assert fill_steps[0].params["selector"] == ""
+        assert fill_steps[0].confidence == 0.5
+
+    def test_normal_field_value_pattern_still_parameterized(self):
+        recorder = WorkflowRecorder()
+        recorder.on_cdp_event(
+            _make_click_event(
+                tag="input",
+                el_id="username",
+                class_name="",
+                text="",
+                attributes={"type": "text", "name": "username"},
+            )
+        )
+        recorder.on_cdp_event(_make_key_event(text="user@example.com"))
+        steps = recorder.to_steps()
+        fill_steps = [s for s in steps if s.step_type == "fill"]
+        assert len(fill_steps) == 1
+        assert fill_steps[0].params["value"] == "{{email}}"
+
+    def test_focus_does_not_survive_navigation(self):
+        recorder = WorkflowRecorder()
+        self._click_password_field(recorder)
+        recorder.on_cdp_event(_make_nav_event("https://example.com/next"))
+        recorder.on_cdp_event(_make_key_event(text="hello"))
+        steps = recorder.to_steps()
+        fill_steps = [s for s in steps if s.step_type == "fill"]
+        assert len(fill_steps) == 1
+        assert fill_steps[0].params["value"] == "hello"
+        assert fill_steps[0].params["selector"] == ""
+
+
+class TestSelectorEscaping:
+    def test_id_with_comma_and_space_escaped(self):
+        info = {"tagName": "button", "id": "a,b c", "className": ""}
+        assert SelectorGenerator.get_best_selector(info) == "#a\\,b\\ c"
+
+    def test_id_with_leading_digit_escaped(self):
+        info = {"tagName": "button", "id": "1foo", "className": ""}
+        assert SelectorGenerator.get_best_selector(info) == "#\\31 foo"
+
+    def test_class_with_brackets_escaped(self):
+        info = {"tagName": "div", "id": "", "className": "a[b] c:d"}
+        candidates = SelectorGenerator.generate_candidates(info)
+        selectors = [c["selector"] for c in candidates]
+        assert "div.a\\[b\\]" in selectors
+        assert "div.c\\:d" in selectors
+
+    def test_attribute_value_backslash_quote_newline_escaped(self):
+        info = {
+            "tagName": "button",
+            "id": "",
+            "className": "",
+            "attributes": {"data-testid": 'a\\b"c\nd'},
+        }
+        candidates = SelectorGenerator.generate_candidates(info)
+        selectors = [c["selector"] for c in candidates]
+        assert '[data-testid="a\\\\b\\"c\\a d"]' in selectors
+
+
 class TestWorkflowOutput:
     def test_to_workflow_returns_valid_workflow(self):
         recorder = WorkflowRecorder()

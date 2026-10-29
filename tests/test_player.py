@@ -491,6 +491,40 @@ class TestRehearsal:
         assert result.steps_validated == 1
 
 
+class _BytesPageBrowser:
+    """Browser stub without screenshot_on_error; page returns raw bytes."""
+
+    def __init__(self, screenshot_result):
+        self.page = AsyncMock()
+        self.page.screenshot = AsyncMock(return_value=screenshot_result)
+        self.page.url = "https://example.com"
+
+
+@pytest.mark.asyncio
+class TestErrorScreenshotBytes:
+    async def test_bytes_are_written_to_returned_path(self, tmp_path):
+        from pathlib import Path
+
+        player = WorkflowPlayer(
+            _BytesPageBrowser(b"png"), screenshots_dir=tmp_path / "shots"
+        )
+        path = await player._take_step_screenshot("click", 0)
+        assert path is not None
+        assert Path(path).read_bytes() == b"png"
+
+    async def test_no_bytes_returns_none(self, tmp_path):
+        player = WorkflowPlayer(
+            _BytesPageBrowser(None), screenshots_dir=tmp_path / "shots"
+        )
+        assert await player._take_step_screenshot("click", 0) is None
+
+    async def test_screenshot_error_returns_none(self, tmp_path):
+        browser = _BytesPageBrowser(b"png")
+        browser.page.screenshot = AsyncMock(side_effect=RuntimeError("boom"))
+        player = WorkflowPlayer(browser, screenshots_dir=tmp_path / "shots")
+        assert await player._take_step_screenshot("click", 0) is None
+
+
 @pytest.mark.asyncio
 class TestExecutionTime:
     async def test_execution_time_is_recorded(self, player):

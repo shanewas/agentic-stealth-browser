@@ -42,8 +42,49 @@ def _is_generated_id(id_val: str) -> bool:
     return False
 
 
+def _escape_css_identifier(value: str) -> str:
+    """Escape an identifier per CSSOM serialize-an-identifier (CSS.escape)."""
+    result = []
+    chars = list(str(value))
+    for i, ch in enumerate(chars):
+        code = ord(ch)
+        if code == 0x00:
+            result.append("\ufffd")
+        elif 0x01 <= code <= 0x1F or code == 0x7F:
+            result.append(f"\\{code:x} ")
+        elif i == 0 and "0" <= ch <= "9":
+            result.append(f"\\{code:x} ")
+        elif i == 1 and "0" <= ch <= "9" and chars[0] == "-":
+            result.append(f"\\{code:x} ")
+        elif i == 0 and ch == "-" and len(chars) == 1:
+            result.append("\\-")
+        elif (
+            code >= 0x80
+            or ch in ("-", "_")
+            or "0" <= ch <= "9"
+            or ("a" <= ch <= "z")
+            or ("A" <= ch <= "Z")
+        ):
+            result.append(ch)
+        else:
+            result.append(f"\\{ch}")
+    return "".join(result)
+
+
 def _escape_css_string(value: str) -> str:
-    return value.replace('"', '\\"').replace("'", "\\'")
+    """Escape a string's contents per CSSOM serialize-a-string."""
+    result = []
+    for ch in str(value):
+        code = ord(ch)
+        if code == 0x00:
+            result.append("\ufffd")
+        elif ch in ('"', "\\"):
+            result.append(f"\\{ch}")
+        elif 0x01 <= code <= 0x1F or code == 0x7F:
+            result.append(f"\\{code:x} ")
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
 class SelectorGenerator:
@@ -69,7 +110,7 @@ class SelectorGenerator:
         if el_id and not _is_generated_id(el_id):
             candidates.append(
                 {
-                    "selector": f"#{el_id}",
+                    "selector": f"#{_escape_css_identifier(str(el_id))}",
                     "strategy": "id",
                     "stability": 0.95,
                 }
@@ -94,7 +135,7 @@ class SelectorGenerator:
             ):
                 candidates.append(
                     {
-                        "selector": f'[{attr_key}="{_escape_css_string(str(attr_val))}"]',
+                        "selector": f'[{_escape_css_identifier(attr_key)}="{_escape_css_string(str(attr_val))}"]',
                         "strategy": "attribute",
                         "stability": 0.80,
                     }
@@ -107,7 +148,7 @@ class SelectorGenerator:
                     continue
                 candidates.append(
                     {
-                        "selector": f"{tag}.{cls}",
+                        "selector": f"{tag}.{_escape_css_identifier(cls)}",
                         "strategy": "class",
                         "stability": 0.60,
                     }
@@ -212,7 +253,7 @@ class SelectorGenerator:
                     continue
                 cls_base = re.split(r"[:\[#]", cls)[0]
                 if cls_base:
-                    healed.append(f"{tag}.{cls_base}")
+                    healed.append(f"{tag}.{_escape_css_identifier(cls_base)}")
                     healed.append(f'[class*="{_escape_css_string(cls_base)}"]')
             if not healed:
                 healed.append(tag)
