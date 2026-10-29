@@ -856,27 +856,16 @@ class AntiBlockOrchestrator:
                         "action": action.value,
                     },
                 )
-                # Generate new sticky session (robust, #99/#10)
+                # Generate new sticky session (robust, #99/#10).
+                # Delegate to rotate_proxy so provider identity is
+                # preserved and the per-session registry is updated;
+                # it registers the new config as current itself.
                 if getattr(self.proxy_manager, "current_config", None):
-                    cfg = self.proxy_manager.current_config
-                    base_user = self._safe_extract_base_user(
-                        getattr(cfg, "username", None)
-                    )
-                    pwd = getattr(cfg, "password", "")
-                    ctry = getattr(cfg, "country", "jp")
-                    new_config = self.proxy_manager.create_decodo_config(
-                        user=base_user,
-                        password=pwd,
-                        country=ctry,
-                        session_name=f"recovery-{context.attempt}-{uuid.uuid4().hex[:8]}",
-                        duration_minutes=30,  # shorter duration for recovery
-                    )
-                    # ponytail: global mutation, add per-domain lock if orchestrator drives multiple domains concurrently
-                    # Ensure manager state is updated for future use
-                    self.proxy_manager.current_config = new_config
-                    context.metadata["new_proxy"] = new_config.session_name
-                    # Use to_safe_dict() to avoid leaking credentials into logs/history
-                    context.metadata["new_proxy_config"] = new_config.to_safe_dict()
+                    new_config = self.proxy_manager.rotate_proxy(reason="recovery")
+                    if new_config is not None:
+                        context.metadata["new_proxy"] = new_config.session_name
+                        # Use to_safe_dict() to avoid leaking credentials into logs/history
+                        context.metadata["new_proxy_config"] = new_config.to_safe_dict()
             except Exception as e:
                 self.logger.log_error("proxy_rotation_failed", str(e))
                 # If proxy rotation was the chosen action and failed, recovery failed
