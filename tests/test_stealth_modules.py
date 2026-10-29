@@ -33,6 +33,7 @@ from stealth.tls_fingerprint import (
 from stealth.headers import get_extra_http_headers
 from stealth.profiles import (
     DEFAULT_PERSONA,
+    EU_PROFESSIONAL,
     get_persona,
     list_personas,
 )
@@ -135,6 +136,67 @@ class TestGetStealthScript:
             or safe_seed == ""
             or len(safe_seed) < len(malicious_seed)
         )
+
+    def test_orientation_is_single_properly_quoted_string(self):
+        script = get_stealth_script()
+        assert 'type: "landscape-primary"' in script
+        assert '""landscape-primary""' not in script
+
+    def test_orientation_non_default_value_is_single_quoted(self):
+        screen = {
+            "width": 1440,
+            "height": 900,
+            "availWidth": 1440,
+            "availHeight": 860,
+            "colorDepth": 24,
+            "pixelDepth": 24,
+            "devicePixelRatio": 1.25,
+            "orientation": "portrait-primary",
+        }
+        script = get_stealth_script(screen=screen)
+        assert 'type: "portrait-primary"' in script
+        assert '""portrait-primary""' not in script
+
+    def test_seed_with_newline_quote_or_backslash_is_json_escaped(self):
+        for seed in ("evil\nseed-newline", 'evil"seed-quote', "evil\\seed-backslash"):
+            script = get_stealth_script(fingerprint_seed=seed)
+            # Only the JSON-escaped form may appear; the raw seed (with a real
+            # newline, a bare quote, or a single backslash) must not.
+            assert json.dumps(seed) in script
+            assert seed not in script
+
+    def test_persona_locale_en_gb_drives_language(self):
+        script = get_stealth_script(persona=EU_PROFESSIONAL)
+        assert 'get: () => ["en-GB", "en"]' in script
+        assert 'get: () => "en-GB"' in script
+
+    def test_explicit_locale_en_gb_drives_language(self):
+        script = get_stealth_script(locale="en-GB")
+        assert 'get: () => ["en-GB", "en"]' in script
+        assert 'get: () => "en-GB"' in script
+
+    def test_no_persona_keeps_en_us_language(self):
+        script = get_stealth_script()
+        assert 'get: () => ["en-US", "en"]' in script
+        assert 'get: () => "en-US"' in script
+
+    def test_speech_voices_are_windows_not_macos(self):
+        script = get_stealth_script()
+        for mac_voice in ("Alex", "Samantha", "Daniel", "Karen", "Moira"):
+            assert f'"{mac_voice}"' not in script
+        for windows_voice in (
+            "Microsoft David",
+            "Microsoft Mark",
+            "Microsoft Zira",
+            "Google US English",
+        ):
+            assert windows_voice in script
+
+    def test_speech_voices_follow_en_gb_locale(self):
+        script = get_stealth_script(persona=EU_PROFESSIONAL)
+        assert "Microsoft Hazel" in script
+        assert "Google UK English Female" in script
+        assert '"lang": "en-GB"' in script
 
     def test_webrtc_ip_generation(self):
         script = get_stealth_script(fingerprint_seed="test")
