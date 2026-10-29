@@ -436,6 +436,61 @@ class TestMissingRequiredParam:
 
 
 @pytest.mark.asyncio
+class TestAutoHeal:
+    async def test_healed_selector_success_is_reported_as_success(
+        self, player, mock_browser
+    ):
+        mock_browser.safe_click = AsyncMock(
+            side_effect=[Exception("element not found"), True]
+        )
+        workflow = Workflow(
+            name="test-auto-heal",
+            steps=[WorkflowStep(type="click", params={"selector": "#btn12345678"})],
+        )
+        result = await player.execute(workflow)
+
+        assert result.success is True
+        assert result.steps_executed == 1
+        assert result.failed_step is None
+        assert len(result.auto_healed_selectors) == 1
+        assert result.auto_healed_selectors[0]["step_index"] == 0
+        assert result.auto_healed_selectors[0]["original_selector"] == "#btn12345678"
+        assert result.auto_healed_selectors[0]["healed_selector"] != "#btn12345678"
+        assert player.checkpoint["completed_steps"] == [0]
+
+
+@pytest.mark.asyncio
+class TestRehearsal:
+    async def test_rehearsal_not_found_selector_reports_failure(
+        self, player, mock_browser
+    ):
+        mock_browser.page.evaluate = AsyncMock(return_value=False)
+        workflow = Workflow(
+            name="test-rehearsal-not-found",
+            steps=[WorkflowStep(type="click", params={"selector": "#missing"})],
+        )
+        result = await player.rehearse(workflow)
+
+        assert result.success is False
+        assert result.total_steps == 1
+        assert result.steps_validated == 0
+        assert any("NOT FOUND" in warning for warning in result.warnings)
+
+    async def test_rehearsal_found_selector_reports_success(
+        self, player, mock_browser
+    ):
+        mock_browser.page.evaluate = AsyncMock(return_value=True)
+        workflow = Workflow(
+            name="test-rehearsal-found",
+            steps=[WorkflowStep(type="click", params={"selector": "#present"})],
+        )
+        result = await player.rehearse(workflow)
+
+        assert result.success is True
+        assert result.steps_validated == 1
+
+
+@pytest.mark.asyncio
 class TestExecutionTime:
     async def test_execution_time_is_recorded(self, player):
         workflow = Workflow(

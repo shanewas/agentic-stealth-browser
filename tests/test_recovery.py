@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from workflows.player import WorkflowPlayer
+from workflows.player import WorkflowPlayer, workflow_checkpoint_identity
 from workflows.recovery import FallbackController, RecoveryAction, RecoveryResult
 from workflows.schema import Workflow, WorkflowStep
 
@@ -281,6 +281,15 @@ class TestPlayerRecovery:
         fc = FallbackController(mock_browser)
         player.set_recovery_controller(fc)
 
+        captured_configs = []
+        original_handle_step_error = fc.handle_step_error
+
+        async def capturing_handle_step_error(*args, **kwargs):
+            captured_configs.append(kwargs.get("recovery_config"))
+            return await original_handle_step_error(*args, **kwargs)
+
+        fc.handle_step_error = capturing_handle_step_error
+
         workflow = Workflow(
             name="test-recovery-config",
             steps=[
@@ -299,8 +308,73 @@ class TestPlayerRecovery:
         )
         result = await player.execute(workflow)
 
-        assert result.recovery_used is True
-        assert len(result.recovery_actions) >= 1
+        # Healing and recovery are distinct mechanisms: the healed click
+        # completes directly, so the recovery controller is never invoked
+        # and the step's recovery config is never parsed.
+        assert result.success is True
+        assert result.steps_executed == 1
+        assert result.auto_healed_selectors == [
+            {
+                "step_index": 0,
+                "step_type": "click",
+                "original_selector": "#btn",
+                "healed_selector": '[id*="btn"]',
+            }
+        ]
+        assert [
+            call.args[0] for call in mock_browser.safe_click.call_args_list
+        ] == ["#btn", '[id*="btn"]']
+        assert result.recovery_used is False
+        assert result.recovery_actions == []
+        assert captured_configs == []
+
+        # Recovery-config parsing is still covered explicitly: a selector
+        # with no healed candidates ("button") falls through to recovery,
+        # which must receive the config parsed from the step params.
+        mock_browser.safe_click = AsyncMock(
+            side_effect=[Exception("element not found"), True]
+        )
+        unhealed_player = WorkflowPlayer(mock_browser)
+        unhealed_fc = FallbackController(mock_browser)
+        unhealed_player.set_recovery_controller(unhealed_fc)
+
+        unhealed_configs = []
+        original_unhealed_handle = unhealed_fc.handle_step_error
+
+        async def capturing_unhealed_handle(*args, **kwargs):
+            unhealed_configs.append(kwargs.get("recovery_config"))
+            return await original_unhealed_handle(*args, **kwargs)
+
+        unhealed_fc.handle_step_error = capturing_unhealed_handle
+
+        unhealed_workflow = Workflow(
+            name="test-recovery-config-unhealed",
+            steps=[
+                WorkflowStep(
+                    type="click",
+                    params={
+                        "selector": "button",
+                        "recovery": {
+                            "max_retries": 5,
+                            "backoff": 0.5,
+                            "fallback_to_stealth": True,
+                        },
+                    },
+                )
+            ],
+        )
+        unhealed_result = await unhealed_player.execute(unhealed_workflow)
+
+        assert unhealed_result.success is True
+        assert unhealed_result.recovery_used is True
+        assert len(unhealed_result.recovery_actions) >= 1
+        assert len(unhealed_configs) == 1
+        parsed_config = unhealed_configs[0]
+        assert parsed_config is not None
+        assert parsed_config.action_type == "retry"
+        assert parsed_config.max_retries == 5
+        assert parsed_config.backoff_seconds == 0.5
+        assert parsed_config.take_screenshot is True
 
     async def test_no_infinite_recovery_loop(self, mock_browser):
         mock_browser.safe_click = AsyncMock(side_effect=Exception("element not found"))
@@ -455,6 +529,296 @@ class TestRecoveryResultDataclass:
             error_message="test error",
         )
         assert rr.error_message == "test error"
+
+
+@pytest.mark.asyncio
+class TestRecoveryRedispatch:
+    async def test_fill_recovered_only_after_successful_refill(
+        self, fallback_controller, mock_browser
+    ):
+        mock_browser.safe_type = AsyncMock(return_value=True)
+
+        result = await fallback_controller.handle_step_error(
+            step_type="fill",
+            params={"selector": "#input", "value": "hello"},
+            error=Exception("element not found"),
+            step_index=0,
+            recovery_config=RecoveryAction(
+                action_type="retry", max_retries=1, take_screenshot=False
+            ),
+        )
+
+        assert result.recovered is True
+        mock_browser.safe_type.assert_called_once_with("#input", "hello")
+        mock_browser.safe_click.assert_not_called()
+
+    async def test_fill_not_recovered_when_refill_fails(
+        self, fallback_controller, mock_browser
+    ):
+        mock_browser.safe_type = AsyncMock(
+            side_effect=Exception("element not found")
+        )
+
+        result = await fallback_controller.handle_step_error(
+            step_type="fill",
+            params={"selector": "#input", "value": "hello"},
+            error=Exception("element not found"),
+            step_index=0,
+            recovery_config=RecoveryAction(
+                action_type="retry", max_retries=1, take_screenshot=False
+            ),
+        )
+
+        assert result.recovered is False
+        mock_browser.safe_type.assert_called_once_with("#input", "hello")
+
+    async def test_verify_recovered_only_after_assertion_repasses(
+        self, fallback_controller, mock_browser
+    ):
+        mock_browser.page.evaluate = AsyncMock(
+            side_effect=[True, "Expected Text", True]
+        )
+
+        result = await fallback_controller.handle_step_error(
+            step_type="verify",
+            params={"selector": "h1", "text": "Expected"},
+            error=Exception("element not found"),
+            step_index=0,
+            recovery_config=RecoveryAction(
+                action_type="retry", max_retries=1, take_screenshot=False
+            ),
+        )
+
+        assert result.recovered is True
+        mock_browser.safe_click.assert_not_called()
+
+    async def test_verify_still_failing_is_not_recovered(
+        self, fallback_controller, mock_browser
+    ):
+        mock_browser.page.evaluate = AsyncMock(return_value=False)
+
+        result = await fallback_controller.handle_step_error(
+            step_type="verify",
+            params={"selector": "h1", "text": "Expected"},
+            error=Exception("element not found"),
+            step_index=0,
+            recovery_config=RecoveryAction(
+                action_type="retry", max_retries=1, take_screenshot=False
+            ),
+        )
+
+        assert result.recovered is False
+
+    async def test_player_reports_failure_when_verify_still_fails(
+        self, mock_browser
+    ):
+        mock_browser.page.evaluate = AsyncMock(return_value=False)
+
+        player = WorkflowPlayer(mock_browser)
+        player.set_recovery_controller(FallbackController(mock_browser))
+        workflow = Workflow(
+            name="test-verify-recovery-fails",
+            steps=[
+                WorkflowStep(
+                    type="verify",
+                    params={
+                        "selector": "h1",
+                        "text": "Expected",
+                        "recovery": {"max_retries": 1, "take_screenshot": False},
+                    },
+                )
+            ],
+        )
+        result = await player.execute(workflow)
+
+        assert result.success is False
+        assert result.failed_step == 0
+        assert result.recovery_actions[0]["recovered"] is False
+
+
+@pytest.mark.asyncio
+class TestWorkflowBoundCheckpoints:
+    async def test_mismatched_workflow_checkpoint_is_ignored(
+        self, mock_browser, tmp_path
+    ):
+        checkpoint_data = {
+            "checkpoint": {
+                "completed_steps": [0, 1],
+                "last_url": "https://example.com",
+                "variables": {},
+                "workflow_name": "other-workflow",
+                "steps_hash": "0" * 64,
+                "workflow_identity": {
+                    "workflow_name": "other-workflow",
+                    "steps_hash": "0" * 64,
+                },
+            },
+            "backend": "bridge",
+            "saved_at": 9999999.0,
+        }
+        cp_path = tmp_path / "mismatched.json"
+        cp_path.write_text(json.dumps(checkpoint_data))
+
+        player = WorkflowPlayer(mock_browser)
+        assert player.load_checkpoint(str(cp_path)) is True
+
+        workflow = Workflow(
+            name="test-mismatch",
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"}),
+                WorkflowStep(type="click", params={"selector": "#btn"}),
+            ],
+        )
+        result = await player.execute(workflow)
+
+        assert result.success
+        assert result.steps_executed == 2
+        assert player.checkpoint_warning is not None
+        assert "Ignoring checkpoint" in player.checkpoint_warning
+        mock_browser.safe_goto.assert_called_once()
+        mock_browser.safe_click.assert_called_once_with("#btn")
+
+    async def test_matching_workflow_checkpoint_resumes(
+        self, mock_browser, tmp_path
+    ):
+        workflow = Workflow(
+            name="test-matching-resume",
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"}),
+                WorkflowStep(type="click", params={"selector": "#btn"}),
+            ],
+        )
+        identity = workflow_checkpoint_identity(workflow)
+        checkpoint_data = {
+            "checkpoint": {
+                "completed_steps": [0],
+                "last_url": "https://example.com",
+                "variables": {},
+                "workflow_name": identity["workflow_name"],
+                "steps_hash": identity["steps_hash"],
+                "workflow_identity": identity,
+            },
+            "backend": "bridge",
+            "saved_at": 9999999.0,
+        }
+        cp_path = tmp_path / "matching.json"
+        cp_path.write_text(json.dumps(checkpoint_data))
+
+        player = WorkflowPlayer(mock_browser)
+        assert player.load_checkpoint(str(cp_path)) is True
+        result = await player.execute(workflow)
+
+        assert result.success
+        assert result.steps_executed == 2
+        mock_browser.safe_goto.assert_not_called()
+        mock_browser.safe_click.assert_called_once_with("#btn")
+
+    async def test_nested_workflow_indices_do_not_skip_outer_steps(
+        self, mock_browser, tmp_path
+    ):
+        import yaml
+
+        inner_path = tmp_path / "inner.yaml"
+        inner_path.write_text(
+            yaml.dump(
+                {
+                    "name": "inner",
+                    "steps": [
+                        {"type": "click", "selector": "#inner-1"},
+                        {"type": "click", "selector": "#inner-2"},
+                    ],
+                }
+            )
+        )
+        workflow = Workflow(
+            name="outer",
+            steps=[
+                WorkflowStep(type="click", params={"selector": "#outer-first"}),
+                WorkflowStep(
+                    type="run_workflow", params={"path": str(inner_path)}
+                ),
+                WorkflowStep(type="click", params={"selector": "#outer-last"}),
+            ],
+        )
+
+        player = WorkflowPlayer(mock_browser)
+        result = await player.execute(workflow)
+
+        assert result.success
+        assert [
+            call.args[0] for call in mock_browser.safe_click.call_args_list
+        ] == ["#outer-first", "#inner-1", "#inner-2", "#outer-last"]
+        assert player.checkpoint["completed_steps"] == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+class TestCheckpointValidationAndAtomicSave:
+    async def test_malformed_checkpoint_load_returns_false_without_crashing(
+        self, mock_browser, tmp_path
+    ):
+        wrong_type_path = tmp_path / "wrong-type.json"
+        wrong_type_path.write_text(json.dumps({"checkpoint": "oops"}))
+        truncated_path = tmp_path / "truncated.json"
+        truncated_path.write_text('{"checkpoint": {"completed_steps": [')
+        wrong_field_path = tmp_path / "wrong-field.json"
+        wrong_field_path.write_text(
+            json.dumps(
+                {
+                    "checkpoint": {
+                        "completed_steps": "0",
+                        "last_url": "https://example.com",
+                        "variables": {},
+                    }
+                }
+            )
+        )
+
+        player = WorkflowPlayer(mock_browser)
+        assert player.load_checkpoint(str(wrong_type_path)) is False
+        assert player.load_checkpoint(str(truncated_path)) is False
+        assert player.load_checkpoint(str(wrong_field_path)) is False
+        assert player.checkpoint["completed_steps"] == []
+
+        workflow = Workflow(
+            name="test-after-malformed-checkpoint",
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"})
+            ],
+        )
+        result = await player.execute(workflow)
+        assert result.success
+
+    async def test_saved_checkpoint_round_trips(self, mock_browser, tmp_path):
+        workflow = Workflow(
+            name="test-round-trip",
+            steps=[
+                WorkflowStep(type="navigate", params={"url": "https://example.com"}),
+                WorkflowStep(type="click", params={"selector": "#btn"}),
+            ],
+        )
+        player = WorkflowPlayer(mock_browser)
+        result = await player.execute(workflow)
+        assert result.success
+
+        cp_path = tmp_path / "round-trip.json"
+        save_path = player.save_checkpoint(str(cp_path))
+        assert Path(save_path).exists()
+        assert list(tmp_path.glob(".checkpoint-*.tmp")) == []
+
+        resumed = WorkflowPlayer(mock_browser)
+        assert resumed.load_checkpoint(save_path) is True
+        identity = workflow_checkpoint_identity(workflow)
+        assert resumed.checkpoint["completed_steps"] == [0, 1]
+        assert resumed.checkpoint["workflow_name"] == identity["workflow_name"]
+        assert resumed.checkpoint["steps_hash"] == identity["steps_hash"]
+
+        mock_browser.safe_goto.reset_mock()
+        mock_browser.safe_click.reset_mock()
+        resumed_result = await resumed.execute(workflow)
+        assert resumed_result.success
+        assert resumed_result.steps_executed == 2
+        mock_browser.safe_goto.assert_not_called()
+        mock_browser.safe_click.assert_not_called()
 
 
 class TestExecutionResultRecoveryActions:

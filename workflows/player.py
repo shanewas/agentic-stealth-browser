@@ -1,9 +1,13 @@
 import asyncio
+import hashlib
 import json
+import logging
+import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from workflows.action_interpreter import normalize_step_params, validate_step_params
 from workflows.schema import Workflow, load_workflow
@@ -11,7 +15,65 @@ from workflows.selector_generator import SelectorGenerator
 from workflows.variable_resolver import VariableResolver
 
 
+logger = logging.getLogger(__name__)
+
 MIN_RECORDED_DURATION_SECONDS = 1e-9
+
+
+def workflow_checkpoint_identity(workflow: Workflow) -> Dict[str, str]:
+    """Identity binding a checkpoint to one workflow's step list."""
+    payload = json.dumps(
+        [{"type": step.type, "params": step.params} for step in workflow.steps],
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return {
+        "workflow_name": workflow.name,
+        "steps_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+    }
+
+
+def _identity_from_checkpoint(
+    checkpoint: Dict[str, Any],
+) -> Optional[Tuple[str, str]]:
+    identity = checkpoint.get("workflow_identity")
+    name = checkpoint.get("workflow_name")
+    steps_hash = checkpoint.get("steps_hash") or checkpoint.get("workflow_hash")
+    if isinstance(identity, dict):
+        name = name or identity.get("workflow_name") or identity.get("name")
+        steps_hash = (
+            steps_hash or identity.get("steps_hash") or identity.get("workflow_hash")
+        )
+    elif isinstance(identity, str) and ":" in identity:
+        name, steps_hash = identity.split(":", 1)
+    workflow_id = checkpoint.get("workflow_id")
+    if not name and isinstance(workflow_id, str) and ":" in workflow_id:
+        name, steps_hash = workflow_id.split(":", 1)
+    if isinstance(name, str) and isinstance(steps_hash, str) and name and steps_hash:
+        return (name, steps_hash)
+    return None
+
+
+def _validated_checkpoint(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+    completed = raw.get("completed_steps")
+    if not isinstance(completed, list) or any(
+        not isinstance(item, int) or isinstance(item, bool) for item in completed
+    ):
+        return None
+    last_url = raw.get("last_url", "")
+    if not isinstance(last_url, str):
+        return None
+    variables = raw.get("variables", {})
+    if not isinstance(variables, dict):
+        return None
+    validated = dict(raw)
+    validated["completed_steps"] = list(completed)
+    validated["last_url"] = last_url
+    validated["variables"] = dict(variables)
+    return validated
 
 
 def _elapsed_since(start_time: float) -> float:
@@ -61,6 +123,9 @@ class WorkflowPlayer:
         self.backend: str = "bridge"
         self._workflow_stack: List[str] = []
         self.output_variables: Dict[str, Any] = {}
+        self._checkpoint_frames: Dict[str, Dict[str, Any]] = {}
+        self._checkpoint_path: Optional[str] = None
+        self.checkpoint_warning: Optional[str] = None
 
     def set_recovery_controller(self, controller):
         self.recovery = controller
@@ -69,26 +134,76 @@ class WorkflowPlayer:
         try:
             with open(path, "r") as f:
                 data = json.load(f)
-            self.checkpoint = data.get(
-                "checkpoint", {"completed_steps": [], "last_url": "", "variables": {}}
-            )
-            self.backend = data.get("backend", "bridge")
-            return True
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        except (OSError, json.JSONDecodeError):
             return False
+        if not isinstance(data, dict) or "checkpoint" not in data:
+            return False
+        validated = _validated_checkpoint(data.get("checkpoint"))
+        if validated is None:
+            return False
+        backend = data.get("backend", "bridge")
+        if not isinstance(backend, str):
+            return False
+        frames = validated.get("frames")
+        if isinstance(frames, dict):
+            for frame in frames.values():
+                checked_frame = _validated_checkpoint(frame)
+                if checked_frame is None:
+                    continue
+                identity = _identity_from_checkpoint(checked_frame)
+                if identity is not None:
+                    key = f"{identity[0]}:{identity[1]}"
+                    self._checkpoint_frames[key] = checked_frame
+        self.checkpoint = validated
+        self.backend = backend
+        self._checkpoint_path = str(path)
+        return True
 
     def save_checkpoint(self, path: Optional[str] = None) -> str:
         if path is None:
             path = f"checkpoints/checkpoint_{int(time.time())}.json"
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        path_str = str(path)
+        parent = Path(path_str).parent
+        parent.mkdir(parents=True, exist_ok=True)
+        export_checkpoint = dict(self.checkpoint)
+        if self._checkpoint_frames:
+            export_checkpoint["frames"] = {
+                key: {
+                    field: value
+                    for field, value in frame.items()
+                    if field != "frames"
+                }
+                for key, frame in self._checkpoint_frames.items()
+            }
         data = {
-            "checkpoint": self.checkpoint,
+            "checkpoint": export_checkpoint,
             "backend": self.backend,
             "saved_at": time.time(),
         }
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-        return str(path)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(parent), prefix=".checkpoint-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path_str)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        return path_str
+
+    def _persist_checkpoint(self) -> None:
+        if self._workflow_stack or not self._checkpoint_path:
+            return
+        try:
+            self.save_checkpoint(self._checkpoint_path)
+        except Exception:
+            pass
 
     async def execute(
         self, workflow: Workflow, runtime_vars: Optional[Dict[str, Any]] = None
@@ -101,7 +216,42 @@ class WorkflowPlayer:
         recovery_actions: List[Dict[str, Any]] = []
         auto_healed_selectors: List[Dict[str, Any]] = []
 
-        completed = set(self.checkpoint.get("completed_steps", []))
+        identity = workflow_checkpoint_identity(workflow)
+        frame_key = f"{identity['workflow_name']}:{identity['steps_hash']}"
+        frame = self._checkpoint_frames.get(frame_key)
+        if frame is None:
+            source = self.checkpoint if isinstance(self.checkpoint, dict) else {}
+            source_identity = _identity_from_checkpoint(source)
+            expected_identity = (identity["workflow_name"], identity["steps_hash"])
+            if source_identity is not None and source_identity != expected_identity:
+                self.checkpoint_warning = (
+                    f"Ignoring checkpoint for workflow '{source_identity[0]}' "
+                    f"(steps_hash={source_identity[1]}): it does not match "
+                    f"workflow '{identity['workflow_name']}' "
+                    f"(steps_hash={identity['steps_hash']})"
+                )
+                logger.warning(self.checkpoint_warning)
+                frame = {
+                    "completed_steps": [],
+                    "last_url": "",
+                    "variables": {},
+                }
+            else:
+                checked_source = _validated_checkpoint(source)
+                frame = (
+                    dict(checked_source)
+                    if checked_source is not None
+                    else {"completed_steps": [], "last_url": "", "variables": {}}
+                )
+            frame["workflow_name"] = identity["workflow_name"]
+            frame["steps_hash"] = identity["steps_hash"]
+            frame["workflow_identity"] = dict(identity)
+            frame.pop("frames", None)
+            self._checkpoint_frames[frame_key] = frame
+        if not self._workflow_stack:
+            self.checkpoint = frame
+
+        completed = set(frame.get("completed_steps", []))
 
         run_vars = dict(runtime_vars or {})
         resolved_workflow = self.resolver.resolve_workflow(workflow, run_vars)
@@ -127,7 +277,7 @@ class WorkflowPlayer:
                     screenshots=screenshots,
                     execution_time=elapsed,
                     recovery_used=recovery_used,
-                    checkpoint=self.checkpoint,
+                    checkpoint=frame,
                     recovery_actions=recovery_actions,
                     auto_healed_selectors=auto_healed_selectors,
                 )
@@ -135,12 +285,14 @@ class WorkflowPlayer:
             try:
                 await self._dispatch_step(step_type, params, run_vars)
                 steps_executed += 1
-                self.checkpoint["completed_steps"].append(i)
+                frame["completed_steps"].append(i)
                 try:
-                    self.checkpoint["last_url"] = self._get_current_url()
+                    frame["last_url"] = self._get_current_url()
                 except Exception:
                     pass
+                self._persist_checkpoint()
             except Exception as e:
+                healed_succeeded = False
                 if step_type in ("click", "fill", "type", "verify", "wait_for_element"):
                     healed = self._try_auto_heal(params)
                     if healed:
@@ -152,7 +304,8 @@ class WorkflowPlayer:
                                     step_type, healed_params, run_vars
                                 )
                                 steps_executed += 1
-                                self.checkpoint["completed_steps"].append(i)
+                                frame["completed_steps"].append(i)
+                                self._persist_checkpoint()
                                 auto_healed_selectors.append(
                                     {
                                         "step_index": i,
@@ -161,11 +314,15 @@ class WorkflowPlayer:
                                         "healed_selector": healed_selector,
                                     }
                                 )
+                                healed_succeeded = True
                                 break
                             except Exception:
                                 continue
 
-                if (i + 1) not in self.checkpoint["completed_steps"]:
+                if healed_succeeded:
+                    continue
+
+                if i not in frame["completed_steps"]:
                     if self.recovery is not None:
                         recovery_cfg_raw = params.get("recovery")
                         if recovery_cfg_raw and isinstance(recovery_cfg_raw, dict):
@@ -209,7 +366,8 @@ class WorkflowPlayer:
 
                         if recovery_result.recovered:
                             steps_executed += 1
-                            self.checkpoint["completed_steps"].append(i)
+                            frame["completed_steps"].append(i)
+                            self._persist_checkpoint()
                             if recovery_result.backend_used == "stealth":
                                 self.backend = "stealth"
                             continue
@@ -228,7 +386,7 @@ class WorkflowPlayer:
                     screenshots=screenshots,
                     execution_time=elapsed,
                     recovery_used=recovery_used,
-                    checkpoint=self.checkpoint,
+                    checkpoint=frame,
                     recovery_actions=recovery_actions,
                     auto_healed_selectors=auto_healed_selectors,
                 )
@@ -242,7 +400,7 @@ class WorkflowPlayer:
             summary=f"Workflow '{workflow.name}' completed: {steps_executed}/{total_steps} steps executed successfully",
             execution_time=elapsed,
             recovery_used=recovery_used,
-            checkpoint=self.checkpoint,
+            checkpoint=frame,
             recovery_actions=recovery_actions,
             auto_healed_selectors=auto_healed_selectors,
         )
@@ -262,6 +420,7 @@ class WorkflowPlayer:
         warnings: List[str] = []
         screenshots: List[str] = []
         selectors_used: List[Dict[str, Any]] = []
+        steps_validated = 0
 
         validation_warnings = validate_workflow_steps(workflow)
         warnings.extend(validation_warnings)
@@ -276,6 +435,7 @@ class WorkflowPlayer:
             if step_type == "navigate":
                 url = params.get("url", "")
                 warnings.append(f"Step {i} ({step_type}): would navigate to {url}")
+                steps_validated += 1
                 try:
                     screenshot_path = await self._take_step_screenshot(step_type, i)
                     if screenshot_path:
@@ -298,6 +458,8 @@ class WorkflowPlayer:
                     exists = await self._evaluate(
                         f"!!document.querySelector({json.dumps(selector)})"
                     )
+                    if exists:
+                        steps_validated += 1
                     if not exists:
                         warnings.append(
                             f"Step {i} ({step_type}): selector '{selector}' NOT FOUND on current page"
@@ -324,6 +486,8 @@ class WorkflowPlayer:
                     exists = await self._evaluate(
                         f"!!document.querySelector({json.dumps(selector)})"
                     )
+                    if exists:
+                        steps_validated += 1
                     if not exists:
                         warnings.append(
                             f"Step {i} ({step_type}): selector '{selector}' NOT FOUND on current page"
@@ -347,9 +511,11 @@ class WorkflowPlayer:
                         "selector": selector,
                     }
                 )
+                steps_validated += 1
 
             elif step_type == "screenshot":
                 warnings.append(f"Step {i} ({step_type}): would take screenshot")
+                steps_validated += 1
                 try:
                     screenshot_path = await self._take_step_screenshot(step_type, i)
                     if screenshot_path:
@@ -362,6 +528,7 @@ class WorkflowPlayer:
                 warnings.append(
                     f"Step {i} ({step_type}): would run nested workflow from {path}"
                 )
+                steps_validated += 1
 
             elif step_type == "conditional":
                 condition = params.get("condition", "")
@@ -371,6 +538,7 @@ class WorkflowPlayer:
                     f"Step {i} ({step_type}): condition '{condition}' with "
                     f"{steps_count} steps (else: {else_count})"
                 )
+                steps_validated += 1
 
             elif step_type == "wait":
                 ms_val = params.get("ms", 1000)
@@ -381,10 +549,12 @@ class WorkflowPlayer:
                     or f"{ms_val}ms"
                 )
                 warnings.append(f"Step {i} ({step_type}): would wait for {wait_reason}")
+                steps_validated += 1
 
             elif step_type == "wait_for_element":
                 selector = params.get("selector", "")
                 warnings.append(f"Step {i} ({step_type}): would wait for {selector}")
+                steps_validated += 1
 
             elif step_type == "scroll":
                 direction = params.get("direction", "down")
@@ -392,6 +562,7 @@ class WorkflowPlayer:
                 warnings.append(
                     f"Step {i} ({step_type}): would scroll {direction} {amount}px"
                 )
+                steps_validated += 1
 
             elif step_type == "select":
                 selector = params.get("selector", "")
@@ -399,12 +570,14 @@ class WorkflowPlayer:
                 warnings.append(
                     f"Step {i} ({step_type}): would select {value} on {selector}"
                 )
+                steps_validated += 1
 
             elif step_type == "execute_js":
                 code = params.get("code", "")
                 warnings.append(
                     f"Step {i} ({step_type}): would execute JS ({len(code)} chars)"
                 )
+                steps_validated += 1
 
             else:
                 warnings.append(
@@ -412,15 +585,19 @@ class WorkflowPlayer:
                 )
 
         elapsed = _elapsed_since(start_time)
+        success = not any(
+            "NOT FOUND" in warning or "unknown step type" in warning
+            for warning in warnings
+        )
         return RehearsalResult(
-            success=len(warnings) > 0 or True,
+            success=success,
             total_steps=len(resolved_workflow.steps),
-            steps_validated=len(resolved_workflow.steps),
+            steps_validated=steps_validated,
             warnings=warnings,
             screenshots=screenshots,
             selectors_used=selectors_used,
             execution_time=elapsed,
-            summary=f"Rehearsal complete: {len(resolved_workflow.steps)} steps, {len(warnings)} warnings",
+            summary=f"Rehearsal complete: {steps_validated}/{len(resolved_workflow.steps)} steps validated, {len(warnings)} warnings",
         )
 
     async def _dispatch_step(
