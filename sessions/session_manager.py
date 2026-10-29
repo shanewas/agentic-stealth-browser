@@ -93,6 +93,23 @@ class SessionManager:
         session_path = self.base_dir / name
         session_path.mkdir(exist_ok=True)
 
+        # Preserve a compromised flag on re-create: rewriting meta must not
+        # silently clear quarantine while old cookies/profile remain on disk.
+        # (Preserving, not refusing, keeps resume-style callers working.)
+        preserved: Dict[str, Any] = {}
+        existing_meta = session_path / "meta.json"
+        if existing_meta.exists():
+            try:
+                with open(existing_meta, "r") as f:
+                    old_meta = json.load(f)
+                if isinstance(old_meta, dict) and old_meta.get("compromised"):
+                    preserved["compromised"] = True
+                    for key in ("cleaned_at", "cleanup_reason"):
+                        if key in old_meta:
+                            preserved[key] = old_meta[key]
+            except Exception:
+                pass
+
         meta = {
             "name": name,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -101,6 +118,7 @@ class SessionManager:
             "user_data_dir": str(session_path / "user_data"),
             "cookies_file": str(session_path / "cookies.json"),
             "state_file": str(session_path / "state.json"),
+            **preserved,
         }
 
         with open(session_path / "meta.json", "w") as f:
@@ -170,6 +188,14 @@ class SessionManager:
                     "error": str(e),
                 }
 
+        if not marked:
+            return {
+                "status": "error",
+                "name": name,
+                "marked": False,
+                "message": "Failed to mark session compromised: meta.json missing or unreadable",
+            }
+
         return {"status": "marked_compromised", "name": name}
 
     def prune_ephemeral(self, max_age_hours: Optional[int] = None) -> Dict[str, Any]:
@@ -183,6 +209,7 @@ class SessionManager:
         """
         removed = 0
         errors = []
+        skipped = []
         now = datetime.now(timezone.utc)
         for meta_file in self.base_dir.glob("*/meta.json"):
             try:
@@ -192,16 +219,27 @@ class SessionManager:
                     continue
                 if max_age_hours is not None:
                     created = meta.get("created_at")
-                    if created:
-                        try:
-                            created_dt = datetime.fromisoformat(
-                                created.replace("Z", "+00:00")
-                            )
-                            age_h = (now - created_dt).total_seconds() / 3600
-                            if age_h < max_age_hours:
-                                continue
-                        except Exception:
-                            pass
+                    if not created:
+                        errors.append(
+                            f"{meta_file.parent.name}: missing created_at"
+                        )
+                        skipped.append(meta_file.parent.name)
+                        continue
+                    try:
+                        created_dt = datetime.fromisoformat(
+                            created.replace("Z", "+00:00")
+                        )
+                    except Exception:
+                        errors.append(
+                            f"{meta_file.parent.name}: unparseable created_at {created!r}"
+                        )
+                        skipped.append(meta_file.parent.name)
+                        continue
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=timezone.utc)
+                    age_h = (now - created_dt).total_seconds() / 3600
+                    if age_h < max_age_hours:
+                        continue
                 session_path = meta_file.parent
                 import shutil
 
@@ -214,6 +252,7 @@ class SessionManager:
             "status": "success",
             "removed": removed,
             "errors": len(errors),
+            "skipped": skipped,
             "max_age_hours": max_age_hours,
         }
 
@@ -260,8 +299,10 @@ class SessionManager:
         new_path = self.base_dir / new_name
         src_path = self.base_dir / source_name
 
-        # copy key state files (cookies + state) for functional clone
-        for fname in ("cookies.json", "state.json", "meta.json"):
+        # Copy only functional state; never copy meta.json — it names the
+        # source and points at the source's paths. The clone keeps the meta
+        # written by create_session above (its own name/paths).
+        for fname in ("cookies.json", "state.json"):
             src_f = src_path / fname
             if src_f.exists():
                 try:
@@ -279,10 +320,14 @@ class SessionManager:
                 except Exception:
                     pass
 
-        # update meta to record provenance
+        # update meta to record provenance (defensively re-assert own identity)
         try:
             with open(new_path / "meta.json", "r") as f:
                 m = json.load(f)
+            m["name"] = new_name
+            m["user_data_dir"] = str(new_path / "user_data")
+            m["cookies_file"] = str(new_path / "cookies.json")
+            m["state_file"] = str(new_path / "state.json")
             m["cloned_from"] = source_name
             m["cloned_at"] = datetime.now(timezone.utc).isoformat()
             m["clone_full_user_data"] = bool(copy_user_data)

@@ -819,14 +819,29 @@ class CookieManager:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-        # Bundle structure validation (#73)
-        if isinstance(bundle, dict):
-            has_required = any(k in bundle for k in ("meta", "cookies", "version"))
-            if not has_required:
-                return {
-                    "status": "error",
-                    "message": "Bundle structure invalid: missing required keys (meta, cookies, or version)",
-                }
+        # Bundle structure validation (#73) — validate shapes up front so
+        # malformed bundles return an error dict instead of raising.
+        if not isinstance(bundle, dict):
+            return {
+                "status": "error",
+                "message": "Bundle structure invalid: bundle must be a JSON object",
+            }
+        if "meta" in bundle and not isinstance(bundle["meta"], dict):
+            return {
+                "status": "error",
+                "message": "Bundle structure invalid: 'meta' must be an object",
+            }
+        if "cookies" in bundle and not isinstance(bundle["cookies"], list):
+            return {
+                "status": "error",
+                "message": "Bundle structure invalid: 'cookies' must be a list",
+            }
+        has_required = any(k in bundle for k in ("meta", "cookies", "version"))
+        if not has_required:
+            return {
+                "status": "error",
+                "message": "Bundle structure invalid: missing required keys (meta, cookies, or version)",
+            }
 
         # Integrity check for plaintext bundles (#73)
         # Extract stored salt (new format) or fall back to instance salt (legacy)
@@ -838,30 +853,48 @@ class CookieManager:
                 verify_salt = self._hmac_salt
         else:
             verify_salt = self._hmac_salt
+        # Keyless plaintext bundles are unauthenticated: their HMAC key is
+        # derived from bundle-supplied name+salt, so anyone editing the
+        # bundle can re-sign it. Only a caller-held encryption_key makes
+        # the HMAC meaningful; without one, accept (legacy-compatible) but
+        # report integrity as unverified rather than verified.
+        integrity_verified = bool(
+            isinstance(data, dict) and data.get("encrypted")
+        )
         if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
-            stored_hmac = data["integrity"]
-            # Build canonical payload without integrity and salt fields
-            payload_copy = {
-                k: v for k, v in data.items() if k not in ("integrity", "_hmac_salt")
-            }
-            raw = json.dumps(
-                payload_copy, separators=(",", ":"), sort_keys=True
-            ).encode("utf-8")
-            # Use the session name from the bundle's meta for verification
-            # (same key used during export)
-            bundle_meta = bundle.get("meta", {}) if isinstance(bundle, dict) else {}
-            verify_name = bundle_meta.get("name", "") or target_session_name or ""
-            if not _verify_hmac(
-                encryption_key or "",
-                raw,
-                stored_hmac,
-                session_name=verify_name,
-                salt=verify_salt,
-            ):
-                return {
-                    "status": "integrity_error",
-                    "message": "Bundle integrity check failed — bundle may have been tampered with",
+            if encryption_key:
+                stored_hmac = data["integrity"]
+                # Build canonical payload without integrity and salt fields
+                payload_copy = {
+                    k: v
+                    for k, v in data.items()
+                    if k not in ("integrity", "_hmac_salt")
                 }
+                raw = json.dumps(
+                    payload_copy, separators=(",", ":"), sort_keys=True
+                ).encode("utf-8")
+                # Use the session name from the bundle's meta for verification
+                # (same key used during export)
+                bundle_meta = bundle.get("meta", {})
+                verify_name = bundle_meta.get("name", "") or target_session_name or ""
+                if not _verify_hmac(
+                    encryption_key or "",
+                    raw,
+                    stored_hmac,
+                    session_name=verify_name,
+                    salt=verify_salt,
+                ):
+                    return {
+                        "status": "integrity_error",
+                        "message": "Bundle integrity check failed — bundle may have been tampered with",
+                    }
+                integrity_verified = True
+            else:
+                logger.warning(
+                    "Keyless plaintext bundle: integrity is unverified "
+                    "(HMAC key is bundle-derived and forgeable); "
+                    "proceeding as unauthenticated"
+                )
         elif (
             isinstance(data, dict)
             and not data.get("encrypted")
@@ -876,6 +909,13 @@ class CookieManager:
             "name", f"imported-{datetime.now().strftime('%Y%m%d%H%M')}"
         )
         cookies = bundle.get("cookies", []) or bundle.get("cookies_file_content", [])
+        if isinstance(cookies, dict):
+            cookies = cookies.get("cookies", [])
+        if not isinstance(cookies, list):
+            return {
+                "status": "error",
+                "message": "Bundle structure invalid: 'cookies' must be a list",
+            }
 
         # Domain validation (#64)
         original_count = len(cookies)
@@ -900,6 +940,8 @@ class CookieManager:
             "status": "success",
             "session": name,
             "cookies_imported": len(cookies),
+            "integrity_verified": integrity_verified,
+            "integrity": "verified" if integrity_verified else "unverified",
         }
         if filtered_count:
             result["filtered_domains"] = filtered_count
@@ -1013,7 +1055,8 @@ class SessionOrchestrator:
         """Create session (MCP hygiene / contract compat). Delegates to cm."""
         sess = self.cm.create_resilient_session(session_name)
         self.active_sessions[session_name] = sess
-        self.cookie_managers[session_name] = self.cm
+        # Each session gets its own per-session manager, not the shared cm.
+        self.cookie_managers[session_name] = self.cm.cookie_managers[session_name]
         return sess
 
     async def start_session(
@@ -1021,8 +1064,9 @@ class SessionOrchestrator:
     ) -> Dict[str, Any]:
         sess = self.cm.create_resilient_session(name)
         self.active_sessions[name] = sess
+        self.cookie_managers[name] = self.cm.cookie_managers[name]
         if cookies_path:
-            await self.cm.load_cookies(cookies_path)
+            await self.cookie_managers[name].load_cookies(cookies_path)
         return {"status": "started", "session": name}
 
     async def export_session_bundle(
