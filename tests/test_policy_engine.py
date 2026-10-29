@@ -3,6 +3,8 @@ and leaf-step (conditional / nested / variable) checks at the replay gate."""
 
 import pytest
 
+from production.approval_gate import is_sensitive_action
+from production.mcp_handlers import _expand_replay_steps
 from production.mcp_server import StealthMCPServer, ToolError
 from production.policy_engine import DomainRule, Policy, PolicyEngine
 
@@ -237,3 +239,205 @@ class TestReplayGateLeafSteps:
         with pytest.raises(ToolError) as exc:
             await _replay(server, "outer.yaml")
         assert exc.value.error_code == "MCP_POLICY_DENIED"
+
+
+class TestConditionalConditionGate:
+    """H2: a conditional's condition is JS the player evaluates, so the
+    expansion emits it as an execute_js leaf for the policy/approval gate."""
+
+    @pytest.mark.asyncio
+    async def test_condition_only_js_blocked_by_execute_js_policy(
+        self, tmp_path, monkeypatch
+    ):
+        server = _replay_server(
+            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+        )
+        (server._workflow_library_root / "w.yaml").write_text(
+            "name: w\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: 'document.title'\n"
+            "    steps:\n"
+            "      - type: wait\n"
+            "        ms: 1\n"
+        )
+        with pytest.raises(ToolError) as exc:
+            await _replay(server, "w.yaml")
+        assert exc.value.error_code == "MCP_POLICY_DENIED"
+        assert exc.value.details["step_type"] == "execute_js"
+
+    @pytest.mark.asyncio
+    async def test_condition_only_js_pends_for_approval(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("STEALTH_APPROVAL_MODE", raising=False)
+        server = _replay_server(
+            tmp_path,
+            Policy(name="strict", require_approval_for=["execute_js"]),
+            monkeypatch,
+        )
+        (server._workflow_library_root / "w.yaml").write_text(
+            "name: w\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: 'document.title'\n"
+            "    steps:\n"
+            "      - type: wait\n"
+            "        ms: 1\n"
+        )
+        assert is_sensitive_action("execute_js") is True
+        with pytest.raises(ToolError) as exc:
+            await _replay(server, "w.yaml")
+        assert exc.value.error_code == "MCP_APPROVAL_REQUIRED"
+        assert exc.value.details["step_type"] == "execute_js"
+
+    @pytest.mark.asyncio
+    async def test_condition_only_js_allowed_when_js_not_blocked(
+        self, tmp_path, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        server = _replay_server(tmp_path, Policy(name="open"), monkeypatch)
+        (server._workflow_library_root / "w.yaml").write_text(
+            "name: w\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: 'document.title'\n"
+            "    steps:\n"
+            "      - type: wait\n"
+            "        ms: 1\n"
+        )
+        server._sessions["s"] = object()
+
+        class _FakePlayer:
+            def __init__(self, browser):
+                self.browser = browser
+
+            async def execute(self, workflow, runtime_vars=None):
+                return SimpleNamespace(
+                    success=True,
+                    steps_executed=1,
+                    total_steps=1,
+                    failed_step=None,
+                    failed_step_type=None,
+                    error_message=None,
+                    execution_time=0.0,
+                    summary="ok",
+                )
+
+        monkeypatch.setattr("workflows.player.WorkflowPlayer", _FakePlayer)
+        result = await _replay(server, "w.yaml")
+        assert result["success"] is True
+
+    @pytest.mark.parametrize("condition", ["", "   "])
+    def test_trivial_condition_emits_no_js_leaf(self, tmp_path, condition):
+        steps = [
+            {
+                "type": "conditional",
+                "condition": condition,
+                "steps": [{"type": "wait", "ms": 1}],
+            }
+        ]
+        expanded = _expand_replay_steps(steps, {}, tmp_path, tmp_path)
+        assert [s["type"] for s in expanded] == ["conditional", "wait"]
+        assert all(s["type"] != "execute_js" for s in expanded)
+
+    def test_branch_steps_still_expand_after_condition_leaf(self, tmp_path):
+        steps = [
+            {
+                "type": "conditional",
+                "condition": "document.title",
+                "steps": [{"type": "click", "selector": "#ok"}],
+                "else_steps": [
+                    {"type": "navigate", "url": "https://example.com"}
+                ],
+            }
+        ]
+        expanded = _expand_replay_steps(steps, {}, tmp_path, tmp_path)
+        assert [s["type"] for s in expanded] == [
+            "conditional",
+            "execute_js",
+            "click",
+            "navigate",
+        ]
+        assert expanded[1]["params"] == {"code": "document.title"}
+        assert expanded[1]["url"] == ""
+        assert expanded[1]["error"] is None
+        assert expanded[3]["url"] == "https://example.com"
+
+    @pytest.mark.asyncio
+    async def test_branch_step_still_checked_when_condition_trivial(
+        self, tmp_path, monkeypatch
+    ):
+        server = _replay_server(
+            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+        )
+        (server._workflow_library_root / "w.yaml").write_text(
+            "name: w\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: ''\n"
+            "    steps:\n"
+            "      - type: wait\n"
+            "        ms: 1\n"
+            "    else_steps:\n"
+            "      - type: execute_js\n"
+            "        code: '1'\n"
+        )
+        with pytest.raises(ToolError) as exc:
+            await _replay(server, "w.yaml")
+        assert exc.value.error_code == "MCP_POLICY_DENIED"
+        assert exc.value.details["step_type"] == "execute_js"
+
+    @pytest.mark.asyncio
+    async def test_nested_workflow_conditional_condition_blocked(
+        self, tmp_path, monkeypatch
+    ):
+        server = _replay_server(
+            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+        )
+        (server._workflow_library_root / "inner.yaml").write_text(
+            "name: inner\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: 'document.title'\n"
+            "    steps:\n"
+            "      - type: wait\n"
+            "        ms: 1\n"
+        )
+        (server._workflow_library_root / "outer.yaml").write_text(
+            "name: outer\n"
+            "steps:\n"
+            "  - type: run_workflow\n"
+            "    path: inner.yaml\n"
+        )
+        with pytest.raises(ToolError) as exc:
+            await _replay(server, "outer.yaml")
+        assert exc.value.error_code == "MCP_POLICY_DENIED"
+        assert exc.value.details["step_type"] == "execute_js"
+
+    def test_condition_leaves_in_cycle_safe_nested_expansion(self, tmp_path):
+        (tmp_path / "a.yaml").write_text(
+            "name: a\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: 'document.title'\n"
+            "    steps:\n"
+            "      - type: run_workflow\n"
+            "        path: b.yaml\n"
+        )
+        (tmp_path / "b.yaml").write_text(
+            "name: b\n"
+            "steps:\n"
+            "  - type: conditional\n"
+            "    condition: 'document.cookie'\n"
+            "    steps:\n"
+            "      - type: run_workflow\n"
+            "        path: a.yaml\n"
+        )
+        steps = [{"type": "run_workflow", "path": "a.yaml"}]
+        expanded = _expand_replay_steps(steps, {}, tmp_path, tmp_path)
+        js_codes = [
+            s["params"]["code"] for s in expanded if s["type"] == "execute_js"
+        ]
+        assert js_codes == ["document.title", "document.cookie"]
+        errors = [s["error"] for s in expanded if s.get("error")]
+        assert any("cycle" in e for e in errors)

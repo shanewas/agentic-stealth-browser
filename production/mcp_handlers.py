@@ -58,6 +58,12 @@ def _expand_replay_steps(steps, variables, library_root, base_dir, _stack=()):
     the output (they were checked before); nested leaves follow them.
     Unresolvable nested references produce an entry with ``error`` set so
     the caller can fail closed when a policy is active.
+
+    A ``conditional`` with a non-empty condition also emits an
+    ``execute_js`` leaf carrying the condition as ``code`` (immediately
+    after the conditional, before its branches): the player evaluates
+    the condition as arbitrary JavaScript with no trivial-case shortcut,
+    so the gate must classify it like a real ``execute_js`` step.
     """
     from workflows.schema import load_workflow
     from workflows.variable_resolver import VariableResolver
@@ -90,6 +96,16 @@ def _expand_replay_steps(steps, variables, library_root, base_dir, _stack=()):
                 }
             )
             if step_type == "conditional":
+                condition = params.get("condition")
+                if isinstance(condition, str) and condition.strip():
+                    expanded.append(
+                        {
+                            "type": "execute_js",
+                            "params": {"code": condition},
+                            "url": "",
+                            "error": None,
+                        }
+                    )
                 for branch_key in ("steps", "else_steps"):
                     walk(raw_params.get(branch_key) or [], vars_, dir_, stack)
             elif step_type == "run_workflow":
