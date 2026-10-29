@@ -6,9 +6,10 @@ import os
 import tempfile
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
+from sessions.validation import resolve_contained_path
 from workflows.action_interpreter import normalize_step_params, validate_step_params
 from workflows.schema import Workflow, load_workflow
 from workflows.selector_generator import SelectorGenerator
@@ -111,9 +112,26 @@ class RehearsalResult:
 
 
 class WorkflowPlayer:
-    def __init__(self, browser, variable_resolver: Optional[VariableResolver] = None):
+    def __init__(
+        self,
+        browser,
+        variable_resolver: Optional[VariableResolver] = None,
+        workflows_root: Optional[Any] = None,
+        screenshots_dir: Optional[Any] = None,
+    ):
         self.browser = browser
         self.resolver = variable_resolver or VariableResolver()
+        # Explicit containment root for nested run_workflow refs. When unset,
+        # the directory of the workflow file that references the nested
+        # workflow is the root (in-memory workflows then need this set).
+        self.workflows_root: Optional[Path] = (
+            Path(workflows_root) if workflows_root is not None else None
+        )
+        # Dedicated directory screenshot steps may write to.
+        self.screenshots_dir: Path = (
+            Path(screenshots_dir) if screenshots_dir is not None else Path("screenshots")
+        )
+        self._workflow_dir_stack: List[Optional[Path]] = []
         self.checkpoint: Dict[str, Any] = {
             "completed_steps": [],
             "last_url": "",
@@ -205,7 +223,41 @@ class WorkflowPlayer:
         except Exception:
             pass
 
+    def _referencing_workflow_dir(self, workflow: Workflow) -> Optional[Path]:
+        if self.workflows_root is not None:
+            return self.workflows_root.resolve()
+        if workflow.source_path:
+            return Path(workflow.source_path).resolve().parent
+        return None
+
+    @staticmethod
+    def _effective_run_vars(
+        workflow: Workflow, runtime_vars: Optional[Dict[str, Any]]
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        """Declared defaults seeded first; runtime vars win.
+
+        Returns (effective_vars, missing_required_names).
+        """
+        effective: Dict[str, Any] = {}
+        missing: List[str] = []
+        for name, vdef in (workflow.variables or {}).items():
+            if vdef.default is not None:
+                effective[name] = vdef.default
+            elif vdef.required and name not in (runtime_vars or {}):
+                missing.append(name)
+        effective.update(runtime_vars or {})
+        return effective, missing
+
     async def execute(
+        self, workflow: Workflow, runtime_vars: Optional[Dict[str, Any]] = None
+    ) -> ExecutionResult:
+        self._workflow_dir_stack.append(self._referencing_workflow_dir(workflow))
+        try:
+            return await self._execute(workflow, runtime_vars)
+        finally:
+            self._workflow_dir_stack.pop()
+
+    async def _execute(
         self, workflow: Workflow, runtime_vars: Optional[Dict[str, Any]] = None
     ) -> ExecutionResult:
         start_time = time.monotonic()
@@ -253,7 +305,22 @@ class WorkflowPlayer:
 
         completed = set(frame.get("completed_steps", []))
 
-        run_vars = dict(runtime_vars or {})
+        run_vars, missing_required = self._effective_run_vars(workflow, runtime_vars)
+        if missing_required:
+            return ExecutionResult(
+                success=False,
+                steps_executed=0,
+                total_steps=total_steps,
+                failed_step=0,
+                failed_step_type=None,
+                error_message=(
+                    "Missing required workflow variable(s): "
+                    + ", ".join(missing_required)
+                ),
+                screenshots=screenshots,
+                execution_time=_elapsed_since(start_time),
+                checkpoint=frame,
+            )
         resolved_workflow = self.resolver.resolve_workflow(workflow, run_vars)
 
         for i, step in enumerate(resolved_workflow.steps):
@@ -819,7 +886,9 @@ class WorkflowPlayer:
     async def _step_scroll(self, params: Dict[str, Any]):
         selector = params.get("selector")
         direction = params.get("direction", "down")
-        amount = params.get("amount", 300)
+        # Defensive cast: amount is interpolated into JS below, so it must
+        # be a real int here even if a caller bypassed validate_step_params.
+        amount = int(params.get("amount", 300))
 
         if selector:
             await self._evaluate(
@@ -831,6 +900,14 @@ class WorkflowPlayer:
 
     async def _step_screenshot(self, params: Dict[str, Any]):
         path = params.get("path", "")
+        if path:
+            # Workflow-controlled name must stay under screenshots_dir as a
+            # .png; sessions.validation is stdlib-only, so no import cycle.
+            contained = resolve_contained_path(
+                self.screenshots_dir, path, required_suffix=".png"
+            )
+            contained.parent.mkdir(parents=True, exist_ok=True)
+            path = str(contained)
         if not path and hasattr(self.browser, "screenshot_on_error"):
             path = await self.browser.screenshot_on_error("step")
         elif hasattr(self.browser, "page") and hasattr(self.browser.page, "screenshot"):
@@ -853,14 +930,62 @@ class WorkflowPlayer:
         steps = params.get("steps", [])
         else_steps = params.get("else_steps", [])
 
+        # NOTE (H2): `condition` is arbitrary JavaScript evaluated in the
+        # page, exactly like an execute_js step's `code`. The player has no
+        # policy/approval seam of its own — it never consults one for
+        # execute_js either; that gate lives in the production replay path
+        # (production/mcp_handlers.py: PolicyEngine.check_step /
+        # ApprovalGate.check_sensitive over _expand_replay_steps). To block
+        # side-effecting conditions there, that expansion should emit the
+        # condition as an execute_js leaf so a blocked-JS policy denies it.
+        # Until then, branch steps below get the same validate_step_params
+        # gate as top-level steps.
         result = await self._evaluate(condition)
 
         branch = steps if result else else_steps
         for step_data in branch:
+            if not isinstance(step_data, dict) or not step_data.get("type"):
+                raise ValueError(
+                    f"Conditional branch step is missing required field 'type': {step_data!r}"
+                )
             step_type = step_data["type"]
             resolved_params = self._resolve_step_data_params(step_data, run_vars)
             step_params = normalize_step_params(step_type, resolved_params)
+            errors = validate_step_params(step_type, step_params)
+            if errors:
+                raise ValueError(
+                    f"Invalid conditional branch step ({step_type}): "
+                    + "; ".join(errors)
+                )
             await self._dispatch_step(step_type, step_params, run_vars)
+
+    def _resolve_nested_workflow_path(self, ref: Any) -> Path:
+        """Resolve a run_workflow ref inside its containment root.
+
+        The root is the configured workflows_root, else the directory of
+        the workflow file making the reference. Absolute refs and any
+        resolution escaping the root (including via symlinks) are rejected.
+        """
+        if not isinstance(ref, str) or not ref.strip():
+            raise ValueError("run_workflow 'path' must be a non-empty string")
+        if Path(ref).is_absolute() or PureWindowsPath(ref).drive or "\\" in ref:
+            raise ValueError(
+                f"run_workflow path must be relative to the workflow root: {ref!r}"
+            )
+        root = self._workflow_dir_stack[-1] if self._workflow_dir_stack else None
+        if root is None:
+            raise ValueError(
+                "run_workflow cannot resolve "
+                f"{ref!r}: no workflows_root configured and the referencing "
+                "workflow was not loaded from a file"
+            )
+        resolved_root = Path(root).resolve()
+        candidate = (resolved_root / ref).resolve()
+        if candidate == resolved_root or not candidate.is_relative_to(resolved_root):
+            raise ValueError(
+                f"run_workflow path escapes the workflow root: {ref!r}"
+            )
+        return candidate
 
     async def _step_run_workflow(
         self, params: Dict[str, Any], run_vars: Dict[str, Any]
@@ -869,15 +994,20 @@ class WorkflowPlayer:
         variables = params.get("variables", {})
         output_as = params.get("output_as")
 
-        if path in self._workflow_stack:
-            chain = " -> ".join(self._workflow_stack + [path])
+        # Canonical (resolved) spelling keys the cycle stack, so a.yaml,
+        # ./a.yaml and sub/../a.yaml are the same entry.
+        resolved_path = self._resolve_nested_workflow_path(path)
+        canonical = str(resolved_path)
+
+        if canonical in self._workflow_stack:
+            chain = " -> ".join(self._workflow_stack + [canonical])
             raise RuntimeError(f"Cycle detected in workflow chain: {chain}")
 
-        nested = load_workflow(path)
+        nested = load_workflow(canonical)
         merged_vars = dict(run_vars)
         merged_vars.update(variables)
 
-        self._workflow_stack.append(path)
+        self._workflow_stack.append(canonical)
         try:
             result = await self.execute(nested, merged_vars)
             if not result.success:

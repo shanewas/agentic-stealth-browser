@@ -334,10 +334,11 @@ class TestRunWorkflow:
                 steps=[
                     WorkflowStep(
                         type="run_workflow",
-                        params={"path": str(inner_path)},
+                        params={"path": "inner.yaml"},
                     )
                 ],
             )
+            player = WorkflowPlayer(mock_browser, workflows_root=td)
             result = await player.execute(workflow)
             assert result.success
             mock_browser.safe_click.assert_called_once_with("#nested_btn")

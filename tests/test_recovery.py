@@ -735,13 +735,13 @@ class TestWorkflowBoundCheckpoints:
             steps=[
                 WorkflowStep(type="click", params={"selector": "#outer-first"}),
                 WorkflowStep(
-                    type="run_workflow", params={"path": str(inner_path)}
+                    type="run_workflow", params={"path": "inner.yaml"}
                 ),
                 WorkflowStep(type="click", params={"selector": "#outer-last"}),
             ],
         )
 
-        player = WorkflowPlayer(mock_browser)
+        player = WorkflowPlayer(mock_browser, workflows_root=tmp_path)
         result = await player.execute(workflow)
 
         assert result.success

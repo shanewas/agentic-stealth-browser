@@ -89,4 +89,21 @@ def validate_step_params(step_type: str, params: Dict) -> List[str]:
         if req not in params or params[req] in (None, ""):
             errors.append(f"Missing required field '{req}' for step type '{step_type}'")
 
+    # Numeric fields that normalize_step_params() coerces must actually be
+    # coercible. A leftover non-numeric value (e.g. a hostile scroll amount
+    # such as "0); <JS> //") must fail here instead of reaching dispatch,
+    # where some handlers interpolate it into a JavaScript string.
+    for key, coerce_type in _TYPE_COERCIONS.get(step_type, {}).items():
+        if key not in params or params[key] is None:
+            continue
+        value = params[key]
+        if isinstance(value, bool) or not isinstance(value, coerce_type):
+            try:
+                coerce_type(value)
+            except (ValueError, TypeError):
+                errors.append(
+                    f"Field '{key}' for step type '{step_type}' must be "
+                    f"{coerce_type.__name__}, got {value!r}"
+                )
+
     return errors
