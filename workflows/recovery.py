@@ -84,6 +84,101 @@ class FallbackController:
             recovery_config=None,
         )
 
+    async def _redispatch_step(
+        self, step_type: str, params: dict, selector: Optional[str] = None
+    ) -> None:
+        """Re-run the original step semantics; raise if the re-check fails."""
+        selector = selector if selector is not None else params.get("selector", "")
+        timeout_ms = params.get("timeout", 30000)
+        timeout_s = timeout_ms / 1000.0
+
+        if step_type in ("fill", "type"):
+            value = params.get("value", "")
+            if hasattr(self.browser, "safe_type"):
+                await asyncio.wait_for(
+                    self.browser.safe_type(selector, value), timeout=timeout_s
+                )
+            else:
+                await self._evaluate(
+                    f"document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}"
+                )
+            if params.get("submit"):
+                await self._evaluate(
+                    f"document.querySelector({json.dumps(selector)}).form.submit()"
+                )
+        elif step_type == "verify":
+            exists = await self._evaluate(
+                f"!!document.querySelector({json.dumps(selector)})"
+            )
+            if not exists:
+                raise RuntimeError(f"Verify failed: selector '{selector}' not found")
+            expected_text = params.get("text")
+            if expected_text is not None:
+                actual = await self._evaluate(
+                    f"document.querySelector({json.dumps(selector)}).textContent"
+                )
+                if expected_text not in str(actual):
+                    raise RuntimeError(
+                        f"Verify failed: expected text '{expected_text}' not found in '{actual}'"
+                    )
+            if params.get("visible", True):
+                displayed = await self._evaluate(
+                    f"document.querySelector({json.dumps(selector)}).offsetParent !== null"
+                )
+                if not displayed:
+                    raise RuntimeError(
+                        f"Verify failed: selector '{selector}' is not visible"
+                    )
+        elif step_type == "wait_for_element":
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                exists = await self._evaluate(
+                    f"!!document.querySelector({json.dumps(selector)})"
+                )
+                if exists:
+                    return
+                await asyncio.sleep(0.1)
+            raise TimeoutError(
+                f"Wait for element '{selector}' timed out after {timeout_s}s"
+            )
+        elif step_type == "navigate":
+            url = params.get("url", "")
+            if hasattr(self.browser, "safe_goto"):
+                await asyncio.wait_for(
+                    self.browser.safe_goto(
+                        url, platform=params.get("platform", "unknown")
+                    ),
+                    timeout=timeout_s,
+                )
+            elif hasattr(self.browser, "goto"):
+                await asyncio.wait_for(self.browser.goto(url), timeout=timeout_s)
+            else:
+                await self._evaluate(f"window.location.href = {json.dumps(url)}")
+        elif step_type == "select":
+            value = params.get("value", "")
+            await asyncio.wait_for(
+                self._evaluate(
+                    f"document.querySelector({json.dumps(selector)}).value = {json.dumps(value)}"
+                ),
+                timeout=timeout_s,
+            )
+        elif step_type in ("click", "unknown"):
+            if hasattr(self.browser, "safe_click"):
+                await asyncio.wait_for(
+                    self.browser.safe_click(selector), timeout=timeout_s
+                )
+            else:
+                await asyncio.wait_for(
+                    self._evaluate(
+                        f"document.querySelector({json.dumps(selector)}).click()"
+                    ),
+                    timeout=timeout_s,
+                )
+        else:
+            raise RuntimeError(
+                f"Recovery cannot re-dispatch step type '{step_type}'"
+            )
+
     async def _handle_element_not_found_error(
         self,
         params: dict,
@@ -109,12 +204,7 @@ class FallbackController:
                     screenshot_paths.append(path)
 
             try:
-                if hasattr(self.browser, "safe_click"):
-                    await self.browser.safe_click(selector)
-                else:
-                    await self._evaluate(
-                        f"document.querySelector({json.dumps(selector)}).click()"
-                    )
+                await self._redispatch_step(step_type, params, selector=selector)
                 return RecoveryResult(
                     recovered=True,
                     action_taken="retry",
@@ -127,12 +217,7 @@ class FallbackController:
 
         for fallback_sel in fallbacks:
             try:
-                if hasattr(self.browser, "safe_click"):
-                    await self.browser.safe_click(fallback_sel)
-                else:
-                    await self._evaluate(
-                        f"document.querySelector({json.dumps(fallback_sel)}).click()"
-                    )
+                await self._redispatch_step(step_type, params, selector=fallback_sel)
                 return RecoveryResult(
                     recovered=True,
                     action_taken="fallback_to_stealth",
@@ -171,7 +256,6 @@ class FallbackController:
         screenshot_paths: List[str] = []
 
         doubled_timeout = params.get("timeout", 30000) * 2
-        timeout_s = doubled_timeout / 1000.0
 
         if take_screenshot:
             path = await self._try_screenshot(step_index, 0)
@@ -179,43 +263,22 @@ class FallbackController:
                 screenshot_paths.append(path)
 
         try:
-            if step_type == "navigate":
-                url = params.get("url", "")
-                if hasattr(self.browser, "safe_goto"):
-                    await asyncio.wait_for(
-                        self.browser.safe_goto(
-                            url, platform=params.get("platform", "unknown")
-                        ),
-                        timeout=timeout_s,
-                    )
-                elif hasattr(self.browser, "goto"):
-                    await asyncio.wait_for(
-                        self.browser.goto(url),
-                        timeout=timeout_s,
-                    )
-                else:
-                    await self._evaluate(f"window.location.href = {json.dumps(url)}")
-            elif step_type in ("click", "fill", "type", "verify", "wait_for_element"):
-                selector = params.get("selector", "")
-                if step_type == "click" and hasattr(self.browser, "safe_click"):
-                    await asyncio.wait_for(
-                        self.browser.safe_click(selector),
-                        timeout=timeout_s,
-                    )
-                elif step_type in ("fill", "type") and hasattr(
-                    self.browser, "safe_type"
-                ):
-                    value = params.get("value", "")
-                    await asyncio.wait_for(
-                        self.browser.safe_type(selector, value),
-                        timeout=timeout_s,
-                    )
-                elif step_type in ("verify", "wait_for_element"):
-                    await asyncio.sleep(timeout_s)
-                else:
-                    await asyncio.sleep(timeout_s)
+            if step_type in (
+                "navigate",
+                "click",
+                "fill",
+                "type",
+                "verify",
+                "wait_for_element",
+                "select",
+            ):
+                retry_params = dict(params)
+                retry_params["timeout"] = doubled_timeout
+                await self._redispatch_step(step_type, retry_params)
             else:
-                await asyncio.sleep(timeout_s)
+                raise RuntimeError(
+                    f"Recovery cannot re-dispatch step type '{step_type}'"
+                )
 
             return RecoveryResult(
                 recovered=True,
