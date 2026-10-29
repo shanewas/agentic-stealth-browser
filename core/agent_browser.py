@@ -795,7 +795,10 @@ class AgentBrowser:
         # This ensures stealth patches (canvas/Offscreen/WebGL/font) are re-applied after nav/reload (#150)
         # and use the per-session seed for stable but unique fp.
         stealth_script = get_stealth_script(
-            fingerprint_seed=fp_seed, hardware=hw_fingerprint, screen=screen_profile
+            fingerprint_seed=fp_seed,
+            hardware=hw_fingerprint,
+            screen=screen_profile,
+            locale=loc,
         )
         await self.browser.add_init_script(stealth_script)
         if getattr(self, "debug_reporter", None):
@@ -1166,6 +1169,7 @@ class AgentBrowser:
                     fingerprint_seed=fp_seed,
                     hardware=hw_fingerprint,
                     screen=screen_profile,
+                    locale=loc,
                 )
             )
 

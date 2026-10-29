@@ -5,8 +5,7 @@ Production-grade fingerprint spoofing + anti-detection
 
 import functools
 import json
-import re as _re
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional, Tuple
 from .cache import make_cache_key, _script_cache
 
 
@@ -78,6 +77,76 @@ def check_stealth_compatibility() -> Dict[str, Any]:
     }
 
 
+def _resolve_locale_languages(
+    persona: Any = None,
+    locale: Optional[str] = None,
+    languages: Optional[List[str]] = None,
+) -> Tuple[str, List[str]]:
+    """Resolve navigator.language/languages from explicit args or a persona."""
+    if locale is None and persona is not None:
+        if isinstance(persona, dict):
+            locale = persona.get("locale")
+            device = persona.get("device") or {}
+            if locale is None and isinstance(device, dict):
+                locale = device.get("locale")
+        else:
+            effective = getattr(persona, "effective_locale", None)
+            if callable(effective):
+                try:
+                    locale = effective()
+                except Exception:
+                    locale = None
+            if locale is None:
+                locale = getattr(persona, "locale", None) or getattr(
+                    getattr(persona, "device", None), "locale", None
+                )
+    if languages is not None:
+        languages = [str(lang) for lang in languages if str(lang)]
+        if not languages:
+            languages = None
+        elif locale is None:
+            locale = languages[0]
+    if not locale:
+        locale = "en-US"
+    locale = str(locale)
+    if languages is None:
+        languages = [locale]
+        primary = locale.split("-")[0]
+        if primary and primary != locale:
+            languages.append(primary)
+    return locale, languages
+
+
+def _windows_voices_for_locale(locale: str) -> List[Dict[str, Any]]:
+    """Speech voices Windows Chrome actually exposes (Microsoft + Google)."""
+    us_voices = [
+        ("Microsoft David", "en-US", True),
+        ("Microsoft Mark", "en-US", True),
+        ("Microsoft Zira", "en-US", True),
+        ("Google US English", "en-US", False),
+    ]
+    gb_voices = [
+        ("Microsoft Hazel", "en-GB", True),
+        ("Microsoft George", "en-GB", True),
+        ("Google UK English Female", "en-GB", False),
+    ]
+    ordered = (
+        gb_voices + us_voices
+        if str(locale).lower().startswith("en-gb")
+        else us_voices + gb_voices
+    )
+    return [
+        {
+            "voiceURI": name,
+            "name": name,
+            "lang": lang,
+            "localService": local_service,
+            "default": index == 0,
+        }
+        for index, (name, lang, local_service) in enumerate(ordered)
+    ]
+
+
 # lru_cache removed (hardware dict unhashable; fp_seed varies per session so hit rate low anyway)
 # P3 #72/#63: use StealthCache for profile-keyed caching with TTL
 def get_stealth_script(
@@ -86,6 +155,9 @@ def get_stealth_script(
     hardware: Dict[str, Any] = None,
     screen: Dict[str, Any] = None,
     attach_mode: bool = False,
+    locale: Optional[str] = None,
+    languages: Optional[List[str]] = None,
+    persona: Any = None,
 ) -> str:
     """
     Returns a comprehensive stealth injection script.
@@ -98,7 +170,11 @@ def get_stealth_script(
         mode the fixed Windows-profile overrides for navigator.platform, WebGL vendor/renderer, and
         screen/DPR are skipped entirely so the injected fingerprint doesn't contradict the real
         attached browser's OS/GPU/display (which the real UA, TLS/JA3, and CDP already expose).
-    Cached by profile+seed+hardware+screen+attach_mode key with 2-hour TTL (#72 #63).
+    locale/languages: navigator.language/languages values; derived from persona's
+        effective locale when a persona is supplied. Default is en-US / ["en-US", "en"].
+    persona: object with effective_locale() (e.g. stealth.profiles.Persona), used only
+        to resolve locale when locale/languages are not given explicitly.
+    Cached by profile+seed+hardware+screen+attach_mode+locale key with 2-hour TTL (#72 #63).
     """
     seed = fingerprint_seed or ("agentic-" + profile + "-seed-v3-2026")
     hw = hardware or {"hardwareConcurrency": 8, "deviceMemory": 8}
@@ -113,19 +189,37 @@ def get_stealth_script(
         "orientation": "landscape-primary",
     }
 
+    resolved_locale, resolved_languages = _resolve_locale_languages(
+        persona=persona, locale=locale, languages=languages
+    )
+
     cache_profile = profile + (":attach" if attach_mode else "")
+    cache_profile += f":locale={resolved_locale}:{','.join(resolved_languages)}"
     cache_key = make_cache_key(cache_profile, fingerprint_seed, hardware, screen)
     cached = _script_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    script = _build_stealth_script(seed, hw, scr, attach_mode=attach_mode)
+    script = _build_stealth_script(
+        seed,
+        hw,
+        scr,
+        attach_mode=attach_mode,
+        locale=resolved_locale,
+        languages=resolved_languages,
+    )
     _script_cache.put(cache_key, script)
     return script
 
 
 def _build_stealth_script(
-    seed: str, hw: Dict[str, Any], scr: Dict[str, Any], attach_mode: bool = False
+    seed: str,
+    hw: Dict[str, Any],
+    scr: Dict[str, Any],
+    attach_mode: bool = False,
+    locale: Optional[str] = None,
+    languages: Optional[List[str]] = None,
+    persona: Any = None,
 ) -> str:
     """Build the stealth script string (internal, called when cache miss)."""
     script = """
@@ -167,13 +261,7 @@ def _build_stealth_script(
     } catch (e) {}
     try {
         (function spoofSpeech() {
-          const voices = [
-            {voiceURI:"Alex",name:"Alex",lang:"en-US",localService:true,default:true},
-            {voiceURI:"Samantha",name:"Samantha",lang:"en-US",localService:true,default:false},
-            {voiceURI:"Daniel",name:"Daniel",lang:"en-GB",localService:true,default:false},
-            {voiceURI:"Karen",name:"Karen",lang:"en-AU",localService:true,default:false},
-            {voiceURI:"Moira",name:"Moira",lang:"en-IE",localService:true,default:false}
-          ];
+          const voices = __VOICES__;
           const synth = window.speechSynthesis || {};
           synth.getVoices = () => voices;
           if (typeof synth.onvoiceschanged === "function") { try { setTimeout(() => synth.onvoiceschanged(new Event("voiceschanged")), 5); } catch(e){} }
@@ -208,8 +296,8 @@ def _build_stealth_script(
 
     // Languages
     try {
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+        Object.defineProperty(navigator, 'languages', { get: () => __LANGUAGES__ });
+        Object.defineProperty(navigator, 'language', { get: () => __LANGUAGE__ });
     } catch (e) {}
 
     // Chrome runtime
@@ -533,21 +621,27 @@ def _build_stealth_script(
     // === End Stealth ===
     """
 
-    # Sanitize seed: remove JS-unsafe characters (quotes, backslashes, semicolons, angle brackets)
-    # This prevents injection when the seed is interpolated into JS string literals.
-    import re as _re_san  # use distinct name to avoid clash
+    if not seed:
+        seed = "agentic-default-seed"
 
-    _safe_seed = _re_san.sub(r'["\'\\;<>]', "", seed)
-    if not _safe_seed:
-        _safe_seed = "agentic-default-seed"
-    seed = _safe_seed
+    resolved_locale, resolved_languages = _resolve_locale_languages(
+        persona=persona, locale=locale, languages=languages
+    )
 
     # attach_mode flag: gates the navigator.platform / WebGL vendor / screen+DPR overrides so
     # attach_over_cdp() doesn't contradict the real attached browser's OS/GPU/display.
     script = script.replace("__ATTACH_MODE__", "true" if attach_mode else "false")
 
+    # Locale, languages, and Windows-consistent voices, all via json.dumps.
+    script = script.replace("__LANGUAGE__", json.dumps(resolved_locale))
+    script = script.replace("__LANGUAGES__", json.dumps(resolved_languages))
+    script = script.replace(
+        "__VOICES__", json.dumps(_windows_voices_for_locale(resolved_locale))
+    )
+
     # Inject the runtime seed into the JS IIFE call (makes canvas noise / fp per-session unique)
-    # Use json.dumps for safe JS string interpolation (escapes quotes, backslashes, etc.)
+    # json.dumps is the sole escaping path: it escapes quotes, backslashes, and
+    # newlines, so no raw seed is ever reinserted into the script afterwards.
     script = script.replace(
         "__DYNAMIC_SEED_PLACEHOLDER__", json.dumps(seed)[1:-1]
     )  # strip surrounding quotes
@@ -575,12 +669,10 @@ def _build_stealth_script(
     script = script.replace("__SCREEN_CD__", json.dumps(scr.get("colorDepth", 24)))
     script = script.replace("__SCREEN_PD__", json.dumps(scr.get("pixelDepth", 24)))
     script = script.replace("__DPR__", json.dumps(scr.get("devicePixelRatio", 1.0)))
+    # Replace the quoted placeholder as a whole: the template already quotes it
+    # (type: "__ORIENT__"), so inserting json.dumps() there would double the quotes.
     script = script.replace(
-        "__ORIENT__", json.dumps(scr.get("orientation", "landscape-primary"))
-    )
-    # also update any old hardcoded if present (use sanitized seed)
-    script = _re.sub(
-        r'\}\)\("agentic-[^"]*seed[^"]*"\);', '})("' + seed + '");', script
+        '"__ORIENT__"', json.dumps(scr.get("orientation", "landscape-primary"))
     )
     return script.strip()
 
