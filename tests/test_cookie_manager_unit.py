@@ -27,6 +27,7 @@ import pytest
 
 from sessions.cookie_manager import (
     CookieManager,
+    SessionOrchestrator,
     _validate_path,
     _compute_hmac,
     _verify_hmac,
@@ -370,3 +371,82 @@ class TestEncryptDecrypt:
         token = mgr.encrypt_data(b"data", key_old)
         result = mgr._try_decrypt_with_keys(token, ["wrong-key-is-a-32-char-key-xx!ab"])
         assert result is None
+
+
+class TestPlaintextBundleIntegrity:
+    def test_forged_resigned_bundle_not_claimed_verified(self, tmp_path):
+        mgr = CookieManager()
+        mgr.create_resilient_session("sess-a")
+        mgr.cookie_managers["sess-a"].browser_context = _FakeContext(
+            [{"name": "c", "value": "orig", "domain": "example.com"}]
+        )
+        bundle_path = tmp_path / "bundle.json"
+        exported = asyncio.run(
+            mgr.export_session_bundle("sess-a", str(bundle_path))
+        )
+        assert exported["status"] == "success"
+
+        bundle = json.loads(bundle_path.read_text())
+        bundle["cookies"][0]["value"] = "forged"
+        # Re-sign exactly as an attacker with only the bundle can: the key
+        # is derived from bundle-supplied name + bundle-stored salt.
+        payload = {
+            k: v for k, v in bundle.items() if k not in ("integrity", "_hmac_salt")
+        }
+        raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        bundle["integrity"] = _compute_hmac(
+            "",
+            raw,
+            session_name=bundle["meta"]["name"],
+            salt=bytes.fromhex(bundle["_hmac_salt"]),
+        )
+        bundle_path.write_text(json.dumps(bundle))
+
+        importer = CookieManager()
+        result = asyncio.run(
+            importer.import_session_bundle(str(bundle_path), "imported-a")
+        )
+
+        # Honest-labelling route: accepted, but never claimed verified.
+        assert result["status"] == "success"
+        assert result["integrity_verified"] is False
+        assert result["integrity"] == "unverified"
+
+
+class TestMalformedBundleImport:
+    def test_list_bundle_returns_error_dict(self, tmp_path):
+        bundle_path = tmp_path / "bundle.json"
+        bundle_path.write_text(json.dumps([1, 2, 3]))
+        result = asyncio.run(
+            CookieManager().import_session_bundle(str(bundle_path), "x")
+        )
+        assert result["status"] == "error"
+
+    def test_non_dict_meta_returns_error_dict(self, tmp_path):
+        bundle_path = tmp_path / "bundle.json"
+        bundle_path.write_text(json.dumps({"meta": "x", "cookies": []}))
+        result = asyncio.run(
+            CookieManager().import_session_bundle(str(bundle_path), "x")
+        )
+        assert result["status"] == "error"
+
+
+class TestSessionOrchestratorIsolation:
+    def test_sessions_have_distinct_managers_and_cookie_jars(self, tmp_path):
+        orch = SessionOrchestrator()
+        orch.create_resilient_session("orch-a")
+        orch.create_resilient_session("orch-b")
+        assert orch.cookie_managers["orch-a"] is not orch.cookie_managers["orch-b"]
+        assert orch.cookie_managers["orch-a"] is not orch.cm
+        assert orch.cookie_managers["orch-b"] is not orch.cm
+
+        cookies_path = tmp_path / "cookies.json"
+        cookies_path.write_text(
+            json.dumps([{"name": "only-a", "value": "1", "domain": "example.com"}])
+        )
+        asyncio.run(orch.start_session("orch-a", cookies_path=str(cookies_path)))
+
+        assert [c["name"] for c in orch.cookie_managers["orch-a"].cookies] == [
+            "only-a"
+        ]
+        assert orch.cookie_managers["orch-b"].cookies == []

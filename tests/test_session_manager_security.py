@@ -1,6 +1,7 @@
 """Path-traversal tests for session names and screenshot names."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -76,6 +77,87 @@ class TestSessionNameTraversal:
         with pytest.raises(ValueError):
             agent_browser_module.AgentBrowser(session_name="../victim")
         assert list(tmp_path.iterdir()) == []
+
+
+class TestCloneSessionMeta:
+    def test_clone_meta_points_at_clone_and_state_copied(self, tmp_path):
+        manager = SessionManager(base_dir=str(tmp_path))
+        manager.create_session("source-a")
+        (tmp_path / "source-a" / "cookies.json").write_text('[{"name": "c"}]')
+        (tmp_path / "source-a" / "state.json").write_text('{"k": 1}')
+
+        result = manager.clone_session("source-a", "clone-b")
+
+        assert result["status"] == "success"
+        clone_meta = manager.get_session("clone-b")
+        assert clone_meta["name"] == "clone-b"
+        assert clone_meta["user_data_dir"] == str(tmp_path / "clone-b" / "user_data")
+        assert clone_meta["cookies_file"] == str(tmp_path / "clone-b" / "cookies.json")
+        assert clone_meta["state_file"] == str(tmp_path / "clone-b" / "state.json")
+        assert clone_meta["cloned_from"] == "source-a"
+        assert json.loads((tmp_path / "clone-b" / "cookies.json").read_text()) == [
+            {"name": "c"}
+        ]
+        assert json.loads((tmp_path / "clone-b" / "state.json").read_text()) == {"k": 1}
+        # Source untouched.
+        assert manager.get_session("source-a")["name"] == "source-a"
+
+
+class TestCompromisedQuarantine:
+    def test_mark_compromised_corrupt_meta_reports_non_success(self, tmp_path):
+        manager = SessionManager(base_dir=str(tmp_path))
+        manager.create_session("victim-a")
+        (tmp_path / "victim-a" / "meta.json").write_text("{not json")
+
+        result = manager.cleanup_session("victim-a")
+
+        assert result["status"] != "marked_compromised"
+        assert result["status"] in ("error", "partial")
+        assert result["marked"] is False
+
+    def test_mark_compromised_missing_meta_reports_non_success(self, tmp_path):
+        manager = SessionManager(base_dir=str(tmp_path))
+        manager.create_session("victim-b")
+        (tmp_path / "victim-b" / "meta.json").unlink()
+
+        result = manager.cleanup_session("victim-b")
+
+        assert result["status"] != "marked_compromised"
+        assert result["marked"] is False
+
+    def test_recreate_compromised_session_preserves_flag(self, tmp_path):
+        manager = SessionManager(base_dir=str(tmp_path))
+        manager.create_session("victim-c")
+        (tmp_path / "victim-c" / "cookies.json").write_text('[{"name": "keep"}]')
+        assert manager.cleanup_session("victim-c")["status"] == "marked_compromised"
+        assert manager.get_session("victim-c")["compromised"] is True
+
+        # Preserve-flag choice: re-create must not clear quarantine, and
+        # (matching that choice) existing cookies are left in place.
+        manager.create_session("victim-c")
+
+        assert manager.get_session("victim-c")["compromised"] is True
+        assert json.loads((tmp_path / "victim-c" / "cookies.json").read_text()) == [
+            {"name": "keep"}
+        ]
+
+
+class TestPruneEphemeral:
+    def test_corrupt_created_at_survives_age_prune_and_is_reported(self, tmp_path):
+        manager = SessionManager(base_dir=str(tmp_path))
+        meta = manager.create_session("throwaway", ephemeral=True)
+        name = meta["name"]
+        meta_file = tmp_path / name / "meta.json"
+        stored = json.loads(meta_file.read_text())
+        stored["created_at"] = "not-a-date"
+        meta_file.write_text(json.dumps(stored))
+
+        result = manager.prune_ephemeral(max_age_hours=1)
+
+        assert (tmp_path / name).exists()
+        assert result["removed"] == 0
+        assert result["errors"] >= 1
+        assert name in result["skipped"]
 
 
 class _FakePage:
