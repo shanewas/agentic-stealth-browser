@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -83,6 +84,9 @@ class Workflow:
     description: Optional[str] = None
     version: str = SCHEMA_VERSION
     metadata: Optional[Dict[str, Any]] = None
+    # File the workflow was loaded from, if any. The player uses its
+    # directory as the containment root for nested run_workflow refs.
+    source_path: Optional[str] = None
 
 
 @dataclass
@@ -92,25 +96,55 @@ class ValidationResult:
 
 
 def _dict_to_workflow(data: dict) -> Workflow:
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Workflow document must be a mapping, got {type(data).__name__}"
+        )
+    raw_steps = data.get("steps", [])
+    if not isinstance(raw_steps, list):
+        raise ValueError(
+            f"Workflow 'steps' must be a list, got {type(raw_steps).__name__}"
+        )
+
     steps = []
-    for raw in data.get("steps", []):
-        step_type = raw.pop("type")
-        steps.append(WorkflowStep(type=step_type, params=raw))
+    for i, raw in enumerate(raw_steps):
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"Workflow step {i} must be a mapping, got {type(raw).__name__}"
+            )
+        # Copy before popping so the caller's dict is never mutated.
+        # Unknown types are preserved here; validate_workflow() reports them.
+        step_dict = dict(raw)
+        step_type = step_dict.pop("type", None)
+        if not step_type:
+            raise ValueError(f"Workflow step {i} is missing required field 'type'")
+        steps.append(WorkflowStep(type=step_type, params=step_dict))
 
     variables = None
     if "variables" in data:
-        variables = {
-            name: VariableDef(
+        raw_variables = data["variables"]
+        if not isinstance(raw_variables, dict):
+            raise ValueError(
+                f"Workflow 'variables' must be a mapping, got {type(raw_variables).__name__}"
+            )
+        variables = {}
+        for name, vdef in raw_variables.items():
+            if not isinstance(vdef, dict):
+                raise ValueError(
+                    f"Workflow variable '{name}' must be a mapping, "
+                    f"got {type(vdef).__name__}"
+                )
+            variables[name] = VariableDef(
                 type=vdef.get("type", "string"),
                 default=vdef.get("default"),
                 required=vdef.get("required", True),
                 description=vdef.get("description", ""),
             )
-            for name, vdef in data["variables"].items()
-        }
 
     return Workflow(
-        name=data["name"],
+        # Missing/empty name is a validation concern: default to "" so
+        # validate_workflow() reports it instead of failing at load time.
+        name=data.get("name", ""),
         steps=steps,
         variables=variables,
         description=data.get("description"),
@@ -122,9 +156,16 @@ def _dict_to_workflow(data: dict) -> Workflow:
 def load_workflow(path_or_dict) -> Workflow:
     if isinstance(path_or_dict, dict):
         return _dict_to_workflow(path_or_dict)
+    if not isinstance(path_or_dict, (str, Path)):
+        raise ValueError(
+            "Workflow document must be a mapping or a path to one, "
+            f"got {type(path_or_dict).__name__}"
+        )
     with open(path_or_dict, "r") as f:
         data = yaml.safe_load(f)
-    return _dict_to_workflow(data)
+    workflow = _dict_to_workflow(data)
+    workflow.source_path = str(Path(path_or_dict).resolve())
+    return workflow
 
 
 def validate_workflow(workflow: Workflow) -> ValidationResult:
