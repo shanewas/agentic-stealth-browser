@@ -11,8 +11,17 @@ P3 #98 fix: AIHooks now provides real value even without an LLM provider:
 - Structured extraction via regex/heuristics
 """
 
-from typing import Dict, Optional, List
+from typing import Dict, NoReturn, Optional, List
 import re
+
+
+class AIProviderUnavailableError(RuntimeError):
+    """Raised when a provider is configured but no LLM client is available.
+
+    No provider client is implemented yet, so the enabled path raises this
+    instead of fabricating analysis, actions, or extracted data. Callers can
+    catch it and fall back (e.g. to ``provider="none"`` heuristics).
+    """
 
 
 class AIHooks:
@@ -24,7 +33,8 @@ class AIHooks:
     - Rule-based action decisions
     - Heuristic structured extraction
 
-    When provider is set, connects to actual LLM (OpenAI, Claude, etc.).
+    When provider is set but no client is implemented, the AI methods raise
+    :class:`AIProviderUnavailableError` rather than fabricating results.
     """
 
     # Common injection / jailbreak patterns observed in web content & attacks
@@ -35,7 +45,7 @@ class AIHooks:
         r"^\s*(system:|assistant:|user:)\s*",
         r"\b(output only the|respond with only|print exactly|your new instructions)\b",
     ]
-    _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
+    _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE | re.MULTILINE)
 
     def __init__(
         self,
@@ -48,6 +58,12 @@ class AIHooks:
         self.model = model
         self.enabled = provider != "none"
         self._client = None
+
+    def _raise_unavailable(self) -> NoReturn:
+        raise AIProviderUnavailableError(
+            f"AI provider {self.provider!r} is configured but no LLM client "
+            "is available; use provider='none' for heuristic behaviour"
+        )
 
     def sanitize_for_llm(self, content: str, max_len: int = 12000) -> str:
         """Strip or neuter likely prompt-injection content from untrusted page/LLM input.
@@ -92,8 +108,7 @@ class AIHooks:
                 f"  Enable AI provider for deeper analysis."
             )
 
-        safe_content = self.sanitize_for_llm(page_content)
-        return f"[AI Analysis Placeholder] Task: {task} (content sanitized: {len(safe_content)} chars kept)"
+        self._raise_unavailable()
 
     async def decide_next_action(self, context: Dict) -> str:
         """Let AI decide next browsing action (with injection protection on any text fields)"""
@@ -108,13 +123,7 @@ class AIHooks:
                 return "scroll"
             return "extract_and_continue"
 
-        safe_ctx = {}
-        for k, v in (context or {}).items():
-            if isinstance(v, str):
-                safe_ctx[k] = self.sanitize_for_llm(v)
-            else:
-                safe_ctx[k] = v
-        return "scroll"
+        self._raise_unavailable()
 
     async def extract_structured_data(self, text: str, schema: Dict) -> Dict:
         """Extract structured data using AI (sanitized input)"""
@@ -123,7 +132,11 @@ class AIHooks:
             result = {
                 "links": self.extract_links(safe_text),
                 "emails": self.extract_emails(safe_text),
-                "phones": re.findall(r"\+?[\d\s\-\(\)]{10,}", safe_text),
+                "phones": [
+                    candidate
+                    for candidate in re.findall(r"\+?[\d\s\-\(\)]{10,}", safe_text)
+                    if sum(ch.isdigit() for ch in candidate) >= 7
+                ],
                 "prices": re.findall(r"\$[\d,]+\.?\d*", safe_text),
             }
             return {
@@ -132,5 +145,4 @@ class AIHooks:
                 "sanitized_len": len(safe_text),
             }
 
-        safe_text = self.sanitize_for_llm(text)
-        return {"status": "ai_disabled", "data": {}, "sanitized_len": len(safe_text)}
+        self._raise_unavailable()
