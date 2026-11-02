@@ -10,6 +10,16 @@ import math
 import time
 from typing import Optional, Tuple, Any
 
+# Human-plausible maximum scroll distance for a single gesture (pixels).
+MAX_SCROLL_PIXELS = 1000
+# Fallback viewport when neither the page nor a device profile reports one.
+DEFAULT_VIEWPORT_WIDTH = 1366
+DEFAULT_VIEWPORT_HEIGHT = 768
+
+
+class ElementNotFoundError(RuntimeError):
+    """Raised when a selector does not resolve to a clickable element."""
+
 
 class HumanBehavior:
     """Orchestrates realistic human-like actions"""
@@ -31,6 +41,7 @@ class HumanBehavior:
         self.last_mouse_pos = (self.rng.randint(450, 850), self.rng.randint(280, 620))
 
         self.device_profile = device_profile
+        self.last_mouse_pos = self._clamp_to_viewport(*self.last_mouse_pos)
         self.session_start_time = time.time()
         self.action_count = 0
         self.fatigue_level = 0.0
@@ -68,12 +79,51 @@ class HumanBehavior:
         else:
             print(f"[HumanBehavior] {msg}")
 
+    # Inter-key delay ranges (ms) per typing speed. Ordered slow > normal > fast.
+    _TYPING_DELAYS_MS = {
+        "slow": (150.0, 300.0),
+        "normal": (28.0, 145.0),
+        "fast": (10.0, 45.0),
+    }
+
+    def _viewport_size(self) -> Tuple[int, int]:
+        """Effective viewport: device profile, then page, then repo default."""
+        profile = getattr(self, "device_profile", None)
+        viewport = getattr(profile, "viewport", None) if profile else None
+        if (
+            isinstance(viewport, dict)
+            and viewport.get("width")
+            and viewport.get("height")
+        ):
+            return int(viewport["width"]), int(viewport["height"])
+        page_viewport = getattr(getattr(self, "page", None), "viewport_size", None)
+        if callable(page_viewport):
+            try:
+                page_viewport = page_viewport()
+            except Exception:
+                page_viewport = None
+        if (
+            isinstance(page_viewport, dict)
+            and page_viewport.get("width")
+            and page_viewport.get("height")
+        ):
+            return int(page_viewport["width"]), int(page_viewport["height"])
+        return DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT
+
+    def _clamp_to_viewport(self, x: float, y: float) -> Tuple[int, int]:
+        """Clamp a point into the effective viewport (inclusive bounds)."""
+        width, height = self._viewport_size()
+        return (
+            int(max(0, min(width - 1, round(x)))),
+            int(max(0, min(height - 1, round(y)))),
+        )
+
     async def _record_mouse_position(self, x: float, y: float) -> None:
         """Update Python authoritative last pos + sync to JS window.mouseX/Y.
         This + stealth init + calls after every move fixes continuity (#24 #101).
         Cursor no longer resets; gestures chain from real previous end point.
         """
-        self.last_mouse_pos = (int(round(x)), int(round(y)))
+        self.last_mouse_pos = self._clamp_to_viewport(x, y)
         try:
             await self.page.evaluate(
                 f"window.mouseX = {self.last_mouse_pos[0]}; window.mouseY = {self.last_mouse_pos[1]};"
@@ -213,11 +263,24 @@ class HumanBehavior:
             await asyncio.sleep(duration * 0.5)
 
     async def type_like_human(
-        self, selector: str, text: str, mistake_rate: float = 0.025
+        self,
+        selector: str,
+        text: str,
+        mistake_rate: float = 0.025,
+        speed: str = "normal",
     ):
         """Type with realistic speed, variable rhythm, and occasional corrections.
         Uses human_click for natural mouse approach to input (continuity + realism).
+
+        A simulated mistake inserts a known string and deletes exactly
+        ``len(inserted)`` characters, so the filled value always ends up
+        equal to ``text``. ``speed`` selects an inter-key delay profile:
+        slow delays are longest, fast shortest (including on the mistake
+        path, which draws from the same profile with no inverted multiplier).
         """
+        delay_range = self._TYPING_DELAYS_MS.get(
+            speed, self._TYPING_DELAYS_MS["normal"]
+        )
         # Use human_click (which does tracked move + click) instead of direct page.click
         # This ensures mouse pos updated and no teleport jump (#24 #101 continuity)
         await self.human_click(selector)
@@ -235,33 +298,40 @@ class HumanBehavior:
                 await asyncio.sleep(self.rng.uniform(0.08, 0.18))
 
             if self.rng.random() < mistake_rate:
-                # P2 #115: richer realistic correction patterns (word-level deletes, varied hesitation,
-                # multi-backspace, retype pauses) matching human typing error distributions.
-                wrong = self.rng.choice("abcdefghijklmnopqrstuvwxyz")
-                await self.page.type(selector, wrong, delay=self.rng.uniform(25, 80))
-                await asyncio.sleep(self.rng.uniform(0.18, 0.42))
-                # 1-3 backspaces with human-like rhythm (fatigue aware but simple here)
-                n_back = (
-                    1
-                    if self.rng.random() < 0.7
-                    else (2 if self.rng.random() < 0.8 else 3)
+                # Insert a known wrong string, then delete exactly what was
+                # inserted (0 chars if nothing was inserted). A fixed
+                # backspace count would eat previously correct text or
+                # leave wrong characters behind for multi-char inserts.
+                inserted_text = self.rng.choice("abcdefghijklmnopqrstuvwxyz")
+                await self.page.type(
+                    selector, inserted_text, delay=self.rng.uniform(*delay_range)
                 )
-                for b in range(n_back):
+                await asyncio.sleep(self.rng.uniform(0.18, 0.42))
+                for b in range(len(inserted_text)):
                     await self.page.keyboard.press("Backspace")
                     await asyncio.sleep(self.rng.uniform(0.08, 0.22) if b > 0 else 0.12)
-                # Hesitation / "oops" pause, occasional re-mistake or just continue
+                # Hesitation / "oops" pause (no further deletion).
                 if self.rng.random() < 0.35:
                     await asyncio.sleep(self.rng.uniform(0.25, 0.65))
-                    if self.rng.random() < 0.15:  # rare second correction pass
-                        await self.page.keyboard.press("Backspace")
-                        await asyncio.sleep(self.rng.uniform(0.1, 0.3))
                 await asyncio.sleep(self.rng.uniform(0.12, 0.28))
 
-            delay = self.rng.uniform(28, 145)
+            delay = self.rng.uniform(*delay_range)
             await self.page.type(selector, char, delay=delay)
 
             if i > 0 and i % 12 == 0 and self.rng.random() < 0.3:
                 await asyncio.sleep(self.rng.uniform(0.35, 0.75))
+
+    async def type_text(
+        self,
+        selector: str,
+        text: str,
+        mistake_rate: float = 0.025,
+        speed: str = "normal",
+    ):
+        """Alias for :meth:`type_like_human` (same exact-fill guarantee)."""
+        await self.type_like_human(
+            selector, text, mistake_rate=mistake_rate, speed=speed
+        )
 
     async def _bezier_curve(
         self, start: Tuple[float, float], end: Tuple[float, float], steps: int = 25
@@ -322,6 +392,8 @@ class HumanBehavior:
         for subsequent .down()/.up() etc. Human-likeness 100% preserved (same points, wobbles, easing,
         event sequence and timing from the page's POV).
         """
+        # Clamp the requested target into the effective viewport first.
+        x, y = self._clamp_to_viewport(x, y)
         # Prefer tracked Python pos (reliable); fallback to JS or default
         current_x, current_y = self.last_mouse_pos
         try:
@@ -336,8 +408,14 @@ class HumanBehavior:
             # non-fatal, use python tracked
             self._log(f"mouse pos eval non-fatal (using tracked): {e}")
 
-        base_steps = 22 if speed == "normal" else 10
-        max_steps = 42 if speed == "normal" else 20
+        # Slower speeds take more steps with longer delays (never faster
+        # than normal); fast takes fewer steps with shorter delays.
+        if speed == "slow":
+            base_steps, max_steps, base_delay = 30, 50, 0.014
+        elif speed == "fast":
+            base_steps, max_steps, base_delay = 10, 20, 0.004
+        else:
+            base_steps, max_steps, base_delay = 22, 42, 0.008
         # Perf: fewer steps when realism reduced
         if self.realism_level <= 1:
             steps = self.rng.randint(max(3, base_steps // 2), max(5, max_steps // 2))
@@ -353,9 +431,9 @@ class HumanBehavior:
         path_data = []
         for i, (px, py) in enumerate(points):
             progress = (i + 1) / len(points)
-            base_delay = 0.008 if speed == "normal" else 0.004
             delay = base_delay + (math.sin(progress * math.pi) * 0.018)
-            path_data.append({"x": float(px), "y": float(py), "delay": float(delay)})
+            cx, cy = self._clamp_to_viewport(px, py)
+            path_data.append({"x": float(cx), "y": float(cy), "delay": float(delay)})
 
         # Batched JS path (#45): 1 evaluate round-trip runs the full multi-step gesture inside the page
         # using real MouseEvents + window.mouse* updates at the precise human-like delays.
@@ -395,23 +473,24 @@ class HumanBehavior:
                 f"JS mouse path non-fatal (fallback to CDP loop for gesture): {e}"
             )
             for px, py in points:
-                await self.page.mouse.move(px, py)
+                cx, cy = self._clamp_to_viewport(px, py)
+                await self.page.mouse.move(cx, cy)
                 progress = (points.index((px, py)) + 1) / len(points)
-                base_delay = 0.008 if speed == "normal" else 0.004
                 delay = base_delay + (math.sin(progress * math.pi) * 0.018)
                 await asyncio.sleep(delay)
 
         # micro correction (final CDP mouse.move also serves as the single sync of Playwright mouse state)
         if self.rng.random() < 0.65:
             await asyncio.sleep(self.rng.uniform(0.025, 0.07))
-            final_x = x + self.rng.randint(-4, 4)
-            final_y = y + self.rng.randint(-3, 3)
+            final_x, final_y = self._clamp_to_viewport(
+                x + self.rng.randint(-4, 4), y + self.rng.randint(-3, 3)
+            )
             await self.page.mouse.move(
                 final_x, final_y
             )  # syncs Playwright internal cursor for .down/.up/clicks
             await self._record_mouse_position(final_x, final_y)
         else:
-            final_x, final_y = points[-1]
+            final_x, final_y = self._clamp_to_viewport(*points[-1])
             await self.page.mouse.move(
                 final_x, final_y
             )  # 1 CDP call: keeps PW mouse model consistent (key to low chattiness)
@@ -420,6 +499,11 @@ class HumanBehavior:
     async def human_click(self, selector: str = None, x: int = None, y: int = None):
         """Human-like click. Always maintains mouse position continuity (no teleport to 0,0).
         Uses tracked pos for bare clicks; records after action (#24 #101).
+
+        When ``selector`` is given but does not resolve to an element with
+        a bounding box, raises :class:`ElementNotFoundError` without
+        dispatching any mouse events, instead of clicking at stale
+        coordinates left over from a previous gesture.
         """
         # #251 automatic think for critical selectors
         if selector and any(
@@ -433,18 +517,14 @@ class HumanBehavior:
         if selector:
             try:
                 box = await self.page.query_selector(selector)
-                if box:
-                    box_info = await box.bounding_box()
-                    if box_info:
-                        target_x = box_info["x"] + box_info["width"] * self.rng.uniform(
-                            0.2, 0.8
-                        )
-                        target_y = box_info["y"] + box_info[
-                            "height"
-                        ] * self.rng.uniform(0.2, 0.8)
-                        await self.move_mouse_naturally(int(target_x), int(target_y))
+                box_info = await box.bounding_box() if box else None
             except Exception as e:
-                self._log(f"non-fatal error (was silent): {e}")
+                raise ElementNotFoundError(f"Element not found: {selector}") from e
+            if not box_info:
+                raise ElementNotFoundError(f"Element not found: {selector}")
+            target_x = box_info["x"] + box_info["width"] * self.rng.uniform(0.2, 0.8)
+            target_y = box_info["y"] + box_info["height"] * self.rng.uniform(0.2, 0.8)
+            await self.move_mouse_naturally(int(target_x), int(target_y))
         elif x is not None and y is not None:
             await self.move_mouse_naturally(x, y)
 
@@ -454,8 +534,9 @@ class HumanBehavior:
         cx, cy = self.last_mouse_pos
         if self.rng.random() < 0.08:
             # occasional small natural offset for click variety (still continuous)
-            click_x = cx + self.rng.randint(-4, 4)
-            click_y = cy + self.rng.randint(-3, 3)
+            click_x, click_y = self._clamp_to_viewport(
+                cx + self.rng.randint(-4, 4), cy + self.rng.randint(-3, 3)
+            )
             await self.page.mouse.click(click_x, click_y)
             await self._record_mouse_position(click_x, click_y)
         else:
@@ -499,7 +580,7 @@ class HumanBehavior:
             await self.move_mouse_naturally(x, y)
 
         await asyncio.sleep(self.rng.uniform(0.06, 0.15))
-        cx, cy = self.last_mouse_pos
+        cx, cy = self._clamp_to_viewport(*self.last_mouse_pos)
         # Right click via Playwright mouse (button support)
         await self.page.mouse.click(cx, cy, button="right")
         await self._record_mouse_position(cx, cy)
@@ -541,12 +622,28 @@ class HumanBehavior:
         await self.think(250, int(900 * (1 + fat * 0.4)))
         return True
 
-    async def scroll_naturally(self, total_pixels: int = 400, direction: str = "down"):
+    async def scroll_naturally(
+        self,
+        total_pixels: int = 400,
+        direction: str = "down",
+        distance: Optional[int] = None,
+    ):
         """Scroll in small, human-like increments with occasional re-read backticks (realism).
         P2 perf (#81 #108 #153 #89 #123): batched JS wheel/scrollBy sequence (1 evaluate)
         replaces N sequential page.mouse.wheel CDP calls + roundtrips. Same timing, events,
         backticks. Falls back to per-call for safety. Fewer steps + longer sleeps in light realism.
+
+        ``distance`` is an alias for ``total_pixels``. A distance of 0 is a
+        no-op (no wheel/scroll events at all). Requested distances are
+        clamped to ``MAX_SCROLL_PIXELS`` per gesture.
         """
+        if distance is not None:
+            total_pixels = distance
+        if not total_pixels:
+            return
+        total_pixels = int(
+            max(-MAX_SCROLL_PIXELS, min(MAX_SCROLL_PIXELS, total_pixels))
+        )
         # Perf: reduce steps/chatter in low realism (addresses tiny sleeps + CDP in CI/light)
         if self.realism_level <= 1:
             steps = self.rng.randint(2, 5)
@@ -597,6 +694,21 @@ class HumanBehavior:
                     }
                 )
                 did_back = True
+
+        # Random per-step variation must not defeat the clamp: rescale the
+        # main (non-backtick) steps so their total is exactly the clamped
+        # signed distance for the requested direction.
+        desired = -abs(total_pixels) if direction == "up" else total_pixels
+        main_actions = [a for a in scroll_actions if not a["is_back"]]
+        if main_actions:
+            main_total = sum(a["dy"] for a in main_actions)
+            if main_total != desired:
+                if main_total:
+                    scale = desired / main_total
+                    for a in main_actions:
+                        a["dy"] = int(a["dy"] * scale)
+                # Fix rounding on the last step so the sum is exact.
+                main_actions[-1]["dy"] += desired - sum(a["dy"] for a in main_actions)
 
         # Batched JS scroll (P2 CDP reduction): single evaluate runs all wheel dispatches + scrollBy + precise delays inside browser
         # Eliminates per-step CDP roundtrips for scroll sequences (matches mouse batching #45 pattern)
@@ -795,8 +907,7 @@ class HumanBehavior:
                 except Exception:
                     pass
 
-                new_x = cx + dx
-                new_y = cy + dy
+                new_x, new_y = self._clamp_to_viewport(cx + dx, cy + dy)
 
                 await self.page.mouse.move(new_x, new_y)
                 await self._record_mouse_position(new_x, new_y)
@@ -842,8 +953,10 @@ class HumanBehavior:
             try:
                 # Use tracked pos + small correction move; record for continuity
                 base_x, base_y = self.last_mouse_pos
-                corr_x = base_x + self.rng.randint(-30, 30)
-                corr_y = base_y + self.rng.randint(-20, 20)
+                corr_x, corr_y = self._clamp_to_viewport(
+                    base_x + self.rng.randint(-30, 30),
+                    base_y + self.rng.randint(-20, 20),
+                )
                 await self.page.mouse.move(corr_x, corr_y)
                 await self._record_mouse_position(corr_x, corr_y)
                 await asyncio.sleep(0.08)
@@ -908,8 +1021,10 @@ class HumanBehavior:
                         base_x, base_y = jx, jy
                 except Exception:
                     pass
-                tap_x = base_x + self.rng.randint(-12, 12)
-                tap_y = base_y + self.rng.randint(-8, 8)
+                tap_x, tap_y = self._clamp_to_viewport(
+                    base_x + self.rng.randint(-12, 12),
+                    base_y + self.rng.randint(-8, 8),
+                )
                 await self.page.mouse.move(tap_x, tap_y)
                 await self._record_mouse_position(tap_x, tap_y)
                 await self.page.mouse.down()
@@ -917,8 +1032,10 @@ class HumanBehavior:
                 await self.page.mouse.up()
                 if self.rng.random() < 0.2:
                     await asyncio.sleep(0.12)
-                    tap2_x = tap_x + self.rng.randint(-5, 5)
-                    tap2_y = tap_y + self.rng.randint(-3, 3)
+                    tap2_x, tap2_y = self._clamp_to_viewport(
+                        tap_x + self.rng.randint(-5, 5),
+                        tap_y + self.rng.randint(-3, 3),
+                    )
                     await self.page.mouse.move(tap2_x, tap2_y)
                     await self._record_mouse_position(tap2_x, tap2_y)
                     await self.page.mouse.down()

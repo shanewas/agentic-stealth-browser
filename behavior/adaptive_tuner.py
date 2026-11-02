@@ -11,6 +11,8 @@ v1.8.0 adds:
 
 import json
 import os
+import tempfile
+import threading
 import time
 import random
 from pathlib import Path
@@ -25,6 +27,7 @@ class BehaviorFeedback:
     timestamp: float
     blocked: bool
     block_type: str = "none"
+    outcome: str = ""
     platform: str = "unknown"
     domain: str = ""
     behavior_params: Optional[Dict[str, float]] = None
@@ -52,22 +55,41 @@ class FeedbackStore:
         self._events: List[Dict[str, Any]] = []
         self._selector_stats: Dict[str, Dict[str, Dict[str, float]]] = {}
         self._stealth_detections: List[Dict[str, Any]] = []
+        # Guards every read-modify-write of the in-memory lists and the
+        # on-disk file (record_* -> _save) against concurrent threads.
+        self._lock = threading.RLock()
         self._load()
 
+    @property
+    def _corrupt_path(self) -> Path:
+        return self._store_path.with_name(self._store_path.name + ".corrupt")
+
     def _load(self) -> None:
-        if self._store_path.exists():
+        if not self._store_path.exists():
+            return
+        try:
+            data = json.loads(self._store_path.read_text())
+            if not isinstance(data, dict):
+                raise ValueError("feedback store is not a JSON object")
+            self._events = data.get("events", [])
+            self._selector_stats = data.get("selector_stats", {})
+            self._stealth_detections = data.get("stealth_detections", [])
+        except Exception:
+            # Preserve the corrupt store for inspection instead of
+            # silently discarding it, then continue with an empty store.
             try:
-                data = json.loads(self._store_path.read_text())
-                self._events = data.get("events", [])
-                self._selector_stats = data.get("selector_stats", {})
-                self._stealth_detections = data.get("stealth_detections", [])
-            except Exception:
+                os.replace(self._store_path, self._corrupt_path)
+            except OSError:
                 pass
+            self._events = []
+            self._selector_stats = {}
+            self._stealth_detections = []
 
     def _save(self) -> None:
-        self._store_path.parent.mkdir(parents=True, exist_ok=True)
-        self._store_path.write_text(
-            json.dumps(
+        """Persist atomically: temp file in the same dir + os.replace."""
+        with self._lock:
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = json.dumps(
                 {
                     "events": self._events[-1000:],
                     "selector_stats": self._selector_stats,
@@ -76,46 +98,65 @@ class FeedbackStore:
                 default=str,
                 indent=2,
             )
-        )
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(self._store_path.parent),
+                prefix=self._store_path.name + ".",
+                suffix=".tmp",
+            )
+            try:
+                with os.fdopen(fd, "w") as tmp_file:
+                    tmp_file.write(payload)
+                    tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
+                os.replace(tmp_name, self._store_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
 
     def record_event(
         self, event_type: str, domain: str, details: Dict[str, Any]
     ) -> None:
-        self._events.append(
-            {
-                "timestamp": time.time(),
-                "type": event_type,
-                "domain": domain,
-                "details": details,
-            }
-        )
-        if len(self._events) > 2000:
-            self._events = self._events[-1000:]
-        self._save()
+        with self._lock:
+            self._events.append(
+                {
+                    "timestamp": time.time(),
+                    "type": event_type,
+                    "domain": domain,
+                    "details": details,
+                }
+            )
+            if len(self._events) > 2000:
+                self._events = self._events[-1000:]
+            self._save()
 
     def record_selector_result(self, domain: str, selector: str, success: bool) -> None:
-        if domain not in self._selector_stats:
-            self._selector_stats[domain] = {}
-        if selector not in self._selector_stats[domain]:
-            self._selector_stats[domain][selector] = {"hits": 0, "misses": 0}
-        key = "hits" if success else "misses"
-        self._selector_stats[domain][selector][key] += 1
-        self._save()
+        with self._lock:
+            if domain not in self._selector_stats:
+                self._selector_stats[domain] = {}
+            if selector not in self._selector_stats[domain]:
+                self._selector_stats[domain][selector] = {"hits": 0, "misses": 0}
+            key = "hits" if success else "misses"
+            self._selector_stats[domain][selector][key] += 1
+            self._save()
 
     def record_stealth_detection(
         self, domain: str, detection_type: str, bypassed_by: str = ""
     ) -> None:
-        self._stealth_detections.append(
-            {
-                "timestamp": time.time(),
-                "domain": domain,
-                "detection_type": detection_type,
-                "bypassed_by": bypassed_by,
-            }
-        )
-        if len(self._stealth_detections) > 500:
-            self._stealth_detections = self._stealth_detections[-250:]
-        self._save()
+        with self._lock:
+            self._stealth_detections.append(
+                {
+                    "timestamp": time.time(),
+                    "domain": domain,
+                    "detection_type": detection_type,
+                    "bypassed_by": bypassed_by,
+                }
+            )
+            if len(self._stealth_detections) > 500:
+                self._stealth_detections = self._stealth_detections[-250:]
+            self._save()
 
     def get_selector_stats(
         self, domain: str = ""
@@ -214,6 +255,7 @@ class BehaviorTuner:
         feedback_store: Optional[FeedbackStore] = None,
     ):
         self.rng = rng or random.Random()
+        self._lock = threading.RLock()
         self._feedback_history: List[BehaviorFeedback] = []
         self._current_params: Dict[str, float] = {
             "typing_speed": 0.5,
@@ -227,9 +269,23 @@ class BehaviorTuner:
         self._domain_profiles: Dict[str, DomainTuningProfile] = {}
         self._feedback_store = feedback_store or FeedbackStore()
 
+    # Outcomes (and non-"none" block types) that mean the attempt was
+    # blocked or challenged, even if the interaction itself did not error.
+    _FAILURE_OUTCOMES = {
+        "blocked",
+        "block",
+        "challenged",
+        "challenge",
+        "captcha",
+        "failed",
+        "failure",
+        "error",
+    }
+    _CLEAN_BLOCK_TYPES = {"", "none", "no_block", "success", "clean", "ok"}
+
     def record_feedback(
         self,
-        blocked: bool,
+        blocked: bool = False,
         block_type: str = "none",
         platform: str = "unknown",
         behavior_params: Optional[Dict[str, float]] = None,
@@ -238,38 +294,60 @@ class BehaviorTuner:
         recovery_attempts: int = 0,
         selector_results: Optional[Dict[str, bool]] = None,
         stealth_events: Optional[List[Dict[str, Any]]] = None,
+        outcome: Optional[str] = None,
     ):
-        """Record feedback from a browsing session."""
-        feedback = BehaviorFeedback(
-            timestamp=time.time(),
-            blocked=blocked,
-            block_type=block_type,
-            platform=platform,
-            domain=domain,
-            behavior_params=behavior_params or self._current_params.copy(),
-            response_time=response_time,
-            recovery_attempts=recovery_attempts,
-            selector_success={
-                sel: (1.0 if ok else 0.0)
-                for sel, ok in (selector_results or {}).items()
-            },
-            stealth_events=stealth_events or [],
+        """Record feedback from a browsing session.
+
+        Representation choice: outcomes are already represented in this
+        module by the ``blocked`` flag plus ``block_type`` (``"none"``
+        for clean attempts), so a blocked/challenged attempt is recorded
+        as a *failure* through that same flag -- an explicit ``outcome``
+        of ``"blocked"``/``"challenged"`` (or any non-``"none"``
+        ``block_type``) forces ``blocked=True`` even when the caller
+        passes ``blocked=False``. Such parameter sets therefore never
+        enter the successful/optimized statistics.
+        """
+        outcome_key = str(getattr(outcome, "value", outcome) or "").strip().lower()
+        block_type_key = (
+            str(getattr(block_type, "value", block_type) or "").strip().lower()
         )
-        self._feedback_history.append(feedback)
+        effective_blocked = bool(
+            blocked
+            or outcome_key in self._FAILURE_OUTCOMES
+            or (block_type_key and block_type_key not in self._CLEAN_BLOCK_TYPES)
+        )
+        with self._lock:
+            feedback = BehaviorFeedback(
+                timestamp=time.time(),
+                blocked=effective_blocked,
+                block_type=block_type,
+                outcome=outcome_key,
+                platform=platform,
+                domain=domain,
+                behavior_params=behavior_params or self._current_params.copy(),
+                response_time=response_time,
+                recovery_attempts=recovery_attempts,
+                selector_success={
+                    sel: (1.0 if ok else 0.0)
+                    for sel, ok in (selector_results or {}).items()
+                },
+                stealth_events=stealth_events or [],
+            )
+            self._feedback_history.append(feedback)
 
-        params = feedback.behavior_params
-        if blocked:
-            self._failed_params.append(params)
-        else:
-            self._successful_params.append(params)
+            params = feedback.behavior_params
+            if effective_blocked:
+                self._failed_params.append(params)
+            else:
+                self._successful_params.append(params)
 
-        if domain:
-            self._update_domain_profile(feedback)
+            if domain:
+                self._update_domain_profile(feedback)
 
-        self._feed_telemetry_store(feedback)
+            self._feed_telemetry_store(feedback)
 
-        if len(self._feedback_history) >= 5:
-            self._auto_tune()
+            if len(self._feedback_history) >= 5:
+                self._auto_tune()
 
     def _update_domain_profile(self, feedback: BehaviorFeedback) -> None:
         domain = feedback.domain
@@ -285,8 +363,10 @@ class BehaviorTuner:
         profile = self._domain_profiles[domain]
         if feedback.blocked:
             profile.fail_count += 1
-        else:
-            profile.success_count += 1
+            # Blocked/challenged attempts must not pull the domain
+            # profile (its recommendations) toward the blocked params.
+            return
+        profile.success_count += 1
 
         params = feedback.behavior_params or {}
         bounds = DomainTuningProfile.default_bounds()
