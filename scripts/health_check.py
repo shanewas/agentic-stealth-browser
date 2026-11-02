@@ -99,7 +99,13 @@ def check_bridge() -> Dict[str, Any]:
     }
 
     port = os.environ.get("STEALTH_RBB_PORT", "9222")
-    result["port"] = int(port)
+    try:
+        result["port"] = int(port)
+    except (TypeError, ValueError):
+        result["port"] = None
+        result["status"] = "invalid_port"
+        result["error"] = f"Invalid STEALTH_RBB_PORT: {port!r} is not a number"
+        return result
 
     import shutil
 
@@ -109,13 +115,21 @@ def check_bridge() -> Dict[str, Any]:
         import subprocess
 
         try:
-            subprocess.run(
+            cp = subprocess.run(
                 ["systemctl", "--user", "is-active", "stealth-rbb"],
                 capture_output=True,
                 timeout=5,
             )
-            result["service_configured"] = True
-            result["status"] = "service_found"
+            stdout = cp.stdout
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode(errors="replace")
+            # Configured/active only when systemctl actually says so:
+            # an inactive, missing, or failed service does not count.
+            if cp.returncode == 0 and (stdout or "").strip() == "active":
+                result["service_configured"] = True
+                result["status"] = "running"
+            else:
+                result["status"] = "not_configured"
         except Exception:
             pass
 
@@ -125,9 +139,10 @@ def check_bridge() -> Dict[str, Any]:
         )
         if system_service.exists() or user_service.exists():
             result["service_configured"] = True
-            result["status"] = "service_found"
+            if result["status"] != "running":
+                result["status"] = "service_found"
 
-        if result["service_configured"]:
+        if result["service_configured"] and result["status"] != "running":
             try:
                 cp = subprocess.run(
                     ["systemctl", "--no-pager", "--user", "status", "stealth-rbb"],
@@ -219,22 +234,43 @@ def check_memory() -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+def _run_check(fn: Any) -> Dict[str, Any]:
+    """Run one check; an exception becomes an error result, not a crash."""
+    try:
+        result = fn()
+    except Exception as e:
+        return {"error": str(e)}
+    if isinstance(result, dict):
+        return result
+    return {"error": f"unexpected result: {result!r}"}
+
+
 def main() -> None:
     checks: Dict[str, Any] = {
-        "mcp_server": check_mcp_server(),
-        "workflow_library": check_workflow_library(),
-        "bridge": check_bridge(),
-        "disk": check_disk(),
-        "memory": check_memory(),
+        "mcp_server": _run_check(check_mcp_server),
+        "workflow_library": _run_check(check_workflow_library),
+        "bridge": _run_check(check_bridge),
+        "disk": _run_check(check_disk),
+        "memory": _run_check(check_memory),
     }
 
     issues: List[str] = []
-    if not checks["mcp_server"]["running"]:
+    # A failed check ({"error": ...}) is unhealthy, never silently healthy.
+    for name, check in checks.items():
+        if isinstance(check, dict) and check.get("error"):
+            issues.append(f"{name} check failed: {check['error']}")
+    if not checks["mcp_server"].get("running"):
         issues.append("MCP server not available")
-    if not checks["workflow_library"]["accessible"]:
+    if not checks["workflow_library"].get("accessible"):
         issues.append("Workflow library not accessible")
-    if checks["workflow_library"]["invalid"] > 0:
+    if checks["workflow_library"].get("invalid", 0) > 0:
         issues.append(f"{checks['workflow_library']['invalid']} invalid workflow(s)")
+    bridge = checks["bridge"]
+    if not bridge.get("error"):
+        if not bridge.get("service_configured"):
+            issues.append("Remote Browser Bridge not configured")
+        elif bridge.get("status") in ("stopped", "check_failed"):
+            issues.append(f"Remote Browser Bridge not running (status: {bridge.get('status')})")
     if checks["disk"].get("warning"):
         issues.append("Disk space low")
     if checks["memory"].get("warning"):
