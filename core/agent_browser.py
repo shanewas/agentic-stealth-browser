@@ -905,6 +905,14 @@ class AgentBrowser:
             self.recovery._rotation_relaunch_hook = self._perform_rotation_relaunch
             self.recovery.metrics = self.metrics
 
+        # Wire recovery into the scraper created above (it predates recovery
+        # in init order, so use attach_recovery). Guarded: test doubles for
+        # StealthScraper may not expose attach_recovery.
+        if self.recovery and self.scraper is not None:
+            _attach_recovery = getattr(self.scraper, "attach_recovery", None)
+            if callable(_attach_recovery):
+                _attach_recovery(self.recovery)
+
         # Store playwright instance for proper cleanup (only in non-pooled classic path)
         if not getattr(self, "_using_pool", False):
             # pw is defined only in else branch
@@ -1194,6 +1202,12 @@ class AgentBrowser:
             staged_scraper = StealthScraper(
                 staged_page, staged_human, staged_orchestrator
             )
+            # Recovery already exists here (not recreated on rotation); wire
+            # the same instance into the staged scraper. Guarded for doubles.
+            if self.recovery is not None:
+                _attach_recovery = getattr(staged_scraper, "attach_recovery", None)
+                if callable(_attach_recovery):
+                    _attach_recovery(self.recovery)
 
             # Re-init mouse tracker post-rotation for position continuity (#18 related)
             try:
@@ -2352,6 +2366,10 @@ class AgentBrowser:
             )
             self.orchestrator = BehaviorOrchestrator(self.human, rng=self.rng)
             self.scraper = StealthScraper(new_p, self.human, self.orchestrator)
+            if self.recovery is not None:
+                _attach_recovery = getattr(self.scraper, "attach_recovery", None)
+                if callable(_attach_recovery):
+                    _attach_recovery(self.recovery)
             # update recovery page_getter via our pluggable one
             if self.recovery:
                 self.recovery._get_page = self.page_getter
@@ -2408,6 +2426,10 @@ class AgentBrowser:
         self.human = human
         self.orchestrator = orchestrator
         self.scraper = scraper
+        if self.recovery is not None:
+            _attach_recovery = getattr(self.scraper, "attach_recovery", None)
+            if callable(_attach_recovery):
+                _attach_recovery(self.recovery)
         if self.recovery:
             self.recovery._get_page = self.page_getter
         return True
@@ -2613,6 +2635,12 @@ class AgentBrowser:
                 self.recovery = None
             if self.recovery:
                 self.recovery.metrics = self.metrics
+            # Scraper predates recovery in this init order; wire the same
+            # recovery instance in (guarded for doubles / failed creation).
+            if self.recovery and self.scraper is not None:
+                _attach_recovery = getattr(self.scraper, "attach_recovery", None)
+                if callable(_attach_recovery):
+                    _attach_recovery(self.recovery)
 
             # Best-effort version probe (non-fatal)
             browser_version = "unknown"

@@ -25,20 +25,24 @@ class StealthScraper:
         self.recovery = recovery  # AntiBlockOrchestrator scaffolding to prevent bypass
 
     async def _safe_goto(self, url: str, platform: str = "scrape"):
-        """Navigation preferring recovery wrapper if present (#105)."""
+        """Navigation preferring recovery wrapper if present (#105).
+
+        When a recovery orchestrator is attached and it raises (e.g.
+        MaxRetriesExceeded after a detected block), the failure propagates:
+        falling back to a raw goto would send one more unprotected request
+        and let scrape_page extract the challenge page as content. With no
+        recovery attached, the plain goto path is used as before.
+        """
         if self.recovery and hasattr(self.recovery, "execute_with_recovery"):
 
             async def _nav():
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 return True
 
-            try:
-                await self.recovery.execute_with_recovery(
-                    func=_nav, platform=platform, url=url
-                )
-                return True
-            except Exception:
-                pass
+            await self.recovery.execute_with_recovery(
+                func=_nav, platform=platform, url=url
+            )
+            return True
         await self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
         return True
 
@@ -59,12 +63,22 @@ class StealthScraper:
                 }
             }
         """)
-        result = {"url": url, "timestamp": time.monotonic(), "content": content}
+        result = {"url": url, "timestamp": time.time(), "content": content}
         if extract_images:
             result["images"] = await self.extract_images()
         return result
 
     async def extract_images(self, max_images: int = 10) -> List[Dict]:
+        # Validate before interpolation: max_images reaches the page script
+        # via f-string below, so only a plain int may pass. Reject bools and
+        # non-numeric values; clamp negatives to 0.
+        if isinstance(max_images, bool):
+            raise ValueError(f"max_images must be an int, got {max_images!r}")
+        try:
+            max_images = int(max_images)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"max_images must be an int, got {max_images!r}") from exc
+        max_images = max(0, max_images)
         images = await self.page.evaluate(f"""
             () => {{
                 return Array.from(document.images).slice(0, {max_images}).map(img => ({{
