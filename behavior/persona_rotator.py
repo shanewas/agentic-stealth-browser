@@ -25,18 +25,29 @@ class PersonaTrait:
     last_updated: float = 0.0
 
     def evolve(self, days_elapsed: float):
-        """Evolve trait toward target value over time."""
+        """Evolve trait toward target value over time.
+
+        The effective elapsed factor saturates: ``evolution_rate *
+        effective_days`` never exceeds 1, so a long gap moves the trait
+        at most all the way to its target -- never past it -- and repeated
+        evolutions approach the target monotonically (no sign-flipping
+        oscillation). The result is clamped to ``[min_value, max_value]``.
+        """
         if days_elapsed <= 0:
             return
 
-        change = (
-            (self.target_value - self.current_value)
-            * self.evolution_rate
-            * days_elapsed
-        )
-        self.current_value = max(
-            self.min_value, min(self.max_value, self.current_value + change)
-        )
+        rate = min(1.0, max(0.0, self.evolution_rate))
+        if rate <= 0:
+            return
+        effective_days = min(days_elapsed, 1.0 / rate)
+        change = (self.target_value - self.current_value) * rate * effective_days
+        new_value = self.current_value + change
+        # Never overshoot the target.
+        if self.target_value >= self.current_value:
+            new_value = min(new_value, self.target_value)
+        else:
+            new_value = max(new_value, self.target_value)
+        self.current_value = max(self.min_value, min(self.max_value, new_value))
         self.last_updated = time.time()
 
     def is_stable(self, tolerance: float = 0.01) -> bool:
@@ -266,6 +277,9 @@ class PersonaRotator:
                 "traits": {name: t.current_value for name, t in self._traits.items()},
             }
         )
+
+    # Alias using the audit/report naming for the same evolution entry point.
+    evolve_persona = evolve
 
     def get_behavior_params(self) -> Dict[str, Any]:
         """Get current behavioral parameters for use in human behavior simulation."""
