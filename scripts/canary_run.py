@@ -33,21 +33,25 @@ async def main() -> None:
     result = await runner.run_all()
     print(json.dumps(result, indent=2))
 
-    append_history(history_path, result)
-    history = read_history(history_path)
+    # Errored (crashed/partial) runs are not measurements: do not append
+    # them to history or regenerate badge/dashboard/readme from them, so
+    # they cannot publish a bogus score or feed low-score alerting.
+    if result.get("error") is None:
+        append_history(history_path, result)
+        history = read_history(history_path)
 
-    generate_dashboard(history, dashboard_path)
-    generate_badge(history, badge_path)
-    generate_readme(history, readme_path)
+        generate_dashboard(history, dashboard_path)
+        generate_badge(history, badge_path)
+        generate_readme(history, readme_path)
 
-    if "GITHUB_OUTPUT" in os.environ:
-        alert = consecutive_low_scores(history, threshold=75, count=3)
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-            f.write(f"score={result['score']}\n")
-            f.write(f"ts={result['ts']}\n")
-            f.write(f"alert={'true' if alert else 'false'}\n")
+        if "GITHUB_OUTPUT" in os.environ:
+            alert = consecutive_low_scores(history, threshold=75, count=3)
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                f.write(f"score={result['score']}\n")
+                f.write(f"ts={result['ts']}\n")
+                f.write(f"alert={'true' if alert else 'false'}\n")
 
-    sys.exit(0 if result["error"] is None else 1)
+    sys.exit(0 if result.get("error") is None else 1)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,12 @@ def append_history(path: Path, record: dict[str, Any]) -> None:
 
 
 def read_history(path: Path) -> list[dict[str, Any]]:
-    """Read all history entries; returns [] if file missing or empty."""
+    """Read all history entries; returns [] if file missing or empty.
+
+    Malformed lines (e.g. a truncated final line from a killed run) and
+    entries whose score cannot be interpreted as a number are skipped
+    rather than crashing every consumer of the history.
+    """
     if not path.exists():
         return []
     entries: list[dict[str, Any]] = []
@@ -23,13 +28,27 @@ def read_history(path: Path) -> list[dict[str, Any]]:
         line = line.strip()
         if not line:
             continue
-        entries.append(json.loads(line))
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if "score" in entry:
+            try:
+                int(entry["score"])
+            except (TypeError, ValueError, OverflowError):
+                continue
+        entries.append(entry)
     return entries
 
 
 def _parse_ts(ts: str) -> datetime:
     normalized = ts.replace("Z", "+00:00")
-    return datetime.fromisoformat(normalized)
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def entries_last_n_days(
@@ -50,7 +69,12 @@ def average_score(
     history: list[dict[str, Any]], days: int | None = None
 ) -> float | None:
     """Mean score over history; optional window in days."""
-    subset = entries_last_n_days(history, days) if days else history
+    if days is None:
+        subset = history
+    elif days == 0:
+        subset = []
+    else:
+        subset = entries_last_n_days(history, days)
     scores = [int(e["score"]) for e in subset if "score" in e]
     if not scores:
         return None
@@ -59,6 +83,8 @@ def average_score(
 
 def sparkline_scores(history: list[dict[str, Any]], limit: int = 50) -> list[int]:
     """Last N scores in chronological order."""
+    if limit == 0:
+        return []
     scores = [int(e["score"]) for e in history if "score" in e]
     return scores[-limit:]
 
