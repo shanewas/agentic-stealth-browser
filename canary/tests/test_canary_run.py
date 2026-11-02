@@ -1,8 +1,13 @@
 """Tests for scripts/canary_run.py publish behaviour."""
 
+import asyncio
+import fcntl
 import importlib.util
 import json
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -99,3 +104,46 @@ async def test_valid_run_still_publishes(
     assert len(calls["badge"]) == 1
     assert len(calls["dashboard"]) == 1
     assert len(calls["readme"]) == 1
+
+
+def test_publish_blocks_while_lock_held_by_another_holder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _load_canary_run()
+    calls = _install_fakes(monkeypatch, module, tmp_path)
+    _FakeRunner.result = {
+        "ts": "2026-06-03T00:00:00Z",
+        "version": "2.4.0",
+        "score": 100,
+        "per_site": {"sannysoft": "pass"},
+        "duration_s": 1,
+        "error": None,
+    }
+    lock_path = tmp_path / "history.jsonl.lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    codes: list[Any] = []
+
+    def _run() -> None:
+        try:
+            asyncio.run(module.main())
+        except SystemExit as exc:
+            codes.append(exc.code)
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    try:
+        time.sleep(0.5)
+        # Blocked on the lock: nothing appended or published yet.
+        assert thread.is_alive()
+        assert not (tmp_path / "history.jsonl").exists()
+        assert calls == {"badge": [], "dashboard": [], "readme": []}
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert codes == [0]
+    lines = (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert len(calls["badge"]) == 1

@@ -28,6 +28,15 @@ def _load_script(name):
     return module
 
 
+def _load_file(filename, modname):
+    path = ROOT / "scripts" / filename
+    spec = importlib.util.spec_from_file_location(modname, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 migrate = _load_script("migrate_v1_to_v2")
 backup = _load_script("backup_sessions")
 health = _load_script("health_check")
@@ -312,3 +321,240 @@ def test_working_benchmark_report_shape_unchanged():
         "max_ms",
     }
     assert isinstance(data["mean_ms"], (int, float))
+
+
+# ------------------------------------------------------------------ hn-demo
+
+
+class _FakeDemoBrowser:
+    launches = 0
+    goto_results: list = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        type(self).launches += 1  # context manager owns the launch
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def launch(self, **kwargs):
+        type(self).launches += 1
+        raise RuntimeError("already has an active browser/context")
+
+    async def safe_goto(self, url, **kwargs):
+        return type(self).goto_results.pop(0)
+
+
+def _install_demo_fakes(monkeypatch):
+    import types
+
+    monkeypatch.setitem(
+        sys.modules,
+        "core.agent_browser",
+        SimpleNamespace(AgentBrowser=_FakeDemoBrowser),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "stealth.advanced_stealth",
+        SimpleNamespace(get_stealth_script=lambda *a, **k: "x" * 200),
+    )
+    cli = types.ModuleType("production.cli")
+    monkeypatch.setitem(sys.modules, "production.cli", cli)
+    _FakeDemoBrowser.launches = 0
+    _FakeDemoBrowser.goto_results = [True, True]
+
+
+async def test_hn_demo_single_launch_and_success(monkeypatch, capsys):
+    hn = _load_file("hn-demo.py", "scripts_audit_hn_demo")
+    _install_demo_fakes(monkeypatch)
+    await hn.main()
+    assert _FakeDemoBrowser.launches == 1
+    out = capsys.readouterr().out
+    assert "production.cli loaded" in out
+    assert "All systems operational" in out
+
+
+async def test_hn_demo_blocked_navigation_exits_nonzero(monkeypatch, capsys):
+    hn = _load_file("hn-demo.py", "scripts_audit_hn_demo_blocked")
+    _install_demo_fakes(monkeypatch)
+    _FakeDemoBrowser.goto_results = [False]
+    with pytest.raises(SystemExit) as excinfo:
+        await hn.main()
+    assert excinfo.value.code == 1
+    out = capsys.readouterr().out
+    assert "All systems operational" not in out
+    assert "failed/blocked" in out
+
+
+async def test_hn_demo_import_failure_is_honest(monkeypatch, capsys):
+    hn = _load_file("hn-demo.py", "scripts_audit_hn_demo_importfail")
+    _install_demo_fakes(monkeypatch)
+    monkeypatch.setitem(sys.modules, "production.cli", None)
+    with pytest.raises(SystemExit) as excinfo:
+        await hn.main()
+    assert excinfo.value.code == 1
+    out = capsys.readouterr().out
+    assert "production.cli loaded" not in out
+    assert "Import failed" in out
+
+
+# ------------------------------------------------------------ stealth eval
+
+
+class _FakeEvalBrowser:
+    instances: list = []
+    goto_ok = True
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.warm_ups: list = []
+        type(self).instances.append(self)
+
+    async def launch(self, **kwargs):
+        self.launch_kwargs = kwargs
+
+    async def safe_goto(self, url, warm_up=True, **kwargs):
+        self.warm_ups.append(warm_up)
+        return type(self).goto_ok
+
+    async def close(self):
+        pass
+
+
+def _install_eval_fake(monkeypatch, goto_ok=True):
+    _FakeEvalBrowser.instances = []
+    _FakeEvalBrowser.goto_ok = goto_ok
+    monkeypatch.setitem(
+        sys.modules, "core.agent_browser", SimpleNamespace(AgentBrowser=_FakeEvalBrowser)
+    )
+
+
+async def test_evaluator_conditions_differ_only_in_warm_up(monkeypatch):
+    ev = _load_file("evaluate_stealth.py", "scripts_audit_evaluate_stealth")
+    _install_eval_fake(monkeypatch)
+    evaluator = ev.StealthEvaluator(seed=1)
+    await evaluator.run_warm_navigate("https://example.com")
+    await evaluator.run_cold_navigate("https://example.com")
+    assert [i.warm_ups for i in _FakeEvalBrowser.instances] == [[True], [False]]
+    report = evaluator.generate_report()
+    assert set(report) >= {"warm", "cold"}
+    assert "patched" not in report and "baseline" not in report
+    assert report["stealth_comparison_claimed"] is False
+    assert "warm-up" in report["comparison"]["note"]
+    assert "not stealth effectiveness" in report["comparison"]["note"]
+
+
+async def test_evaluator_iterations_zero_rejected(monkeypatch):
+    ev = _load_file("evaluate_stealth.py", "scripts_audit_evaluate_iter0")
+    _install_eval_fake(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        await ev.main(["--iterations", "0"])
+    assert excinfo.value.code != 0
+
+
+def test_evaluator_empty_stats_have_full_shape():
+    ev = _load_file("evaluate_stealth.py", "scripts_audit_evaluate_empty")
+    report = ev.StealthEvaluator(seed=1).generate_report()
+    for stats in (report["warm"], report["cold"]):
+        assert stats["count"] == 0
+        assert stats["detection_rate"] == 0.0
+        assert stats["avg_load_time_ms"] == 0.0
+
+
+async def test_evaluator_all_failed_exits_nonzero(monkeypatch, capsys):
+    ev = _load_file("evaluate_stealth.py", "scripts_audit_evaluate_allfail")
+    _install_eval_fake(monkeypatch, goto_ok=False)
+    code = await ev.main(["--iterations", "1", "--urls", "https://example.com"])
+    assert code == 1
+    json.loads(capsys.readouterr().out)
+
+
+# ------------------------------------------------------------------- gifs
+
+
+def test_make_gif_expect_script_contains_real_output_path(tmp_path):
+    mod = _load_file("make-gif.py", "scripts_audit_make_gif")
+    target = tmp_path / "recording.cast"
+    script = mod.build_expect_script(target)
+    assert str(target) in script
+    assert "{output}" not in script
+    expect_path = mod.write_expect_script(target)
+    try:
+        assert expect_path.exists()
+        assert expect_path.name != "hn-demo.expect"
+        assert expect_path.stat().st_mode & 0o777 != 0o755
+    finally:
+        expect_path.unlink(missing_ok=True)
+
+
+def test_make_gif_failure_returns_nonzero(tmp_path):
+    mod = _load_file("make-gif.py", "scripts_audit_make_gif_fail")
+
+    def failing_runner(*args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr="boom")
+
+    code = mod.main(
+        runner=failing_runner,
+        cast_file=tmp_path / "x.cast",
+        gif_path=tmp_path / "x.gif",
+        repo=tmp_path,
+    )
+    assert code == 1
+
+
+def test_make_gif_missing_cast_returns_nonzero(tmp_path):
+    mod = _load_file("make-gif.py", "scripts_audit_make_gif_nocast")
+
+    def ok_runner(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    code = mod.main(
+        runner=ok_runner,
+        cast_file=tmp_path / "missing.cast",
+        gif_path=tmp_path / "x.gif",
+        repo=tmp_path,
+    )
+    assert code == 1
+
+
+def test_generate_demo_gif_output_path_is_repo_relative():
+    mod = _load_file("generate-demo-gif.py", "scripts_audit_gen_gif_path")
+    assert mod.OUTPUT_PATH == ROOT / "assets" / "hn-demo.gif"
+
+
+def test_generate_demo_gif_pillow_bootstrap_ordering(monkeypatch):
+    mod = _load_file("generate-demo-gif.py", "scripts_audit_gen_gif_boot")
+    monkeypatch.setattr(mod, "Image", None)
+    events: list = []
+    attempts = {"n": 0}
+
+    def importer():
+        events.append("import")
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ImportError("no Pillow")
+        return (object(), object(), object())
+
+    def installer():
+        events.append("install")
+        return SimpleNamespace(returncode=0)
+
+    mod._ensure_pillow(importer=importer, installer=installer)
+    assert events == ["import", "install", "import"]
+
+
+def test_generate_demo_gif_pillow_install_failure_is_loud(monkeypatch):
+    mod = _load_file("generate-demo-gif.py", "scripts_audit_gen_gif_bootfail")
+    monkeypatch.setattr(mod, "Image", None)
+
+    def importer():
+        raise ImportError("no Pillow")
+
+    def installer():
+        return SimpleNamespace(returncode=1)
+
+    with pytest.raises(SystemExit):
+        mod._ensure_pillow(importer=importer, installer=installer)
