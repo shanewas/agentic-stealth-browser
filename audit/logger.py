@@ -27,6 +27,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from sessions.validation import validate_identifier
+
+_NO_HMAC_KEY_MSG = (
+    "AGENTIC_AUDIT_HMAC_KEY is not set or empty: the audit HMAC chain is "
+    "using an empty key and can be recomputed by anyone who can edit the "
+    "audit file. Set AGENTIC_AUDIT_HMAC_KEY to make the chain tamper-evident."
+)
+
+# Per-audit-file locks (M5): serialize writers from multiple AuditLogger
+# instances for the same file in this process.
+_AUDIT_FILE_LOCKS: Dict[str, threading.Lock] = {}
+_AUDIT_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for_audit_file(path: Path) -> threading.Lock:
+    key = os.path.abspath(str(path))
+    with _AUDIT_FILE_LOCKS_GUARD:
+        lock = _AUDIT_FILE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _AUDIT_FILE_LOCKS[key] = lock
+        return lock
+
 
 def _resolve_log_dir() -> str:
     """Resolve container- and env-friendly log directory (mirrors session manager logic)."""
@@ -57,6 +80,10 @@ class AuditLogger:
         log_dir: Optional[str] = None,
         correlation_id: Optional[str] = None,
     ):
+        # M6: session_name becomes path components / a glob prefix below.
+        # Reuse SessionManager's identifier rules (sessions.validation is a
+        # stdlib-only leaf, so this import creates no cycle).
+        validate_identifier(session_name, field="session_name")
         self.session_name = session_name
         if log_dir is None:
             log_dir = _resolve_log_dir()
@@ -72,6 +99,16 @@ class AuditLogger:
         # P2 #128: Correlation ID for multi-account run tracing
         self.correlation_id: str = correlation_id or str(uuid.uuid4())[:8]
         self._prev_hash: Optional[str] = None
+        # M5: tail signature (size, mtime_ns) matching _prev_hash; a mismatch
+        # means another instance wrote, so the last hash is re-read.
+        self._audit_tail_signature: Optional[tuple] = None
+        self._audit_file_lock = _lock_for_audit_file(self.audit_file)
+        self._hmac_key_warned = False
+        # M2: dropped / failed audit entries are counted, never silent.
+        self.dropped_audit_entries = 0
+        self.failed_audit_writes = 0
+        self._unreported_drops = 0
+        self._drop_lock = threading.Lock()
 
         # === Non-blocking queued writers for #44 P1 perf ===
         # audit JSONL uses dedicated queue + background drainer thread (single writer, no per-call threads)
@@ -141,7 +178,8 @@ class AuditLogger:
 
         Applies value-level redaction regardless of key name:
         - Email addresses → [user@REDACTED]
-        - Common API key prefixes (ghp_*, sk-*, xai-*, AIza*, AKIA*) → [REDACTED_KEY]
+        - Common API key prefixes (ghp_*, github_pat_*, sk-*, xai-*, AIza*, AKIA*) → [REDACTED_KEY]
+        - Slack tokens (xoxb-/xoxp-/xoxa-/xoxr-/xoxs-*) and JWTs (eyJ…) → [REDACTED_KEY]
         - URLs with embedded credentials (user:pass@host) → [REDACTED]@host
         - Query-param tokens (?token=xxx&api_key=xxx) → ?token=[REDACTED]&api_key=[REDACTED]
         - Bearer tokens (Bearer xxx) → Bearer [REDACTED]
@@ -202,6 +240,22 @@ class AuditLogger:
             "[REDACTED_KEY]",
             value,
         )
+        value = re.sub(
+            r"\b(github_pat_[A-Za-z0-9_]{20,})\b",
+            "[REDACTED_KEY]",
+            value,
+        )
+        value = re.sub(
+            r"\b(xox[bpras]-[A-Za-z0-9-]{10,})\b",
+            "[REDACTED_KEY]",
+            value,
+        )
+        # JWT: three base64url segments, header segment starts with eyJ.
+        value = re.sub(
+            r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+            "[REDACTED_KEY]",
+            value,
+        )
 
         # Email addresses: user@domain → [user@REDACTED]
         value = re.sub(
@@ -234,6 +288,7 @@ class AuditLogger:
                 "access_key",
                 "private_key",
                 "auth",
+                "credential",
                 "credentials",
                 "cookie",
                 "session_id",
@@ -250,22 +305,99 @@ class AuditLogger:
             k_lower = k.lower() if isinstance(k, str) else str(k).lower()
             if any(s in k_lower for s in SENSITIVE_KEYS):
                 redacted[k] = "***REDACTED***"
-            elif isinstance(v, dict):
-                redacted[k] = AuditLogger._redact_sensitive(v)
-            elif isinstance(v, str):
-                redacted[k] = AuditLogger._redact_sensitive_values(v)
-            elif isinstance(v, (list, tuple)):
-                redacted[k] = [
-                    AuditLogger._redact_sensitive(item)
-                    if isinstance(item, dict)
-                    else AuditLogger._redact_sensitive_values(item)
-                    if isinstance(item, str)
-                    else item
-                    for item in v
-                ]
             else:
-                redacted[k] = v
+                redacted[k] = AuditLogger._redact_value(v)
         return redacted
+
+    @staticmethod
+    def _redact_value(v: Any) -> Any:
+        """Recursively redact a value; dicts are handled at any list depth (M1)."""
+        if isinstance(v, dict):
+            return AuditLogger._redact_sensitive(v)
+        if isinstance(v, str):
+            return AuditLogger._redact_sensitive_values(v)
+        if isinstance(v, (list, tuple)):
+            return [AuditLogger._redact_value(item) for item in v]
+        return v
+
+    @property
+    def dropped_entries(self) -> int:
+        """Alias for ``dropped_audit_entries`` (M2)."""
+        return self.dropped_audit_entries
+
+    @property
+    def dropped_count(self) -> int:
+        """Alias for ``dropped_audit_entries`` (M2)."""
+        return self.dropped_audit_entries
+
+    @property
+    def drop_count(self) -> int:
+        """Alias for ``dropped_audit_entries`` (M2)."""
+        return self.dropped_audit_entries
+
+    @property
+    def write_failure_count(self) -> int:
+        """Alias for ``failed_audit_writes`` (M2)."""
+        return self.failed_audit_writes
+
+    @property
+    def write_failures(self) -> int:
+        """Alias for ``failed_audit_writes`` (M2)."""
+        return self.failed_audit_writes
+
+    def _record_drop(self, entry: Dict[str, Any]) -> None:
+        with self._drop_lock:
+            self.dropped_audit_entries += 1
+            self._unreported_drops += 1
+            count = self.dropped_audit_entries
+        logging.getLogger(__name__).warning(
+            "AuditLogger dropped audit entry (queue full): "
+            "dropped_audit_entries=%d action=%s",
+            count,
+            entry.get("action") if isinstance(entry, dict) else None,
+        )
+
+    def _record_write_failure(self, entry: Any) -> None:
+        with self._drop_lock:
+            self.failed_audit_writes += 1
+            count = self.failed_audit_writes
+        logging.getLogger(__name__).error(
+            "AuditLogger failed to write audit entry: "
+            "failed_audit_writes=%d action=%s",
+            count,
+            entry.get("action") if isinstance(entry, dict) else None,
+            exc_info=True,
+        )
+
+    def _write_drop_marker_if_needed(self) -> None:
+        """Write a chained AUDIT_ENTRIES_DROPPED marker for unreported drops (M2)."""
+        with self._drop_lock:
+            pending = self._unreported_drops
+        if not pending:
+            return
+        marker = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "session": self.session_name,
+            "correlation_id": self.correlation_id,
+            "action": "AUDIT_ENTRIES_DROPPED",
+            "level": "error",
+            "details": {"dropped_count": pending},
+        }
+        try:
+            self._write_audit_line(marker)
+        except Exception:
+            self._record_write_failure(marker)
+            return
+        with self._drop_lock:
+            self._unreported_drops = max(0, self._unreported_drops - pending)
+
+    def _write_entry_counted(self, entry: Any) -> None:
+        """Write one entry, flushing any pending drop marker first (M2)."""
+        self._write_drop_marker_if_needed()
+        try:
+            self._write_audit_line(entry)
+        except Exception:
+            self._record_write_failure(entry)
 
     def log_action(
         self, action: str, details: Optional[Dict] = None, level: str = "info"
@@ -292,8 +424,9 @@ class AuditLogger:
         try:
             self._audit_queue.put_nowait(entry)
         except queue.Full:
-            # Extremely high volume: drop (never block hot path or OOM)
-            pass
+            # Extremely high volume: drop (never block hot path or OOM), but
+            # never silently (M2): count it and log at drop time.
+            self._record_drop(entry)
 
         # Stdlib log goes through QueueHandler -> non-blocking (listener drains to FileHandler)
         msg = f"{action}"
@@ -319,7 +452,7 @@ class AuditLogger:
 
     def get_recent_actions(
         self,
-        limit: int = 50,
+        limit: Optional[int] = 50,
         since_ts: Optional[str] = None,
         before_ts: Optional[str] = None,
     ) -> list:
@@ -329,7 +462,13 @@ class AuditLogger:
         - since_ts: only entries with timestamp >= since_ts (ISO strings are comparable)
         - before_ts: only entries with timestamp < before_ts (used when cursor provided for older pages)
         After any filter, returns the most recent 'limit' of the matching entries (chronological order).
+        L1: limit=0 returns []; a negative limit raises ValueError;
+        limit=None returns all matching entries.
         """
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be non-negative or None")
+        if limit == 0:
+            return []
         if not self.audit_file.exists():
             return []
 
@@ -355,6 +494,8 @@ class AuditLogger:
                 filtered.append(e)
             entries = filtered
 
+        if limit is None:
+            return entries
         return entries[-limit:]
 
     def replay_sequence(
@@ -391,11 +532,7 @@ class AuditLogger:
                     self._audit_queue.task_done()
                     continue
                 try:
-                    self._write_audit_line(entry)
-                except Exception:
-                    logging.getLogger(__name__).debug(
-                        "suppressed exception", exc_info=True
-                    )  # never crash writer
+                    self._write_entry_counted(entry)  # never crashes; counts failures (M2)
                 finally:
                     self._audit_queue.task_done()
             except queue.Empty:
@@ -407,13 +544,16 @@ class AuditLogger:
             while True:
                 entry = self._audit_queue.get_nowait()
                 try:
-                    self._write_audit_line(entry)
-                except Exception:
-                    logging.getLogger(__name__).debug(
-                        "suppressed exception", exc_info=True
-                    )
-                self._audit_queue.task_done()
+                    if entry is not None:
+                        self._write_entry_counted(entry)
+                finally:
+                    self._audit_queue.task_done()
         except queue.Empty:
+            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
+        # Record any drops that no later entry triggered a marker for (M2).
+        try:
+            self._write_drop_marker_if_needed()
+        except Exception:
             logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
     def _purge_old_logs(self) -> None:
@@ -423,8 +563,17 @@ class AuditLogger:
             if days <= 0:
                 return
             cutoff = datetime.now(timezone.utc).timestamp() - (days * 86400)
+            # L2: never purge this logger's own live files; unlinking the
+            # just-opened .log would send writes to an unlinked inode.
+            own_files = {
+                os.path.abspath(str(self.log_file)),
+                os.path.abspath(str(self.audit_file)),
+                os.path.abspath(str(self._debug_log_file)),
+            }
             for p in self.log_dir.glob(f"{self.session_name}*"):
                 try:
+                    if os.path.abspath(str(p)) in own_files:
+                        continue
                     if p.is_file() and p.stat().st_mtime < cutoff:
                         p.unlink()
                 except Exception:
@@ -464,26 +613,57 @@ class AuditLogger:
         except Exception:
             return genesis
 
-    def _write_audit_line(self, entry) -> None:
-        key = os.getenv("AGENTIC_AUDIT_HMAC_KEY", "").encode("utf-8")
-        if self._prev_hash is None:
-            self._prev_hash = self._read_last_hash()
+    def _audit_file_signature(self) -> Optional[tuple]:
         try:
-            max_bytes = int(os.getenv("AGENTIC_AUDIT_MAX_BYTES", str(10 * 1024 * 1024)))
-            if self.audit_file.exists() and self.audit_file.stat().st_size >= max_bytes:
-                self._rotate_jsonl()
-                self._prev_hash = "0" * 64
-        except Exception:
-            logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
-        prev = self._prev_hash if self._prev_hash is not None else "0" * 64
-        canonical = json.dumps(entry, sort_keys=True, ensure_ascii=False)
-        entry_hash = hmac.new(
-            key, (prev + canonical).encode("utf-8"), hashlib.sha256
-        ).hexdigest()
-        chained = {**entry, "prev_hash": prev, "entry_hash": entry_hash}
-        with open(self.audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(chained, ensure_ascii=False) + "\n")
-        self._prev_hash = entry_hash
+            st = self.audit_file.stat()
+            return (st.st_size, st.st_mtime_ns)
+        except (FileNotFoundError, OSError):
+            return None
+
+    def _write_audit_line(self, entry) -> None:
+        # M5: serialize same-file writers in this process and re-read the
+        # tail hash whenever the file changed since this instance last wrote.
+        with self._audit_file_lock:
+            key = os.getenv("AGENTIC_AUDIT_HMAC_KEY", "").encode("utf-8")
+            if not key and not self._hmac_key_warned:
+                # M4: never silent about the forgeable empty-key chain.
+                self._hmac_key_warned = True
+                logging.getLogger(__name__).warning(_NO_HMAC_KEY_MSG)
+            rotated = False
+            try:
+                max_bytes = int(
+                    os.getenv("AGENTIC_AUDIT_MAX_BYTES", str(10 * 1024 * 1024))
+                )
+                if (
+                    self.audit_file.exists()
+                    and self.audit_file.stat().st_size >= max_bytes
+                ):
+                    self._rotate_jsonl()
+                    self._prev_hash = "0" * 64
+                    rotated = True
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "suppressed exception", exc_info=True
+                )
+            if rotated:
+                prev = "0" * 64
+            elif (
+                self._prev_hash is None
+                or self._audit_file_signature() != self._audit_tail_signature
+            ):
+                prev = self._read_last_hash()
+                self._prev_hash = prev
+            else:
+                prev = self._prev_hash
+            canonical = json.dumps(entry, sort_keys=True, ensure_ascii=False)
+            entry_hash = hmac.new(
+                key, (prev + canonical).encode("utf-8"), hashlib.sha256
+            ).hexdigest()
+            chained = {**entry, "prev_hash": prev, "entry_hash": entry_hash}
+            with open(self.audit_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(chained, ensure_ascii=False) + "\n")
+            self._prev_hash = entry_hash
+            self._audit_tail_signature = self._audit_file_signature()
 
     def close(self) -> None:
         """Graceful shutdown of background writers and listeners (call from cleanup paths)."""
@@ -497,9 +677,10 @@ class AuditLogger:
                     logging.getLogger(__name__).debug(
                         "suppressed exception", exc_info=True
                     )
-            # Give writer thread a moment
+            # L3: wait until the writer has drained the queue (its shutdown
+            # flush runs before the thread exits); no fixed time cap.
             if hasattr(self, "_writer_thread") and self._writer_thread.is_alive():
-                self._writer_thread.join(timeout=1.0)
+                self._writer_thread.join()
         except Exception:
             logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
@@ -646,9 +827,15 @@ def verify_audit_chain(audit_file: str) -> bool:
     from pathlib import Path as _P
 
     key = _os.getenv("AGENTIC_AUDIT_HMAC_KEY", "").encode("utf-8")
+    if not key:
+        # M4: never silent about the forgeable empty-key chain (once per call;
+        # do not hard-fail keyless deployments).
+        logging.getLogger(__name__).warning(_NO_HMAC_KEY_MSG)
     p = _P(audit_file)
     if not p.exists():
-        return True
+        # M3: a missing audit file is not a verified chain. An empty but
+        # existing file still verifies (loop below finds no bad entries).
+        return False
     prev = "0" * 64
     with open(p, encoding="utf-8") as f:
         for line in f:
