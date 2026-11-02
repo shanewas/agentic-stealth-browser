@@ -30,6 +30,13 @@ class BenchmarkResult:
     name: str
     samples: List[float] = field(default_factory=list)
     iterations: int = 0
+    failures: int = 0
+    error: Optional[str] = None
+
+    @property
+    def failed(self) -> bool:
+        """True when no iteration produced a usable sample."""
+        return not self.samples and (self.failures > 0 or self.iterations > 0)
 
     @property
     def mean(self) -> float:
@@ -68,6 +75,22 @@ class BenchmarkResult:
         return max(self.samples) if self.samples else 0.0
 
     def to_dict(self) -> dict:
+        if self.failed:
+            # Never render a benchmark that never succeeded as 0.0 ms.
+            return {
+                "name": self.name,
+                "iterations": self.iterations,
+                "status": "FAILED",
+                "failures": self.failures,
+                "error": self.error,
+                "mean_ms": None,
+                "median_ms": None,
+                "p95_ms": None,
+                "p99_ms": None,
+                "stddev_ms": None,
+                "min_ms": None,
+                "max_ms": None,
+            }
         return {
             "name": self.name,
             "iterations": self.iterations,
@@ -104,6 +127,8 @@ class PerfBenchmark:
             try:
                 fn(*args, **kwargs)
             except Exception as e:
+                result.failures += 1
+                result.error = str(e)
                 if self.verbose:
                     print(f"  iter {i} failure [{name}]: {e}")
                 continue
@@ -114,6 +139,16 @@ class PerfBenchmark:
                     f"  [{name}] iter {i + 1}/{self.iterations}: {elapsed * 1000:.1f}ms"
                 )
 
+        self.results[name] = result
+        return result
+
+    def _record_failure(self, name: str, error: BaseException) -> BenchmarkResult:
+        result = BenchmarkResult(
+            name=name,
+            iterations=self.iterations,
+            failures=max(self.iterations, 1),
+            error=str(error),
+        )
         self.results[name] = result
         return result
 
@@ -195,6 +230,8 @@ class PerfBenchmark:
             try:
                 await _check()
             except Exception as e:
+                result.failures += 1
+                result.error = str(e)
                 if self.verbose:
                     print(f"  iter {i} failure [tool_rate_limiter_check]: {e}")
                 continue
@@ -209,15 +246,30 @@ class PerfBenchmark:
         return result
 
     async def bench_all(self) -> Dict[str, Any]:
-        self.bench_imports()
-        self.bench_input_validation()
-        self.bench_audit_logging()
-        await self.bench_rate_limiter()
+        # A benchmark that fails before/inside its run is recorded as
+        # FAILED in the report — never silently omitted.
+        for name, fn in (
+            ("import_core_modules", self.bench_imports),
+            ("input_validation", self.bench_input_validation),
+            ("audit_logging", self.bench_audit_logging),
+        ):
+            try:
+                fn()
+            except Exception as e:
+                self._record_failure(name, e)
+        try:
+            await self.bench_rate_limiter()
+        except Exception as e:
+            self._record_failure("tool_rate_limiter_check", e)
         try:
             self.bench_policy_load()
-        except Exception:
-            pass
+        except Exception as e:
+            self._record_failure("policy_engine_load", e)
         return self.report()
+
+    @property
+    def has_failures(self) -> bool:
+        return any(result.failed for result in self.results.values())
 
     def report(self) -> Dict[str, Any]:
         return {
@@ -243,15 +295,18 @@ class PerfBenchmark:
 
         for r in sorted(self.results.values(), key=lambda x: x.mean, reverse=True):
             d = r.to_dict()
-            row = [
-                d["name"][:26],
-                str(d["mean_ms"]),
-                str(d["median_ms"]),
-                str(d["p95_ms"]),
-                str(d["p99_ms"]),
-                str(d["min_ms"]),
-                str(d["max_ms"]),
-            ]
+            if r.failed:
+                row = [d["name"][:26], "FAILED", "-", "-", "-", "-", "-"]
+            else:
+                row = [
+                    d["name"][:26],
+                    str(d["mean_ms"]),
+                    str(d["median_ms"]),
+                    str(d["p95_ms"]),
+                    str(d["p99_ms"]),
+                    str(d["min_ms"]),
+                    str(d["max_ms"]),
+                ]
             print("  ".join(f"{v:<{w}}" for v, w in zip(row, col_widths)))
 
         print(f"\n{'=' * 60}\n")
@@ -283,7 +338,7 @@ async def main(argv: Optional[list[str]] = None) -> int:
     else:
         bench.print_report()
 
-    return 0
+    return 1 if bench.has_failures else 0
 
 
 if __name__ == "__main__":
