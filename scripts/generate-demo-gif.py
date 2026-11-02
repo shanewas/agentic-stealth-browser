@@ -3,12 +3,44 @@
 
 import subprocess
 import sys
-from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
 
-# Ensure Pillow is available
-subprocess.run(
-    [sys.executable, "-m", "pip", "install", "Pillow", "-q"], capture_output=True
-)
+OUTPUT_PATH = Path(__file__).resolve().parent.parent / "assets" / "hn-demo.gif"
+
+Image = ImageDraw = ImageFont = None
+
+
+def _default_importer():
+    from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont
+
+    return _Image, _ImageDraw, _ImageFont
+
+
+def _default_installer():
+    return subprocess.run(
+        [sys.executable, "-m", "pip", "install", "Pillow", "-q"],
+        capture_output=True,
+    )
+
+
+def _ensure_pillow(importer=None, installer=None):
+    """Import Pillow; on ImportError install it (checked), then re-import."""
+    global Image, ImageDraw, ImageFont
+    if Image is not None:
+        return Image, ImageDraw, ImageFont
+    importer = importer or _default_importer
+    try:
+        Image, ImageDraw, ImageFont = importer()
+    except ImportError:
+        result = (installer or _default_installer)()
+        if result is None or getattr(result, "returncode", 1) != 0:
+            raise SystemExit("Failed to install Pillow; cannot generate GIF")
+        try:
+            Image, ImageDraw, ImageFont = importer()
+        except ImportError as exc:
+            raise SystemExit(f"Pillow still unavailable after install: {exc}") from exc
+    return Image, ImageDraw, ImageFont
+
 
 WIDTH = 900
 HEIGHT = 520
@@ -18,24 +50,29 @@ GREEN = (80, 200, 120)
 CYAN = (80, 180, 240)
 YELLOW = (240, 200, 80)
 
-# Try to get a monospace font
 font = None
 font_size = 14
-for path in [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-]:
-    try:
-        font = ImageFont.truetype(path, font_size)
-        break
-    except Exception:
-        continue
-
-if font is None:
-    font = ImageFont.load_default()
-
 line_h = font_size + 4
+
+
+def _ensure_font():
+    global font
+    if font is not None:
+        return font
+    _ensure_pillow()
+    for path in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    ]:
+        try:
+            font = ImageFont.truetype(path, font_size)
+            break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    return font
 
 
 def draw_text(draw, x, y, text, color=FG, bold=False):
@@ -45,6 +82,7 @@ def draw_text(draw, x, y, text, color=FG, bold=False):
 
 def terminal_frame(lines, prompt="$"):
     """Create a terminal frame with given lines of text."""
+    _ensure_font()
     img = Image.new("RGB", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(img)
 
@@ -80,6 +118,8 @@ def terminal_frame(lines, prompt="$"):
 
 def make_gif(output_path):
     """Generate all frames and save as GIF."""
+    _ensure_font()
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     frames = []
     durations = []
 
@@ -211,4 +251,5 @@ def make_gif(output_path):
 
 
 if __name__ == "__main__":
-    make_gif("/root/agentic-stealth-browser/assets/hn-demo.gif")
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    make_gif(str(OUTPUT_PATH))

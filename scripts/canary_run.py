@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,6 +17,25 @@ from canary.dashboard_gen import generate_dashboard
 from canary.history import append_history, consecutive_low_scores, read_history
 from canary.readme_gen import generate_readme
 from canary.runner import CanaryRunner
+
+
+@contextmanager
+def _publish_lock(history_path: Path):
+    """Hold an exclusive flock beside *history_path* for append+publish.
+
+    A concurrent run blocks here instead of interleaving, so it cannot
+    overwrite newer dashboard/badge/readme artifacts with a stale snapshot.
+    """
+    lock_path = history_path.parent / f"{history_path.name}.lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield lock_path
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 async def main() -> None:
@@ -37,19 +58,20 @@ async def main() -> None:
     # them to history or regenerate badge/dashboard/readme from them, so
     # they cannot publish a bogus score or feed low-score alerting.
     if result.get("error") is None:
-        append_history(history_path, result)
-        history = read_history(history_path)
+        with _publish_lock(history_path):
+            append_history(history_path, result)
+            history = read_history(history_path)
 
-        generate_dashboard(history, dashboard_path)
-        generate_badge(history, badge_path)
-        generate_readme(history, readme_path)
+            generate_dashboard(history, dashboard_path)
+            generate_badge(history, badge_path)
+            generate_readme(history, readme_path)
 
-        if "GITHUB_OUTPUT" in os.environ:
-            alert = consecutive_low_scores(history, threshold=75, count=3)
-            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-                f.write(f"score={result['score']}\n")
-                f.write(f"ts={result['ts']}\n")
-                f.write(f"alert={'true' if alert else 'false'}\n")
+            if "GITHUB_OUTPUT" in os.environ:
+                alert = consecutive_low_scores(history, threshold=75, count=3)
+                with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                    f.write(f"score={result['score']}\n")
+                    f.write(f"ts={result['ts']}\n")
+                    f.write(f"alert={'true' if alert else 'false'}\n")
 
     sys.exit(0 if result.get("error") is None else 1)
 
