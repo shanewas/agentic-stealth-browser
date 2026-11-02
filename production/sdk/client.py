@@ -165,13 +165,27 @@ class StealthClient:
         raw = await scraper.scrape_page(
             str(url), extract_images=extract_images, platform=platform
         )
+        # scrape_page returns {"url", "timestamp", "content": {title, url,
+        # text, headings}, "images"?}; read the nested content dict (the MCP
+        # handler consumes that same nested shape, so it stays canonical).
+        # Flat keys are accepted as a fallback for other scraper doubles.
+        # scrape_page does not extract links, so links stays empty rather
+        # than being fabricated; headings/timestamp surface via metadata.
+        content = raw.get("content")
+        if not isinstance(content, dict):
+            content = {}
+        metadata: Dict[str, Any] = dict(raw.get("metadata") or {})
+        if content.get("headings") is not None:
+            metadata.setdefault("headings", content["headings"])
+        if raw.get("timestamp") is not None:
+            metadata.setdefault("timestamp", raw["timestamp"])
         return ClientScrapeResult(
-            title=raw.get("title", ""),
-            url=raw.get("url", str(url)),
-            text=raw.get("text", ""),
+            title=content.get("title", raw.get("title", "")),
+            url=raw.get("url", content.get("url", str(url))),
+            text=content.get("text", raw.get("text", "")),
             links=raw.get("links", []),
             images=raw.get("images", []),
-            metadata=raw.get("metadata", {}),
+            metadata=metadata,
         )
 
     async def status(self) -> ClientStatusResult:
