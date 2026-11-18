@@ -858,9 +858,7 @@ class CookieManager:
         # bundle can re-sign it. Only a caller-held encryption_key makes
         # the HMAC meaningful; without one, accept (legacy-compatible) but
         # report integrity as unverified rather than verified.
-        integrity_verified = bool(
-            isinstance(data, dict) and data.get("encrypted")
-        )
+        integrity_verified = bool(isinstance(data, dict) and data.get("encrypted"))
         if isinstance(data, dict) and not data.get("encrypted") and "integrity" in data:
             if encryption_key:
                 stored_hmac = data["integrity"]

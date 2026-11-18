@@ -224,8 +224,7 @@ class TestSafeExtractBaseUser:
     def test_hyphenated_base_before_session(self):
         manager = ProxyManager()
         assert (
-            manager._safe_extract_base_user("user-mary-ann-session-abc")
-            == "mary-ann"
+            manager._safe_extract_base_user("user-mary-ann-session-abc") == "mary-ann"
         )
         assert (
             manager._safe_extract_base_user("user-anne-marie-sessionduration-30")

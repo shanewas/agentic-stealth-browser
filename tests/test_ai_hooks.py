@@ -54,7 +54,9 @@ class TestDisabledProviderUnchanged:
     def test_decide_next_action_rules(self):
         hooks = self._disabled()
         assert (
-            asyncio.run(hooks.decide_next_action({"url": "https://x.test/", "status": 403}))
+            asyncio.run(
+                hooks.decide_next_action({"url": "https://x.test/", "status": 403})
+            )
             == "backoff_and_retry"
         )
         assert (
@@ -95,9 +97,7 @@ class TestSanitizeRoleMarkers:
 
 class TestPhoneExtraction:
     def _phones(self, text):
-        result = asyncio.run(
-            AIHooks(provider="none").extract_structured_data(text, {})
-        )
+        result = asyncio.run(AIHooks(provider="none").extract_structured_data(text, {}))
         return result["data"]["phones"]
 
     def test_punctuation_runs_rejected(self):

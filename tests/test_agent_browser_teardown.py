@@ -186,9 +186,7 @@ class FakePoolPW:
 def _patch_collaborators(monkeypatch):
     """Patch the heavy collaborators launch()/rotation build, not the SUT."""
     monkeypatch.setattr("core.agent_browser.get_stealth_script", lambda **kw: "s")
-    monkeypatch.setattr(
-        "core.agent_browser.get_tls_manager", lambda *a, **k: FakeTLS()
-    )
+    monkeypatch.setattr("core.agent_browser.get_tls_manager", lambda *a, **k: FakeTLS())
     monkeypatch.setattr(
         "core.agent_browser.check_stealth_compatibility", lambda *a, **k: {}
     )
@@ -220,9 +218,7 @@ async def test_classic_launch_failure_after_context_creation_is_closed(monkeypat
     _patch_collaborators(monkeypatch)
     ctx = FakeContext(fail_init=True)
     pw = FakePW(context=ctx)
-    monkeypatch.setattr(
-        "core.agent_browser.async_playwright", lambda: FakeStarter(pw)
-    )
+    monkeypatch.setattr("core.agent_browser.async_playwright", lambda: FakeStarter(pw))
     ab = _make_browser("t3-fail-after-ctx")
 
     with pytest.raises(RuntimeError, match="init boom"):
@@ -240,9 +236,7 @@ async def test_classic_launch_success_sets_launched_and_close_cleans(monkeypatch
     _patch_collaborators(monkeypatch)
     ctx = FakeContext()
     pw = FakePW(context=ctx)
-    monkeypatch.setattr(
-        "core.agent_browser.async_playwright", lambda: FakeStarter(pw)
-    )
+    monkeypatch.setattr("core.agent_browser.async_playwright", lambda: FakeStarter(pw))
     ab = _make_browser("t3-success")
 
     await ab.launch()

@@ -45,7 +45,9 @@ class AIHooks:
         r"^\s*(system:|assistant:|user:)\s*",
         r"\b(output only the|respond with only|print exactly|your new instructions)\b",
     ]
-    _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE | re.MULTILINE)
+    _INJECTION_RE = re.compile(
+        "|".join(_INJECTION_PATTERNS), re.IGNORECASE | re.MULTILINE
+    )
 
     def __init__(
         self,

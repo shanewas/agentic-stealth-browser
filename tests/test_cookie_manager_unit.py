@@ -381,9 +381,7 @@ class TestPlaintextBundleIntegrity:
             [{"name": "c", "value": "orig", "domain": "example.com"}]
         )
         bundle_path = tmp_path / "bundle.json"
-        exported = asyncio.run(
-            mgr.export_session_bundle("sess-a", str(bundle_path))
-        )
+        exported = asyncio.run(mgr.export_session_bundle("sess-a", str(bundle_path)))
         assert exported["status"] == "success"
 
         bundle = json.loads(bundle_path.read_text())
@@ -446,7 +444,5 @@ class TestSessionOrchestratorIsolation:
         )
         asyncio.run(orch.start_session("orch-a", cookies_path=str(cookies_path)))
 
-        assert [c["name"] for c in orch.cookie_managers["orch-a"].cookies] == [
-            "only-a"
-        ]
+        assert [c["name"] for c in orch.cookie_managers["orch-a"].cookies] == ["only-a"]
         assert orch.cookie_managers["orch-b"].cookies == []

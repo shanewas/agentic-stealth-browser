@@ -129,9 +129,7 @@ class LinkedInActions:
                             or job.get("job_id")
                         )
                         if key is None:
-                            key = tuple(
-                                sorted((k, str(v)) for k, v in job.items())
-                            )
+                            key = tuple(sorted((k, str(v)) for k, v in job.items()))
                     else:
                         key = str(job)
                     if key not in seen:

@@ -300,13 +300,10 @@ class ToolRateLimiter:
 
                 if (
                     self.tool_calls_per_minute
-                    and len(self._tool_calls[tool_name])
-                    >= self.tool_calls_per_minute
+                    and len(self._tool_calls[tool_name]) >= self.tool_calls_per_minute
                 ):
                     oldest = self._tool_calls[tool_name][0]
-                    wait_time = (
-                        oldest + timedelta(minutes=1) - now
-                    ).total_seconds()
+                    wait_time = (oldest + timedelta(minutes=1) - now).total_seconds()
                     if wait_time <= 0:
                         wait_time = 0.0
                 if wait_time == 0.0:

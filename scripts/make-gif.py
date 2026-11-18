@@ -60,7 +60,9 @@ def main(runner=subprocess.run, cast_file=None, gif_path=None, repo=REPO) -> int
         cast_file = Path(name)
     else:
         cast_file = Path(cast_file)
-    gif_path = Path(gif_path) if gif_path is not None else repo / "assets" / "hn-demo.gif"
+    gif_path = (
+        Path(gif_path) if gif_path is not None else repo / "assets" / "hn-demo.gif"
+    )
     expect_path = write_expect_script(cast_file, repo=repo)
     try:
         try:

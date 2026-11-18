@@ -321,9 +321,10 @@ class TestPlayerRecovery:
                 "healed_selector": '[id*="btn"]',
             }
         ]
-        assert [
-            call.args[0] for call in mock_browser.safe_click.call_args_list
-        ] == ["#btn", '[id*="btn"]']
+        assert [call.args[0] for call in mock_browser.safe_click.call_args_list] == [
+            "#btn",
+            '[id*="btn"]',
+        ]
         assert result.recovery_used is False
         assert result.recovery_actions == []
         assert captured_configs == []
@@ -587,9 +588,7 @@ class TestRecoveryRedispatch:
     async def test_fill_not_recovered_when_refill_fails(
         self, fallback_controller, mock_browser
     ):
-        mock_browser.safe_type = AsyncMock(
-            side_effect=Exception("element not found")
-        )
+        mock_browser.safe_type = AsyncMock(side_effect=Exception("element not found"))
 
         result = await fallback_controller.handle_step_error(
             step_type="fill",
@@ -641,9 +640,7 @@ class TestRecoveryRedispatch:
 
         assert result.recovered is False
 
-    async def test_player_reports_failure_when_verify_still_fails(
-        self, mock_browser
-    ):
+    async def test_player_reports_failure_when_verify_still_fails(self, mock_browser):
         mock_browser.page.evaluate = AsyncMock(return_value=False)
 
         player = WorkflowPlayer(mock_browser)
@@ -710,9 +707,7 @@ class TestWorkflowBoundCheckpoints:
         mock_browser.safe_goto.assert_called_once()
         mock_browser.safe_click.assert_called_once_with("#btn")
 
-    async def test_matching_workflow_checkpoint_resumes(
-        self, mock_browser, tmp_path
-    ):
+    async def test_matching_workflow_checkpoint_resumes(self, mock_browser, tmp_path):
         workflow = Workflow(
             name="test-matching-resume",
             steps=[
@@ -766,9 +761,7 @@ class TestWorkflowBoundCheckpoints:
             name="outer",
             steps=[
                 WorkflowStep(type="click", params={"selector": "#outer-first"}),
-                WorkflowStep(
-                    type="run_workflow", params={"path": "inner.yaml"}
-                ),
+                WorkflowStep(type="run_workflow", params={"path": "inner.yaml"}),
                 WorkflowStep(type="click", params={"selector": "#outer-last"}),
             ],
         )
@@ -777,9 +770,12 @@ class TestWorkflowBoundCheckpoints:
         result = await player.execute(workflow)
 
         assert result.success
-        assert [
-            call.args[0] for call in mock_browser.safe_click.call_args_list
-        ] == ["#outer-first", "#inner-1", "#inner-2", "#outer-last"]
+        assert [call.args[0] for call in mock_browser.safe_click.call_args_list] == [
+            "#outer-first",
+            "#inner-1",
+            "#inner-2",
+            "#outer-last",
+        ]
         assert player.checkpoint["completed_steps"] == [0, 1, 2]
 
 

@@ -71,7 +71,9 @@ class TestDomainNormalization:
 class TestMissingPolicy:
     def test_unknown_policy_name_denied(self):
         engine = PolicyEngine()
-        result = engine.check_step("navigate", "https://example.com", policy_name="nope")
+        result = engine.check_step(
+            "navigate", "https://example.com", policy_name="nope"
+        )
         assert result["allowed"] is False
         assert result["approval_required"] is True
         assert "nope" in result["reason"]
@@ -105,9 +107,7 @@ class TestMissingPolicy:
         }
 
     def test_loaded_policy_behaves_as_before(self):
-        engine = _engine_with(
-            Policy(name="strict", blocked_step_types={"execute_js"})
-        )
+        engine = _engine_with(Policy(name="strict", blocked_step_types={"execute_js"}))
         assert engine.check_step("execute_js", "")["allowed"] is False
         assert engine.check_step("navigate", "https://example.com")["allowed"] is True
 
@@ -117,7 +117,10 @@ class TestMissingPolicy:
         assert result["allowed"] is False
         assert result["approval_required"] is True
         # Unconfigured engine keeps its documented fail-open result.
-        assert PolicyEngine().check_step("navigate", "https://{{host}}/path")["allowed"] is True
+        assert (
+            PolicyEngine().check_step("navigate", "https://{{host}}/path")["allowed"]
+            is True
+        )
 
 
 def _replay_server(tmp_path, policy: Policy, monkeypatch) -> StealthMCPServer:
@@ -140,7 +143,9 @@ class TestReplayGateLeafSteps:
     @pytest.mark.asyncio
     async def test_conditional_wrapped_execute_js_blocked(self, tmp_path, monkeypatch):
         server = _replay_server(
-            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+            tmp_path,
+            Policy(name="strict", blocked_step_types={"execute_js"}),
+            monkeypatch,
         )
         (server._workflow_library_root / "w.yaml").write_text(
             "name: w\n"
@@ -186,19 +191,15 @@ class TestReplayGateLeafSteps:
     @pytest.mark.asyncio
     async def test_nested_workflow_blocked_step_caught(self, tmp_path, monkeypatch):
         server = _replay_server(
-            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+            tmp_path,
+            Policy(name="strict", blocked_step_types={"execute_js"}),
+            monkeypatch,
         )
         (server._workflow_library_root / "inner.yaml").write_text(
-            "name: inner\n"
-            "steps:\n"
-            "  - type: execute_js\n"
-            "    code: '1'\n"
+            "name: inner\nsteps:\n  - type: execute_js\n    code: '1'\n"
         )
         (server._workflow_library_root / "outer.yaml").write_text(
-            "name: outer\n"
-            "steps:\n"
-            "  - type: run_workflow\n"
-            "    path: inner.yaml\n"
+            "name: outer\nsteps:\n  - type: run_workflow\n    path: inner.yaml\n"
         )
         with pytest.raises(ToolError) as exc:
             await _replay(server, "outer.yaml")
@@ -216,10 +217,7 @@ class TestReplayGateLeafSteps:
             monkeypatch,
         )
         (server._workflow_library_root / "w.yaml").write_text(
-            "name: w\n"
-            "steps:\n"
-            "  - type: navigate\n"
-            "    url: 'https://{{host}}/path'\n"
+            "name: w\nsteps:\n  - type: navigate\n    url: 'https://{{host}}/path'\n"
         )
         with pytest.raises(ToolError) as exc:
             await _replay(server, "w.yaml", variables={"host": "blocked.example"})
@@ -231,10 +229,7 @@ class TestReplayGateLeafSteps:
     ):
         server = _replay_server(tmp_path, Policy(name="strict"), monkeypatch)
         (server._workflow_library_root / "outer.yaml").write_text(
-            "name: outer\n"
-            "steps:\n"
-            "  - type: run_workflow\n"
-            "    path: missing.yaml\n"
+            "name: outer\nsteps:\n  - type: run_workflow\n    path: missing.yaml\n"
         )
         with pytest.raises(ToolError) as exc:
             await _replay(server, "outer.yaml")
@@ -250,7 +245,9 @@ class TestConditionalConditionGate:
         self, tmp_path, monkeypatch
     ):
         server = _replay_server(
-            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+            tmp_path,
+            Policy(name="strict", blocked_step_types={"execute_js"}),
+            monkeypatch,
         )
         (server._workflow_library_root / "w.yaml").write_text(
             "name: w\n"
@@ -346,9 +343,7 @@ class TestConditionalConditionGate:
                 "type": "conditional",
                 "condition": "document.title",
                 "steps": [{"type": "click", "selector": "#ok"}],
-                "else_steps": [
-                    {"type": "navigate", "url": "https://example.com"}
-                ],
+                "else_steps": [{"type": "navigate", "url": "https://example.com"}],
             }
         ]
         expanded = _expand_replay_steps(steps, {}, tmp_path, tmp_path)
@@ -368,7 +363,9 @@ class TestConditionalConditionGate:
         self, tmp_path, monkeypatch
     ):
         server = _replay_server(
-            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+            tmp_path,
+            Policy(name="strict", blocked_step_types={"execute_js"}),
+            monkeypatch,
         )
         (server._workflow_library_root / "w.yaml").write_text(
             "name: w\n"
@@ -392,7 +389,9 @@ class TestConditionalConditionGate:
         self, tmp_path, monkeypatch
     ):
         server = _replay_server(
-            tmp_path, Policy(name="strict", blocked_step_types={"execute_js"}), monkeypatch
+            tmp_path,
+            Policy(name="strict", blocked_step_types={"execute_js"}),
+            monkeypatch,
         )
         (server._workflow_library_root / "inner.yaml").write_text(
             "name: inner\n"
@@ -404,10 +403,7 @@ class TestConditionalConditionGate:
             "        ms: 1\n"
         )
         (server._workflow_library_root / "outer.yaml").write_text(
-            "name: outer\n"
-            "steps:\n"
-            "  - type: run_workflow\n"
-            "    path: inner.yaml\n"
+            "name: outer\nsteps:\n  - type: run_workflow\n    path: inner.yaml\n"
         )
         with pytest.raises(ToolError) as exc:
             await _replay(server, "outer.yaml")
@@ -435,9 +431,7 @@ class TestConditionalConditionGate:
         )
         steps = [{"type": "run_workflow", "path": "a.yaml"}]
         expanded = _expand_replay_steps(steps, {}, tmp_path, tmp_path)
-        js_codes = [
-            s["params"]["code"] for s in expanded if s["type"] == "execute_js"
-        ]
+        js_codes = [s["params"]["code"] for s in expanded if s["type"] == "execute_js"]
         assert js_codes == ["document.title", "document.cookie"]
         errors = [s["error"] for s in expanded if s.get("error")]
         assert any("cycle" in e for e in errors)

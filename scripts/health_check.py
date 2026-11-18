@@ -270,7 +270,9 @@ def main() -> None:
         if not bridge.get("service_configured"):
             issues.append("Remote Browser Bridge not configured")
         elif bridge.get("status") in ("stopped", "check_failed"):
-            issues.append(f"Remote Browser Bridge not running (status: {bridge.get('status')})")
+            issues.append(
+                f"Remote Browser Bridge not running (status: {bridge.get('status')})"
+            )
     if checks["disk"].get("warning"):
         issues.append("Disk space low")
     if checks["memory"].get("warning"):

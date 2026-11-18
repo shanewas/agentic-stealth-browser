@@ -94,7 +94,9 @@ class TestDeviceProfileValidation:
             DeviceProfile(power_level="ultra")
 
     def test_explicit_hardware_wins_over_power_level(self):
-        device = DeviceProfile(hardware_concurrency=16, device_memory=32, power_level="low")
+        device = DeviceProfile(
+            hardware_concurrency=16, device_memory=32, power_level="low"
+        )
         hw = device.get_hardware_fingerprint()
         assert hw == {"hardwareConcurrency": 16, "deviceMemory": 32}
 
@@ -109,7 +111,9 @@ class TestDeviceProfileValidation:
         }
 
     def test_partial_explicit_hardware_mixes_with_mapping(self):
-        hw = DeviceProfile(hardware_concurrency=6, power_level="high").get_hardware_fingerprint()
+        hw = DeviceProfile(
+            hardware_concurrency=6, power_level="high"
+        ).get_hardware_fingerprint()
         assert hw == {"hardwareConcurrency": 6, "deviceMemory": 16}
 
     def test_builtin_registry_profiles_are_valid(self):
@@ -208,7 +212,9 @@ class TestPresetsReExportCanonicalProfiles:
         from stealth import presets, profiles
 
         assert presets.list_personas() == profiles.list_personas()
-        assert presets.get_persona("eu_professional") == profiles.get_persona("eu_professional")
+        assert presets.get_persona("eu_professional") == profiles.get_persona(
+            "eu_professional"
+        )
         assert "eu_professional" in presets.list_personas()
 
 
@@ -265,7 +271,12 @@ class TestCacheMissingGenerator:
         assert cache.get_or_generate("k") == "generated"
 
     def test_cached_key_returns_without_generator(self):
-        assert get_cached_script("cached_profile_f32", generator=lambda: "script") == "script"
+        assert (
+            get_cached_script("cached_profile_f32", generator=lambda: "script")
+            == "script"
+        )
         assert get_cached_script("cached_profile_f32") == "script"
-        assert get_cached_profile("cached_profile_f32", generator=lambda: {"p": 1}) == {"p": 1}
+        assert get_cached_profile("cached_profile_f32", generator=lambda: {"p": 1}) == {
+            "p": 1
+        }
         assert get_cached_profile("cached_profile_f32") == {"p": 1}

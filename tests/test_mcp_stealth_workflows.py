@@ -545,9 +545,7 @@ def test_validator_accepts_normal_teach_and_list_names():
 
 
 @pytest.mark.asyncio
-async def test_teach_handler_rejects_traversal_without_writing(
-    tmp_path, monkeypatch
-):
+async def test_teach_handler_rejects_traversal_without_writing(tmp_path, monkeypatch):
     from production.mcp_server import ToolError
 
     monkeypatch.setattr("production.mcp_server.Path.home", lambda: tmp_path)
@@ -567,9 +565,7 @@ async def test_teach_handler_rejects_traversal_without_writing(
 
 
 @pytest.mark.asyncio
-async def test_workflow_list_handler_rejects_platform_traversal(
-    tmp_path, monkeypatch
-):
+async def test_workflow_list_handler_rejects_platform_traversal(tmp_path, monkeypatch):
     from production.mcp_server import ToolError
 
     monkeypatch.setattr("production.mcp_server.Path.home", lambda: tmp_path)

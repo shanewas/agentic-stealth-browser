@@ -324,9 +324,7 @@ class TestRestoreStorageInjection:
         page = MockPage()
         page._session_storage = {}
         asyncio.run(manager.restore_session_storage(page, dict(self.PAYLOAD)))
-        self._assert_argument_passing(
-            page, page._session_storage, "sessionStorage"
-        )
+        self._assert_argument_passing(page, page._session_storage, "sessionStorage")
 
 
 class TestCheckpointPathTraversal:
@@ -388,9 +386,7 @@ class TestCheckpointPathTraversal:
 
     def test_normal_checkpoint_round_trip_still_works(self, tmp_path):
         manager = SessionManager(data_dir=str(tmp_path))
-        cp = manager.create_checkpoint(
-            account_id="user-1", local_storage={"k": "v"}
-        )
+        cp = manager.create_checkpoint(account_id="user-1", local_storage={"k": "v"})
         filepath = manager.save_checkpoint(cp, filename="user-1_manual.json")
         assert filepath.exists()
         assert manager.load_checkpoint(filepath.name).local_storage == {"k": "v"}

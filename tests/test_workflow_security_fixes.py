@@ -281,9 +281,7 @@ class TestDeclaredVariables:
             "https://prod.example.com/x", platform="unknown"
         )
 
-    async def test_missing_required_fails_before_any_step(
-        self, player, mock_browser
-    ):
+    async def test_missing_required_fails_before_any_step(self, player, mock_browser):
         workflow = Workflow(
             name="test-var-missing",
             steps=[WorkflowStep(type="navigate", params={"url": "{{api_key}}/x"})],
@@ -337,9 +335,7 @@ class TestLoadWorkflowMalformed:
         assert any("name" in e for e in result.errors)
 
     def test_unknown_type_still_loads_for_validate_workflow(self):
-        workflow = load_workflow(
-            {"name": "t", "steps": [{"type": "teleport", "x": 1}]}
-        )
+        workflow = load_workflow({"name": "t", "steps": [{"type": "teleport", "x": 1}]})
         result = validate_workflow(workflow)
         assert not result.valid
         assert any("unknown step type" in e for e in result.errors)

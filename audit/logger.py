@@ -362,8 +362,7 @@ class AuditLogger:
             self.failed_audit_writes += 1
             count = self.failed_audit_writes
         logging.getLogger(__name__).error(
-            "AuditLogger failed to write audit entry: "
-            "failed_audit_writes=%d action=%s",
+            "AuditLogger failed to write audit entry: failed_audit_writes=%d action=%s",
             count,
             entry.get("action") if isinstance(entry, dict) else None,
             exc_info=True,
@@ -532,7 +531,9 @@ class AuditLogger:
                     self._audit_queue.task_done()
                     continue
                 try:
-                    self._write_entry_counted(entry)  # never crashes; counts failures (M2)
+                    self._write_entry_counted(
+                        entry
+                    )  # never crashes; counts failures (M2)
                 finally:
                     self._audit_queue.task_done()
             except queue.Empty:
@@ -642,9 +643,7 @@ class AuditLogger:
                     self._prev_hash = "0" * 64
                     rotated = True
             except Exception:
-                logging.getLogger(__name__).debug(
-                    "suppressed exception", exc_info=True
-                )
+                logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
             if rotated:
                 prev = "0" * 64
             elif (
