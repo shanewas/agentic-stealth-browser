@@ -43,10 +43,15 @@ def test_permissive_mode(monkeypatch):
 def test_effect_sensitive_tools_pend_in_enforce_mode(monkeypatch, tool):
     monkeypatch.delenv("STEALTH_APPROVAL_MODE", raising=False)
     srv = StealthMCPServer()
-    details = {"url": "https://unclassified-example.invalid/"} if tool in {
-        "stealth_scrape",
-        "stealth_navigate",
-    } else {}
+    details = (
+        {"url": "https://unclassified-example.invalid/"}
+        if tool
+        in {
+            "stealth_scrape",
+            "stealth_navigate",
+        }
+        else {}
+    )
     result = srv._approval_gate.check_sensitive(tool, details)
     assert result.decision == ApprovalDecision.PENDING
     assert is_sensitive_action(tool) is True

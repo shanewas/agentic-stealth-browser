@@ -321,9 +321,7 @@ class TestBrowserPoolContract:
 
     def test_pool_matching_config_is_accepted(self, monkeypatch):
         pool, browser = self._pool_with_live_browser(monkeypatch)
-        result = asyncio.run(
-            pool.ensure_browser(headless=True, args=["--pool-arg"])
-        )
+        result = asyncio.run(pool.ensure_browser(headless=True, args=["--pool-arg"]))
         assert result is browser
 
     def test_pool_conflicting_headless_raises(self, monkeypatch):

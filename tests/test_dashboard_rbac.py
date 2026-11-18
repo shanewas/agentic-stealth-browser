@@ -141,13 +141,19 @@ def test_viewer_cannot_delete_workflow_or_schedule(tmp_path):
     assert _login(client, "vic", "pw").status_code == 303
     csrf = _csrf(app)
 
-    assert client.delete(
-        "/api/workflows/demo.yaml", headers={"x-csrf-token": csrf}
-    ).status_code == 403
+    assert (
+        client.delete(
+            "/api/workflows/demo.yaml", headers={"x-csrf-token": csrf}
+        ).status_code
+        == 403
+    )
     assert workflow.exists()
-    assert client.delete(
-        f"/api/schedules/{schedule['id']}", headers={"x-csrf-token": csrf}
-    ).status_code == 403
+    assert (
+        client.delete(
+            f"/api/schedules/{schedule['id']}", headers={"x-csrf-token": csrf}
+        ).status_code
+        == 403
+    )
     assert app.state.hermes_manager.list_schedules()
 
 
@@ -156,12 +162,16 @@ def test_viewer_cannot_record_start_or_save(tmp_path):
     assert _login(client, "vic", "pw").status_code == 303
     csrf = _csrf(app)
 
-    assert client.post(
-        "/api/workflows/record/start", json={"csrf": csrf, "name": "x"}
-    ).status_code == 403
-    assert client.post(
-        "/api/workflows/record/save", json={"csrf": csrf}
-    ).status_code == 403
+    assert (
+        client.post(
+            "/api/workflows/record/start", json={"csrf": csrf, "name": "x"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post("/api/workflows/record/save", json={"csrf": csrf}).status_code
+        == 403
+    )
     assert app.state.hermes_manager.recorder.active is False
 
 
@@ -171,9 +181,12 @@ def test_delete_routes_require_csrf_for_operator(tmp_path):
     assert _login(client, "op", "pw").status_code == 303
 
     assert client.delete("/api/workflows/demo.yaml").status_code == 403
-    assert client.delete(
-        "/api/workflows/demo.yaml", headers={"x-csrf-token": "bogus"}
-    ).status_code == 403
+    assert (
+        client.delete(
+            "/api/workflows/demo.yaml", headers={"x-csrf-token": "bogus"}
+        ).status_code
+        == 403
+    )
     assert workflow.exists()
     assert client.delete(f"/api/schedules/{schedule['id']}").status_code == 403
     assert app.state.hermes_manager.list_schedules()
@@ -193,13 +206,19 @@ def test_operator_with_csrf_can_delete_and_record(tmp_path):
     saved = client.post("/api/workflows/record/save", json={"csrf": csrf})
     assert saved.status_code == 200
 
-    assert client.delete(
-        "/api/workflows/demo.yaml", headers={"x-csrf-token": csrf}
-    ).status_code == 200
+    assert (
+        client.delete(
+            "/api/workflows/demo.yaml", headers={"x-csrf-token": csrf}
+        ).status_code
+        == 200
+    )
     assert not workflow.exists()
-    assert client.delete(
-        f"/api/schedules/{schedule['id']}", headers={"x-csrf-token": csrf}
-    ).status_code == 200
+    assert (
+        client.delete(
+            f"/api/schedules/{schedule['id']}", headers={"x-csrf-token": csrf}
+        ).status_code
+        == 200
+    )
     assert app.state.hermes_manager.list_schedules() == []
 
 
