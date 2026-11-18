@@ -64,9 +64,7 @@ class TestSessionNameTraversal:
             "marked_compromised"
         )
 
-    def test_agent_browser_rejects_traversal_session_name(
-        self, tmp_path, monkeypatch
-    ):
+    def test_agent_browser_rejects_traversal_session_name(self, tmp_path, monkeypatch):
         import core.agent_browser as agent_browser_module
 
         monkeypatch.setattr(

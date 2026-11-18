@@ -86,9 +86,7 @@ def test_validate_catches_broken_migration_via_real_validator(tmp_path, capsys):
         {"name": "broken", "steps": [{"type": "navigate"}]},  # missing url
     )
     out = tmp_path / "out.yaml"
-    code = migrate.main(
-        ["--validate", "--input", src, "--output", str(out), "--json"]
-    )
+    code = migrate.main(["--validate", "--input", src, "--output", str(out), "--json"])
     assert code == 1
     assert not out.exists()
     payload = json.loads(capsys.readouterr().out)
@@ -213,17 +211,13 @@ def test_bridge_inactive_service_is_not_configured(monkeypatch):
     monkeypatch.setattr(health.sys, "platform", "linux")
     monkeypatch.setattr(
         "subprocess.run",
-        lambda *a, **k: SimpleNamespace(
-            returncode=3, stdout="inactive\n", stderr=""
-        ),
+        lambda *a, **k: SimpleNamespace(returncode=3, stdout="inactive\n", stderr=""),
     )
     real_exists = Path.exists
     monkeypatch.setattr(
         Path,
         "exists",
-        lambda self: False
-        if "stealth-rbb" in str(self)
-        else real_exists(self),
+        lambda self: False if "stealth-rbb" in str(self) else real_exists(self),
     )
     result = health.check_bridge()
     assert result["service_configured"] is False
@@ -428,7 +422,9 @@ def _install_eval_fake(monkeypatch, goto_ok=True):
     _FakeEvalBrowser.instances = []
     _FakeEvalBrowser.goto_ok = goto_ok
     monkeypatch.setitem(
-        sys.modules, "core.agent_browser", SimpleNamespace(AgentBrowser=_FakeEvalBrowser)
+        sys.modules,
+        "core.agent_browser",
+        SimpleNamespace(AgentBrowser=_FakeEvalBrowser),
     )
 
 
