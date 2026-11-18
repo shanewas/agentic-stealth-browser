@@ -105,7 +105,7 @@ def is_url_safe(url: str) -> bool:
     try:
         parsed = urllib.parse.urlparse(url)
         scheme = (parsed.scheme or "").lower()
-        if scheme and scheme not in ALLOWED_SCHEMES:
+        if scheme not in ALLOWED_SCHEMES:
             return False
 
         host = parsed.hostname
