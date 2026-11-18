@@ -231,7 +231,7 @@ def _build_stealth_script(
     // Core anti-detection (improved for #138)
     try {
         Object.defineProperty(navigator, 'webdriver', {
-            get: () => false,
+            get: () => undefined,
             configurable: true
         });
 

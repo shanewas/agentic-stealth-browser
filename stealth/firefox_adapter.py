@@ -17,7 +17,7 @@ FIREFOX_STEALTH_SCRIPT = """
 (function() {
     // Placeholder for WebDriver / Marionette hiding
     if (navigator.webdriver) {
-        Object.defineProperty(navigator, 'webdriver', {get: () => false});
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
     }
     // Suppress Firefox-specific automation flags
     if (typeof InstallTrigger !== 'undefined') {
