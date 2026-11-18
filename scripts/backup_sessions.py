@@ -23,17 +23,13 @@ def _repo_root() -> Path:
 
 def _source_dirs(root: Path) -> list[Path]:
     return [
-        root / name
-        for name in ("sessions", "checkpoints")
-        if (root / name).is_dir()
+        root / name for name in ("sessions", "checkpoints") if (root / name).is_dir()
     ]
 
 
 def _has_files(directories: list[Path]) -> bool:
     return any(
-        path.is_file()
-        for directory in directories
-        for path in directory.rglob("*")
+        path.is_file() for directory in directories for path in directory.rglob("*")
     )
 
 

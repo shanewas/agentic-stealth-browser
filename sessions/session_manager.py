@@ -220,9 +220,7 @@ class SessionManager:
                 if max_age_hours is not None:
                     created = meta.get("created_at")
                     if not created:
-                        errors.append(
-                            f"{meta_file.parent.name}: missing created_at"
-                        )
+                        errors.append(f"{meta_file.parent.name}: missing created_at")
                         skipped.append(meta_file.parent.name)
                         continue
                     try:

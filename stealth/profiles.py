@@ -85,8 +85,14 @@ class DeviceProfile:
             if value is not None and value <= 0:
                 raise ValueError(f"{field_name} must be positive, got {value!r}")
         viewport = self.viewport
-        if not isinstance(viewport, dict) or viewport.get("width", 0) <= 0 or viewport.get("height", 0) <= 0:
-            raise ValueError(f"viewport must have positive width/height, got {viewport!r}")
+        if (
+            not isinstance(viewport, dict)
+            or viewport.get("width", 0) <= 0
+            or viewport.get("height", 0) <= 0
+        ):
+            raise ValueError(
+                f"viewport must have positive width/height, got {viewport!r}"
+            )
         screen = self.screen
         if screen is not None:
             if not isinstance(screen, dict):
@@ -96,12 +102,19 @@ class DeviceProfile:
             if screen_width is not None and screen_width <= 0:
                 raise ValueError(f"screen width must be positive, got {screen_width!r}")
             if screen_height is not None and screen_height <= 0:
-                raise ValueError(f"screen height must be positive, got {screen_height!r}")
-            for avail_key, limit_key in (("availWidth", "width"), ("availHeight", "height")):
+                raise ValueError(
+                    f"screen height must be positive, got {screen_height!r}"
+                )
+            for avail_key, limit_key in (
+                ("availWidth", "width"),
+                ("availHeight", "height"),
+            ):
                 avail = screen.get(avail_key)
                 limit = screen.get(limit_key)
                 if avail is not None and avail <= 0:
-                    raise ValueError(f"screen {avail_key} must be positive, got {avail!r}")
+                    raise ValueError(
+                        f"screen {avail_key} must be positive, got {avail!r}"
+                    )
                 if avail is not None and limit is not None and avail > limit:
                     raise ValueError(
                         f"screen {avail_key} ({avail!r}) cannot exceed {limit_key} ({limit!r})"
