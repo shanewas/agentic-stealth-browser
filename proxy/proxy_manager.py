@@ -213,9 +213,7 @@ class ProxyManager:
     ) -> ProxyConfig:
         return self.set_config_for_session(session_name, config)
 
-    def get_config_for_session(
-        self, session_name: str
-    ) -> Optional[ProxyConfig]:
+    def get_config_for_session(self, session_name: str) -> Optional[ProxyConfig]:
         return self.get_config(session_name)
 
     def get_site_sensitivity(self, domain: str) -> str:
@@ -366,16 +364,12 @@ class ProxyManager:
         if session_name or config is not None:
             key = self._health_key(session_name, config=config)
             if key in self._proxy_health:
-                return (
-                    self._proxy_health[key]["consecutive_failures"] >= threshold
-                )
+                return self._proxy_health[key]["consecutive_failures"] >= threshold
             return False
         if self._current_config is not None:
             key = self._health_key()
             if key in self._proxy_health:
-                return (
-                    self._proxy_health[key]["consecutive_failures"] >= threshold
-                )
+                return self._proxy_health[key]["consecutive_failures"] >= threshold
         return False
 
     def create_decodo_config(
@@ -653,7 +647,10 @@ class ProxyManager:
             session_name = session_id
         # An explicitly named session that is unknown must not rotate
         # a different session's config.
-        if isinstance(session_name, str) and session_name not in self._configs_by_session:
+        if (
+            isinstance(session_name, str)
+            and session_name not in self._configs_by_session
+        ):
             return None
         cfg = self.get_config(session_name)
         if not cfg:
@@ -661,9 +658,7 @@ class ProxyManager:
         old_key = self._session_key_for(cfg)
         new_session_name = f"rotated-{uuid.uuid4().hex[:6]}"
         if cfg.provider == "decodo":
-            base_user = self._safe_extract_base_user(
-                getattr(cfg, "username", None)
-            )
+            base_user = self._safe_extract_base_user(getattr(cfg, "username", None))
             new_config = self.create_decodo_config(
                 user=base_user,
                 password=cfg.password,
