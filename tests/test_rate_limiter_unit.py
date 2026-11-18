@@ -176,8 +176,7 @@ class TestToolRateLimiterConcurrency:
 
         async def _run():
             tasks = [
-                asyncio.ensure_future(limiter.check_and_wait("goto"))
-                for _ in range(10)
+                asyncio.ensure_future(limiter.check_and_wait("goto")) for _ in range(10)
             ]
             # Admitted calls return at once; the rest must be sleeping on a
             # fresh re-check, not burst through together.
@@ -201,8 +200,7 @@ class TestToolRateLimiterConcurrency:
             old = datetime.now(timezone.utc) - timedelta(seconds=59.8)
             limiter._tool_calls["goto"] = [old, old, old]
             tasks = [
-                asyncio.ensure_future(limiter.check_and_wait("goto"))
-                for _ in range(10)
+                asyncio.ensure_future(limiter.check_and_wait("goto")) for _ in range(10)
             ]
             await asyncio.sleep(0.5)
             done = [t for t in tasks if t.done() and not t.cancelled()]

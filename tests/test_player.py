@@ -477,9 +477,7 @@ class TestRehearsal:
         assert result.steps_validated == 0
         assert any("NOT FOUND" in warning for warning in result.warnings)
 
-    async def test_rehearsal_found_selector_reports_success(
-        self, player, mock_browser
-    ):
+    async def test_rehearsal_found_selector_reports_success(self, player, mock_browser):
         mock_browser.page.evaluate = AsyncMock(return_value=True)
         workflow = Workflow(
             name="test-rehearsal-found",
