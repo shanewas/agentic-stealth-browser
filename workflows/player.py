@@ -129,7 +129,9 @@ class WorkflowPlayer:
         )
         # Dedicated directory screenshot steps may write to.
         self.screenshots_dir: Path = (
-            Path(screenshots_dir) if screenshots_dir is not None else Path("screenshots")
+            Path(screenshots_dir)
+            if screenshots_dir is not None
+            else Path("screenshots")
         )
         self._workflow_dir_stack: List[Optional[Path]] = []
         self.checkpoint: Dict[str, Any] = {
@@ -187,9 +189,7 @@ class WorkflowPlayer:
         if self._checkpoint_frames:
             export_checkpoint["frames"] = {
                 key: {
-                    field: value
-                    for field, value in frame.items()
-                    if field != "frames"
+                    field: value for field, value in frame.items() if field != "frames"
                 }
                 for key, frame in self._checkpoint_frames.items()
             }
@@ -982,9 +982,7 @@ class WorkflowPlayer:
         resolved_root = Path(root).resolve()
         candidate = (resolved_root / ref).resolve()
         if candidate == resolved_root or not candidate.is_relative_to(resolved_root):
-            raise ValueError(
-                f"run_workflow path escapes the workflow root: {ref!r}"
-            )
+            raise ValueError(f"run_workflow path escapes the workflow root: {ref!r}")
         return candidate
 
     async def _step_run_workflow(
