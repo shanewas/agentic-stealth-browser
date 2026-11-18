@@ -179,9 +179,7 @@ class FallbackController:
                     timeout=timeout_s,
                 )
         else:
-            raise RuntimeError(
-                f"Recovery cannot re-dispatch step type '{step_type}'"
-            )
+            raise RuntimeError(f"Recovery cannot re-dispatch step type '{step_type}'")
 
     async def _handle_element_not_found_error(
         self,

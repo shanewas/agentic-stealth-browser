@@ -25,9 +25,7 @@ from production.approval_gate import ApprovalDecision
 
 def _step_type_and_params(step: Any) -> tuple[str, Dict[str, Any]]:
     if isinstance(step, dict):
-        return str(step.get("type", "")), {
-            k: v for k, v in step.items() if k != "type"
-        }
+        return str(step.get("type", "")), {k: v for k, v in step.items() if k != "type"}
     return str(getattr(step, "type", "")), dict(getattr(step, "params", {}) or {})
 
 
@@ -37,7 +35,11 @@ def _resolve_nested_workflow_path(ref: str, library_root: Path, base_dir: Path):
         return None
     root = library_root.resolve()
     candidate = Path(ref)
-    candidates = [candidate] if candidate.is_absolute() else [base_dir / candidate, root / candidate]
+    candidates = (
+        [candidate]
+        if candidate.is_absolute()
+        else [base_dir / candidate, root / candidate]
+    )
     for cand in candidates:
         try:
             resolved = cand.resolve()
@@ -629,9 +631,7 @@ class _MCPToolHandlers:
             }
         )
 
-    def _resolve_teach_output_path(
-        self, session_name: str, workflow_name: str
-    ) -> Path:
+    def _resolve_teach_output_path(self, session_name: str, workflow_name: str) -> Path:
         root = self._workflow_library_root.resolve()
         output_path = (root / session_name / f"{workflow_name}.yaml").resolve()
         if root not in output_path.parents:
