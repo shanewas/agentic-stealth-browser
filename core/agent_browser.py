@@ -1031,9 +1031,7 @@ class AgentBrowser:
 
             # P2/P3: preserve current_region / preset for health/status continuity on rotation
             tls_region = getattr(self, "current_region", "global") or "global"
-            staged_tls_manager = get_tls_manager(
-                tls_region, staged_session.get("name")
-            )
+            staged_tls_manager = get_tls_manager(tls_region, staged_session.get("name"))
             staged_tls_manager.log_fingerprint_choice()
             tls_args = staged_tls_manager.get_launch_args()
 
@@ -1196,9 +1194,7 @@ class AgentBrowser:
                 rng=rotation_rng,
                 device_profile=getattr(self.persona, "device", None),
             )
-            staged_orchestrator = BehaviorOrchestrator(
-                staged_human, rng=rotation_rng
-            )
+            staged_orchestrator = BehaviorOrchestrator(staged_human, rng=rotation_rng)
             staged_scraper = StealthScraper(
                 staged_page, staged_human, staged_orchestrator
             )
