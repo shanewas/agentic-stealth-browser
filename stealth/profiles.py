@@ -25,6 +25,8 @@ import copy
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, Optional
 
+from stealth.headers import align_user_agent
+
 
 @dataclass(frozen=True)
 class DeviceProfile:
@@ -212,7 +214,7 @@ class Persona:
         """Return the minimal dict consumed by AgentBrowser.launch and similar."""
         return {
             "viewport": copy.deepcopy(self.device.viewport),
-            "user_agent": self.device.user_agent,
+            "user_agent": align_user_agent(self.device.user_agent),
             "locale": self.effective_locale(),
             "timezone_id": self.effective_timezone(),
             "device_profile_name": self.device.name,
