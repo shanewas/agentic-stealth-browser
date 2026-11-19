@@ -666,10 +666,12 @@ class _MCPToolHandlers:
         output_path = self._resolve_teach_output_path(resolved_name, workflow_name)
         output_dir = output_path.parent
 
+        page = None
         current_url = ""
         try:
             p = browser.page_getter()
             if p:
+                page = p
                 current_url = getattr(p, "url", "") or ""
                 try:
                     title_attr = getattr(p, "title")
@@ -685,6 +687,39 @@ class _MCPToolHandlers:
             logging.getLogger(__name__).debug("suppressed exception", exc_info=True)
 
         recorder = WorkflowRecorder()
+
+        if page is not None:
+            from workflows.teach_bridge import TeachSession
+
+            teach_session = TeachSession(recorder=recorder)
+            await teach_session.start(page, capture_seconds=capture_seconds)
+            if teach_session.cleanup_state["binding_installed"]:
+                try:
+                    await teach_session.wait()
+                finally:
+                    await teach_session.stop("completed")
+                workflow = recorder.to_workflow(
+                    name=workflow_name, description=description
+                )
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(
+                    recorder.to_workflow_yaml(
+                        name=workflow_name, description=description
+                    )
+                )
+                return self._tool_ok_payload(
+                    {
+                        "session_name": resolved_name,
+                        "workflow_name": workflow_name,
+                        "workflow_path": str(output_path),
+                        "step_count": len(workflow.steps),
+                        "recording_mode": "live",
+                        "note": "Passive recording ran through TeachSession on the live page.",
+                    }
+                )
+            # The page cannot capture live actions (no binding could be
+            # installed); fall through to the synthetic fallback below.
+            await teach_session.stop("completed")
 
         if current_url:
             from workflows.schema import Workflow, WorkflowStep, workflow_to_yaml_str
@@ -709,7 +744,8 @@ class _MCPToolHandlers:
                     "workflow_name": workflow_name,
                     "workflow_path": str(output_path),
                     "step_count": len(steps),
-                    "note": "Full passive recording requires M4 bridge integration.",
+                    "recording_mode": "fallback",
+                    "note": "Synthetic fallback: no live capture was available for passive recording, so a synthetic navigate-and-wait workflow was generated instead.",
                 }
             )
         else:
@@ -731,7 +767,8 @@ class _MCPToolHandlers:
                 "workflow_name": workflow_name,
                 "workflow_path": str(output_path),
                 "step_count": len(steps),
-                "note": "Full passive recording requires M4 bridge integration.",
+                "recording_mode": "fallback",
+                "note": "Synthetic fallback: no live capture was available for passive recording, so an empty synthetic workflow was generated instead.",
             }
         )
 
