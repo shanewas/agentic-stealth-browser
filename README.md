@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml/badge.svg)](https://github.com/shanewas/agentic-stealth-browser/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/agentic-stealth-browser.svg)](https://pypi.org/project/agentic-stealth-browser/)
 [![GitHub Stars](https://img.shields.io/github/stars/shanewas/agentic-stealth-browser?style=flat&logo=github)](https://github.com/shanewas/agentic-stealth-browser)
 
@@ -197,6 +197,26 @@ live E2E (`RUN_E2E_ANTI_BLOCK=1` to enable).
 | **Operator Dashboard** | Live DevTools, CAPTCHA intervention, workflow recording |
 | **Feature Flags** | Runtime capability discovery per browser backend |
 | **Performance Profiling** | Timing decorators + `perf_benchmark.py` |
+
+---
+
+## New in v3.1.0 — Correctness and Stealth Coherence
+
+- **Stealth coherence** — `navigator.webdriver` reads `undefined`; the
+  persona user agent and client hints align to the bundled Chromium 149
+- **Correctness fixes** — exact launch/close/rotation teardown, session
+  and path boundaries, policy and workflow containment, recorder
+  password handling, and proxy rotation staying on one provider
+- **Honest reporting** — anti-block recovery wired into every scraper
+  path, audit log integrity closed, and maintenance, demo and canary
+  scoring no longer report success for work that did not happen
+- **Lockfile** — regenerated for issue #471, so `pip-audit` reports no
+  known vulnerabilities
+
+Measured stealth status (Contabo VPS, 2026-11-18): live harness 5
+passed, 1 failed (trusted input, a known open item), 3 skipped; canary
+17/100 from a datacenter IP. See [CHANGELOG.md](CHANGELOG.md) for the
+full list.
 
 ---
 

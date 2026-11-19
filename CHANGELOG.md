@@ -9,6 +9,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] — Correctness and Stealth Coherence (2026-11-19)
+
+A correctness pass over the code merged since v3.0.0. No new features and
+no breaking changes. Themes below are taken from the commit subjects in
+`git log v3.0.0..master`.
+
+### Fixed
+
+- **Stealth coherence:** `navigator.webdriver` now reads `undefined`, and
+  the persona user agent and client hints align to the bundled Chromium
+  149, so the UA string no longer contradicts `userAgentData` (#491).
+  The generated stealth script parses and matches its persona (#487),
+  and stealth profile and persona state no longer leak across
+  sessions (#488).
+- **CI restore:** the fail-closed scheme check in `is_url_safe` is
+  restored, the ruff rule set and lint tool versions are pinned, and the
+  tree is reformatted so CI passes again (#490). `is_url_safe` also
+  requires an http/https scheme, so scheme-less input fails
+  closed (#475).
+- **Core lifecycle and behaviour:** launch, close and rotation teardown
+  state is exact in `AgentBrowser` (#480); live cookies are saved,
+  pooled launches no longer misreport their config, and warming sessions
+  accumulate (#481); typing, clicking, scrolling, persona evolution and
+  tuner feedback behave correctly, so simulated mistakes no longer
+  corrupt text, unresolved clicks no longer fire at stale positions, and
+  blocked attempts no longer train the tuner.
+- **Session and path boundaries:** checkpoint and session identifiers
+  and values no longer escape their boundaries (#479); session binding
+  is exclusive and rate limits are enforced under concurrency (#478);
+  session clones, quarantine, bundles and orchestrated jars keep their
+  boundaries (#485).
+- **Policy, dashboard and workflows:** dashboard RBAC gaps,
+  approval-gate holes and a teach path traversal are closed (#476);
+  the policy engine checks nested workflow steps, normalizes policy
+  domains and fails closed on missing policies (#477); conditional-step
+  JavaScript is gated in the replay policy expansion (#486); workflow
+  player JavaScript, path and variable bypasses are closed (#483);
+  workflow recovery, healing, rehearsal and checkpoints report the
+  truth (#482).
+- **Recorder:** the recorder no longer leaks typed passwords, selector
+  escaping is fixed, and error screenshots are real (#484).
+- **Proxy:** proxy rotation stays on the same provider, and configs are
+  scoped per session (#489).
+- **Scraping and recovery:** anti-block recovery is wired into every
+  scraper path, so MCP and SDK scrapes no longer bypass block detection
+  or report block pages as successful scrapes, and protected navigation
+  fails honestly.
+- **Audit log:** the audit log integrity gaps are closed, so its
+  tamper-evident claim holds in practice.
+- **AI, LinkedIn and plugins:** AI hooks no longer fabricate results,
+  LinkedIn inputs are encoded and its selectors fixed, and the
+  documented plugin import works.
+- **Canary:** canary history and scoring are robust, so one truncated
+  history line or one crashed run can no longer break generation or
+  publish a fake 0% detection score.
+- **Scripts:** maintenance scripts (migrator, backup, health,
+  benchmark) and the demo and evaluation scripts fail honestly instead
+  of reporting success for work that did not happen.
+
+### Security
+
+- **Lockfile remediation (issue #471):** `requirements.lock` is
+  regenerated with aiohttp 3.14.5, cryptography 50.0.2, multidict 7.x
+  and certifi 2026.10.23, so `pip-audit` reports no known
+  vulnerabilities.
+
+### Changed
+
+- GitHub Actions bumps from Dependabot: `actions/checkout` 7.0.0
+  (#466), `actions/download-artifact` 8.0.2 (#467),
+  `gitleaks/gitleaks-action` 3.0.0 (#468) and
+  `stefanzweifel/git-auto-commit-action` 7.2.0 (#465).
+
+### Measured stealth status
+
+Measured on the Contabo VPS on 2026-11-18. Live harness: 5 passed,
+1 failed, 3 skipped. The failure is trusted input, an architectural
+limit and a known open item. The 3 skips are because no
+reference-chrome JSON ships in the repo. Canary: 17/100 from a
+datacenter IP — Sannysoft, Pixelscan, NowSecure/Cloudflare and
+CreepJS detect; one repeat run scored 33 on Fingerprint.com noise.
+No stronger detection claim is made for this release.
+
 ## [3.0.0] — Enterprise Hardening, Part 2 (2026-07-18)
 
 A large enterprise-readiness pass across reliability, auditability, security/
