@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from production.adapters import BackendAdapter
+from production.control_gate import ControlGate, ControlModeError
 from production.dashboard_adapter_bridge import DashboardProtocolBridge
 from workflows.player import WorkflowPlayer
 from workflows.schema import (
@@ -257,9 +258,10 @@ class BrowserRuntimeManager:
         self.browser: Any = None
         self.active_profile = "default"
         self.active_backend = "playwright-mcp"
-        self.control_mode = "shared"
+        # #446 A1: mode / pause / intervention state lives in the gate;
+        # control_mode and intervention below are views onto it.
+        self.control_gate = ControlGate(mode="shared")
         self.execution_state = "idle"
-        self.intervention: Optional[Dict[str, Any]] = None
         self.recorder = DashboardRecorder()
         self.schedules: List[Dict[str, Any]] = []
         self.start_time: Optional[float] = None
@@ -273,6 +275,23 @@ class BrowserRuntimeManager:
         # See production/dashboard_adapter_bridge.py for design notes.
         self.protocol_bridge = DashboardProtocolBridge(self)
         self.active_protocol_adapter: Optional[str] = None
+
+    @property
+    def control_mode(self) -> str:
+        return self.control_gate.mode
+
+    @control_mode.setter
+    def control_mode(self, mode: str) -> None:
+        self.control_gate.set_mode(mode)
+
+    @property
+    def intervention(self) -> Optional[Dict[str, Any]]:
+        return self.control_gate.intervention
+
+    @intervention.setter
+    def intervention(self, value: Optional[Dict[str, Any]]) -> None:
+        self.control_gate.intervention = value
+        self.control_gate._sync_event()
 
     @property
     def protocol_adapters(self) -> Dict[str, type[BackendAdapter]]:
@@ -336,19 +355,22 @@ class BrowserRuntimeManager:
         profile: str = "default",
         backend: str = "playwright-mcp",
         headless: bool = True,
+        origin: str = "agent",
     ) -> Dict[str, Any]:
+        self.control_gate.check_allowed(origin)
         self._ensure_backend(backend)
         await self.adapters[backend].launch(profile=profile, headless=headless)
         return await self.status()
 
     async def stop(self) -> Dict[str, Any]:
+        # Never gated: stopping the browser is a safety action.
         await self._close_browser()
         self.activity.append("system", "browser_stopped", "Browser stopped")
         return await self.status()
 
-    async def restart(self) -> Dict[str, Any]:
+    async def restart(self, origin: str = "agent") -> Dict[str, Any]:
         profile, backend = self.active_profile, self.active_backend
-        await self.start(profile=profile, backend=backend)
+        await self.start(profile=profile, backend=backend, origin=origin)
         self.activity.append(
             "system",
             "browser_restarted",
@@ -358,10 +380,13 @@ class BrowserRuntimeManager:
         )
         return await self.status()
 
-    async def switch_backend(self, backend: str) -> Dict[str, Any]:
+    async def switch_backend(
+        self, backend: str, origin: str = "agent"
+    ) -> Dict[str, Any]:
+        self.control_gate.check_allowed(origin)
         self._ensure_backend(backend)
         warning = "Switch relaunches the managed browser while preserving the active profile name."
-        await self.start(profile=self.active_profile, backend=backend)
+        await self.start(profile=self.active_profile, backend=backend, origin=origin)
         self.activity.append(
             "system", "backend_switched", f"Switched to {backend}", warning=warning
         )
@@ -430,51 +455,51 @@ class BrowserRuntimeManager:
             "protocol_adapters": self.protocol_bridge.all_capability_sets(),
         }
 
-    async def navigate(self, url: str) -> Dict[str, Any]:
+    async def navigate(self, url: str, origin: str = "agent") -> Dict[str, Any]:
+        self.control_gate.check_allowed(origin)
         await self.adapters[self.active_backend].navigate(url)
         self.recorder.record("navigate", url=url)
-        self.activity.append("agent", "navigate", f"Navigated to {url}", url=url)
+        self.activity.append(origin, "navigate", f"Navigated to {url}", url=url)
         return await self.status()
 
-    async def click(self, selector: str) -> Dict[str, Any]:
+    async def click(self, selector: str, origin: str = "agent") -> Dict[str, Any]:
+        self.control_gate.check_allowed(origin)
         await self.adapters[self.active_backend].click(selector)
         self.recorder.record("click", selector=selector, selector_fallbacks=[])
-        self.activity.append("agent", "click", f"Clicked {selector}", selector=selector)
+        self.activity.append(origin, "click", f"Clicked {selector}", selector=selector)
         return await self.status()
 
-    async def fill(self, selector: str, value: str) -> Dict[str, Any]:
+    async def fill(
+        self, selector: str, value: str, origin: str = "agent"
+    ) -> Dict[str, Any]:
+        self.control_gate.check_allowed(origin)
         await self.adapters[self.active_backend].fill(selector, value)
         self.recorder.record("fill", selector=selector, value=value)
-        self.activity.append("agent", "fill", f"Filled {selector}", selector=selector)
+        self.activity.append(origin, "fill", f"Filled {selector}", selector=selector)
         return await self.status()
 
     def set_control_mode(self, mode: str) -> Dict[str, Any]:
-        if mode not in {"agent", "human", "shared"}:
-            raise ValueError("mode must be agent, human, or shared")
-        self.control_mode = mode
+        self.control_gate.set_mode(mode)
         self.activity.append(
             "system", "control_mode", f"Control mode set to {mode}", mode=mode
         )
         return {"control_mode": mode}
 
     def pause(self, reason: str = "manual") -> Dict[str, Any]:
+        self.control_gate.pause(reason)
         self.execution_state = "paused"
         self.activity.append("system", "paused", "Execution paused", reason=reason)
         return {"execution_state": self.execution_state, "reason": reason}
 
     def resume(self) -> Dict[str, Any]:
+        self.control_gate.resume()
         self.execution_state = "running"
-        self.intervention = None
         self.activity.append("system", "resumed", "Execution resumed")
         return {"execution_state": self.execution_state}
 
     def request_intervention(self, reason: str, message: str = "") -> Dict[str, Any]:
+        self.control_gate.request_intervention(reason, message)
         self.execution_state = "waiting_for_human"
-        self.intervention = {
-            "reason": reason,
-            "message": message,
-            "requested_at": time.time(),
-        }
         self.activity.append(
             "system", "intervention_requested", message or reason, reason=reason
         )
@@ -484,8 +509,7 @@ class BrowserRuntimeManager:
         }
 
     def resolve_intervention(self, note: str = "") -> Dict[str, Any]:
-        previous = self.intervention
-        self.intervention = None
+        previous = self.control_gate.resolve_intervention(note)
         self.execution_state = "resuming"
         self.activity.append(
             "human",
@@ -529,6 +553,9 @@ class BrowserRuntimeManager:
     async def replay_workflow(
         self, workflow_path: str, variables: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        # Replay is agent work: refused in human mode, while paused,
+        # or while an intervention is open (spike #446 section 1/3).
+        self.control_gate.check_agent_allowed()
         self.execution_state = "running"
         path = self._resolve_workflow_path(workflow_path)
         workflow = load_workflow(str(path))
@@ -823,6 +850,26 @@ def create_app(
         if session.get("role") != "operator":
             raise HTTPException(status_code=403, detail="Operator role required")
 
+    # #446 A1: control-mode gating for action endpoints. Read-only
+    # endpoints never call these helpers. Browser actions arriving via
+    # the operator UI default to human origin; agent callers pass
+    # "origin": "agent" in the body (or the x-actor-origin header).
+    # Workflow replay is agent work and always checks the agent side.
+    def _origin(request: Request, data: Dict[str, Any], default: str = "human") -> str:
+        raw = (
+            data.get("origin")
+            or data.get("actor")
+            or request.headers.get("x-actor-origin")
+            or default
+        )
+        return raw if raw in ("agent", "human") else default
+
+    def _gate_check(actor: str) -> None:
+        try:
+            manager.control_gate.check_allowed(actor)
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
+
     async def require_csrf(request: Request, session: Dict[str, Any]) -> Dict[str, Any]:
         token = request.headers.get("x-csrf-token")
         if not token:
@@ -912,10 +959,16 @@ def create_app(
         session = current_session(request)
         require_operator(session)
         data = await require_csrf(request, session)
-        return await manager.start(
-            profile=data.get("profile", "default"),
-            backend=data.get("backend", manager.active_backend),
-        )
+        origin = _origin(request, data)
+        _gate_check(origin)
+        try:
+            return await manager.start(
+                profile=data.get("profile", "default"),
+                backend=data.get("backend", manager.active_backend),
+                origin=origin,
+            )
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.post("/api/browser/stop")
     async def api_stop(request: Request):
@@ -928,8 +981,13 @@ def create_app(
     async def api_restart(request: Request):
         session = current_session(request)
         require_operator(session)
-        await require_csrf(request, session)
-        return await manager.restart()
+        data = await require_csrf(request, session)
+        origin = _origin(request, data)
+        _gate_check(origin)
+        try:
+            return await manager.restart(origin=origin)
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.post("/api/browser/navigate")
     async def api_navigate(request: Request):
@@ -937,8 +995,13 @@ def create_app(
         require_operator(session)
         data = await require_csrf(request, session)
         url = str(data.get("url") or "about:blank")
+        origin = _origin(request, data)
+        _gate_check(origin)
         audit_append(session.get("user", "unknown"), "navigate", {"url": url})
-        return await manager.navigate(url)
+        try:
+            return await manager.navigate(url, origin=origin)
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.post("/api/browser/click")
     async def api_click(request: Request):
@@ -946,8 +1009,13 @@ def create_app(
         require_operator(session)
         data = await require_csrf(request, session)
         selector = str(data.get("selector") or "")
+        origin = _origin(request, data)
+        _gate_check(origin)
         audit_append(session.get("user", "unknown"), "click", {"selector": selector})
-        return await manager.click(selector)
+        try:
+            return await manager.click(selector, origin=origin)
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.post("/api/browser/fill")
     async def api_fill(request: Request):
@@ -955,8 +1023,15 @@ def create_app(
         require_operator(session)
         data = await require_csrf(request, session)
         selector = str(data.get("selector") or "")
+        origin = _origin(request, data)
+        _gate_check(origin)
         audit_append(session.get("user", "unknown"), "fill", {"selector": selector})
-        return await manager.fill(selector, str(data.get("value") or ""))
+        try:
+            return await manager.fill(
+                selector, str(data.get("value") or ""), origin=origin
+            )
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.post("/api/backend/switch")
     async def api_switch(request: Request):
@@ -964,10 +1039,15 @@ def create_app(
         require_operator(session)
         data = await require_csrf(request, session)
         backend = str(data.get("backend") or "")
+        origin = _origin(request, data)
+        _gate_check(origin)
         audit_append(
             session.get("user", "unknown"), "backend_switch", {"backend": backend}
         )
-        return await manager.switch_backend(backend)
+        try:
+            return await manager.switch_backend(backend, origin=origin)
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.post("/api/control/mode")
     async def api_mode(request: Request):
@@ -1039,9 +1119,13 @@ def create_app(
         session = current_session(request)
         require_operator(session)
         data = await require_csrf(request, session)
-        return await manager.replay_workflow(
-            str(data.get("path") or ""), dict(data.get("variables") or {})
-        )
+        _gate_check("agent")
+        try:
+            return await manager.replay_workflow(
+                str(data.get("path") or ""), dict(data.get("variables") or {})
+            )
+        except ControlModeError as exc:
+            raise HTTPException(status_code=403, detail=exc.to_dict()) from exc
 
     @app.get("/api/profiles")
     async def api_profiles(request: Request):
