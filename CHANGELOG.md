@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Dashboard control-mode enforcement (#446, slice A1):** a `ControlGate`
+  in `production/control_gate.py` now backs the dashboard control modes.
+  Agent mode blocks human-originated browser actions, human mode blocks
+  agent actions, shared allows both, and pause or an open intervention
+  blocks agent actions only. Refusals return a structured mode error.
+  The `WorkflowPlayer` step-boundary hook is still to come (slice A2).
+- **Teach recording bridge (#445, slice B1):** `workflows/teach_bridge.py`
+  adds `TeachSession`, which captures live page actions through injected
+  listeners and CDP navigation events and feeds them to the existing
+  `WorkflowRecorder`. Wiring `stealth_teach` and the dashboard teach
+  path through it is still to come (slice B2).
+
 ## [3.1.0] — Correctness and Stealth Coherence (2026-11-19)
 
 A correctness pass over the code merged since v3.0.0. No new features and
