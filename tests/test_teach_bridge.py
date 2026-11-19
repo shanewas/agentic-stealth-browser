@@ -120,8 +120,13 @@ class TestShaping:
         assert shaped["params"]["text"] == "hello"
 
     def test_keydown_only_enter_and_tab(self):
-        assert shape_binding_report({"type": "keydown", "key": "a", "element": _el()}) is None
-        enter = shape_binding_report({"type": "keydown", "key": "Enter", "element": _el()})
+        assert (
+            shape_binding_report({"type": "keydown", "key": "a", "element": _el()})
+            is None
+        )
+        enter = shape_binding_report(
+            {"type": "keydown", "key": "Enter", "element": _el()}
+        )
         assert enter["method"] == "Input.dispatchKeyEvent"
         assert enter["params"]["key"] == "Enter"
 
@@ -131,7 +136,9 @@ class TestShaping:
         assert shaped["params"]["deltaY"] == 240
 
     def test_cdp_event_only_navigation_passes(self):
-        nav = shape_cdp_event("Page.frameNavigated", {"frame": {"url": "https://x.test/"}})
+        nav = shape_cdp_event(
+            "Page.frameNavigated", {"frame": {"url": "https://x.test/"}}
+        )
         assert nav["method"] == "Page.frameNavigated"
         assert shape_cdp_event("Page.loadEventFired", {}) is None
 
@@ -160,14 +167,19 @@ class TestCaptureFlow:
         ctx.report(
             {
                 "type": "input",
-                "element": _el(tag="input", el_id="q", text="", attrs={"type": "text", "name": "q"}),
+                "element": _el(
+                    tag="input", el_id="q", text="", attrs={"type": "text", "name": "q"}
+                ),
                 "value": "hello",
             }
         )
-        ctx.report({"type": "keydown", "key": "Enter", "element": _el(tag="input", el_id="q")})
+        ctx.report(
+            {"type": "keydown", "key": "Enter", "element": _el(tag="input", el_id="q")}
+        )
         ctx.report({"type": "scroll", "deltaX": 0, "deltaY": 300})
         page.context.cdp_session.emit(
-            "Page.frameNavigated", {"frame": {"url": "https://example.com/done", "id": "main"}}
+            "Page.frameNavigated",
+            {"frame": {"url": "https://example.com/done", "id": "main"}},
         )
         await session.stop()
 
@@ -237,7 +249,9 @@ class TestCleanup:
         await session.stop()
         before = session.events_forwarded
         page.context.report({"type": "click", "element": _el()})
-        session.handle_cdp_event("Page.frameNavigated", {"frame": {"url": "https://x.test/"}})
+        session.handle_cdp_event(
+            "Page.frameNavigated", {"frame": {"url": "https://x.test/"}}
+        )
         assert session.events_forwarded == before
         assert session.recorder.to_steps() == []
 

@@ -172,7 +172,9 @@ def shape_binding_report(report: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def shape_cdp_event(method: str, params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def shape_cdp_event(
+    method: str, params: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
     """Translate a CDP session event into a recorder dict (navigation only)."""
     if method == "Page.frameNavigated":
         return {"method": method, "params": params or {}}
@@ -249,7 +251,8 @@ class TeachSession:
             "cdp_listener_count": self._cdp_listener_count,
             "active_listener_count": self.active_listener_count,
             "binding_installed": self._binding_installed,
-            "timer_pending": self._timer_task is not None and not self._timer_task.done(),
+            "timer_pending": self._timer_task is not None
+            and not self._timer_task.done(),
             "events_forwarded": self._events_forwarded,
         }
 
@@ -266,7 +269,9 @@ class TeachSession:
             self.recorder.on_cdp_event(shaped)
             self._events_forwarded += 1
 
-    def handle_cdp_event(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+    def handle_cdp_event(
+        self, method: str, params: Optional[Dict[str, Any]] = None
+    ) -> None:
         if not self._active:
             return
         shaped = shape_cdp_event(method, params)
@@ -276,7 +281,9 @@ class TeachSession:
 
     def _on_frame_navigated(self, params: Any = None) -> None:
         # Playwright CDP handlers receive the params dict directly.
-        self.handle_cdp_event("Page.frameNavigated", params if isinstance(params, dict) else {})
+        self.handle_cdp_event(
+            "Page.frameNavigated", params if isinstance(params, dict) else {}
+        )
 
     def _on_page_close(self, *_args: Any) -> None:
         task = asyncio.ensure_future(self.stop("session-close"))
@@ -284,7 +291,9 @@ class TeachSession:
 
     # -- lifecycle ----------------------------------------------------------
 
-    async def start(self, page: Any, capture_seconds: Optional[float] = 60) -> "TeachSession":
+    async def start(
+        self, page: Any, capture_seconds: Optional[float] = 60
+    ) -> "TeachSession":
         if self._active:
             raise RuntimeError("TeachSession already active")
         self._page = page
@@ -298,7 +307,9 @@ class TeachSession:
         self._hook_page_close()
 
         if capture_seconds:
-            self._timer_task = asyncio.ensure_future(self._timeout(float(capture_seconds)))
+            self._timer_task = asyncio.ensure_future(
+                self._timeout(float(capture_seconds))
+            )
         return self
 
     async def _timeout(self, seconds: float) -> None:
@@ -323,7 +334,9 @@ class TeachSession:
                 self._binding_installed = True
                 return
             except Exception:
-                logger.debug("teach binding install failed on %r", target, exc_info=True)
+                logger.debug(
+                    "teach binding install failed on %r", target, exc_info=True
+                )
         logger.debug("teach: no expose_binding available; binding not installed")
 
     async def _install_init_script(self) -> None:
@@ -340,7 +353,9 @@ class TeachSession:
                     await result
                 return
             except Exception:
-                logger.debug("teach init script install failed on %r", target, exc_info=True)
+                logger.debug(
+                    "teach init script install failed on %r", target, exc_info=True
+                )
 
     async def _attach_cdp(self) -> None:
         context = self._context
@@ -399,7 +414,11 @@ class TeachSession:
 
         # Cancel the capture-window timer (unless stop was called by it).
         timer, self._timer_task = self._timer_task, None
-        if timer is not None and not timer.done() and timer is not asyncio.current_task():
+        if (
+            timer is not None
+            and not timer.done()
+            and timer is not asyncio.current_task()
+        ):
             timer.cancel()
             try:
                 await timer
