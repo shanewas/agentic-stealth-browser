@@ -348,15 +348,21 @@ def test_http_pause_blocks_agent_not_human_and_control_stays_open(tmp_path):
     assert paused.status_code == 200
 
     blocked = _post(
-        client, csrf, "/api/browser/navigate",
-        url="https://example.com", origin="agent",
+        client,
+        csrf,
+        "/api/browser/navigate",
+        url="https://example.com",
+        origin="agent",
     )
     assert blocked.status_code == 403
     assert blocked.json()["detail"]["code"] == "CONTROL_PAUSED"
 
     allowed = _post(
-        client, csrf, "/api/browser/navigate",
-        url="https://example.com", origin="human",
+        client,
+        csrf,
+        "/api/browser/navigate",
+        url="https://example.com",
+        origin="human",
     )
     assert allowed.status_code == 200
 
@@ -364,8 +370,11 @@ def test_http_pause_blocks_agent_not_human_and_control_stays_open(tmp_path):
     resumed = _post(client, csrf, "/api/control/resume")
     assert resumed.status_code == 200
     again = _post(
-        client, csrf, "/api/browser/navigate",
-        url="https://example.com", origin="agent",
+        client,
+        csrf,
+        "/api/browser/navigate",
+        url="https://example.com",
+        origin="agent",
     )
     assert again.status_code == 200
 
@@ -375,15 +384,21 @@ def test_http_mode_can_be_changed_while_actions_are_blocked(tmp_path):
     manager.set_control_mode("agent")
 
     blocked = _post(
-        client, csrf, "/api/browser/navigate",
-        url="https://example.com", origin="human",
+        client,
+        csrf,
+        "/api/browser/navigate",
+        url="https://example.com",
+        origin="human",
     )
     assert blocked.status_code == 403
 
     changed = _post(client, csrf, "/api/control/mode", mode="shared")
     assert changed.status_code == 200
     allowed = _post(
-        client, csrf, "/api/browser/navigate",
-        url="https://example.com", origin="human",
+        client,
+        csrf,
+        "/api/browser/navigate",
+        url="https://example.com",
+        origin="human",
     )
     assert allowed.status_code == 200

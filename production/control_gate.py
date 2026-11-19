@@ -96,12 +96,16 @@ class ControlGate:
                 return ControlModeError("CONTROL_MODE_HUMAN", self._mode, actor)
             if self.intervention is not None:
                 return ControlModeError(
-                    "CONTROL_INTERVENTION", self._mode, actor,
+                    "CONTROL_INTERVENTION",
+                    self._mode,
+                    actor,
                     "CONTROL_INTERVENTION: agent action blocked while an "
                     "intervention is waiting for a human",
                 )
             return ControlModeError(
-                "CONTROL_PAUSED", self._mode, actor,
+                "CONTROL_PAUSED",
+                self._mode,
+                actor,
                 "CONTROL_PAUSED: agent action blocked while execution is paused",
             )
         return ControlModeError("CONTROL_MODE_AGENT", self._mode, actor)

@@ -459,18 +459,14 @@ class BrowserRuntimeManager:
         self.control_gate.check_allowed(origin)
         await self.adapters[self.active_backend].navigate(url)
         self.recorder.record("navigate", url=url)
-        self.activity.append(
-            origin, "navigate", f"Navigated to {url}", url=url
-        )
+        self.activity.append(origin, "navigate", f"Navigated to {url}", url=url)
         return await self.status()
 
     async def click(self, selector: str, origin: str = "agent") -> Dict[str, Any]:
         self.control_gate.check_allowed(origin)
         await self.adapters[self.active_backend].click(selector)
         self.recorder.record("click", selector=selector, selector_fallbacks=[])
-        self.activity.append(
-            origin, "click", f"Clicked {selector}", selector=selector
-        )
+        self.activity.append(origin, "click", f"Clicked {selector}", selector=selector)
         return await self.status()
 
     async def fill(
@@ -479,9 +475,7 @@ class BrowserRuntimeManager:
         self.control_gate.check_allowed(origin)
         await self.adapters[self.active_backend].fill(selector, value)
         self.recorder.record("fill", selector=selector, value=value)
-        self.activity.append(
-            origin, "fill", f"Filled {selector}", selector=selector
-        )
+        self.activity.append(origin, "fill", f"Filled {selector}", selector=selector)
         return await self.status()
 
     def set_control_mode(self, mode: str) -> Dict[str, Any]:
@@ -861,9 +855,7 @@ def create_app(
     # the operator UI default to human origin; agent callers pass
     # "origin": "agent" in the body (or the x-actor-origin header).
     # Workflow replay is agent work and always checks the agent side.
-    def _origin(
-        request: Request, data: Dict[str, Any], default: str = "human"
-    ) -> str:
+    def _origin(request: Request, data: Dict[str, Any], default: str = "human") -> str:
         raw = (
             data.get("origin")
             or data.get("actor")
