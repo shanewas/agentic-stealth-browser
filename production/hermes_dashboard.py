@@ -616,7 +616,27 @@ class BrowserRuntimeManager:
         self.execution_state = "running"
         path = self._resolve_workflow_path(workflow_path)
         workflow = load_workflow(str(path))
-        player = WorkflowPlayer(self.require_browser())
+
+        def _on_gate_blocked(gate: ControlGate) -> None:
+            # #446 A2: the player blocked at a step boundary; surface it
+            # on the dashboard until the gate opens again.
+            self.execution_state = (
+                "waiting_for_human" if gate.intervention is not None else "paused"
+            )
+            self.activity.append(
+                "system",
+                "execution_paused_by_gate",
+                "Execution paused by control gate",
+                mode=gate.mode,
+                paused=gate.paused,
+                intervention=gate.intervention,
+            )
+
+        player = WorkflowPlayer(
+            self.require_browser(),
+            control_gate=self.control_gate,
+            on_gate_blocked=_on_gate_blocked,
+        )
         result = await player.execute(workflow, runtime_vars=variables)
         self.execution_state = "completed" if result.success else "failed"
         payload = {
