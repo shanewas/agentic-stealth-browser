@@ -30,6 +30,7 @@ from workflows.schema import (
     validate_workflow,
     workflow_to_yaml_str,
 )
+from workflows.teach_bridge import TeachSession
 
 
 DEFAULT_STORAGE_ROOT = Path.home() / ".agentic-browser" / "hermes_dashboard"
@@ -263,6 +264,11 @@ class BrowserRuntimeManager:
         self.control_gate = ControlGate(mode="shared")
         self.execution_state = "idle"
         self.recorder = DashboardRecorder()
+        # #445 B2: live teach capture through TeachSession, alongside the
+        # synchronous DashboardRecorder above.
+        self.teach_session: Optional[TeachSession] = None
+        self.teach_name = ""
+        self.teach_description = ""
         self.schedules: List[Dict[str, Any]] = []
         self.start_time: Optional[float] = None
         self.adapters = {
@@ -429,6 +435,7 @@ class BrowserRuntimeManager:
             if hasattr(self.browser, "get_cdp_endpoint"):
                 cdp = await self.browser.get_cdp_endpoint()
         uptime = (time.time() - self.start_time) if self.start_time else 0.0
+        teach_active = self.teach_session is not None and self.teach_session.is_active
         return {
             "running": self.browser is not None,
             "backend": self.active_backend,
@@ -444,8 +451,12 @@ class BrowserRuntimeManager:
             },
             "intervention": self.intervention,
             "uptime_seconds": round(uptime, 1),
-            "recording": self.recorder.active,
-            "recording_name": self.recorder.name if self.recorder.active else None,
+            "recording": self.recorder.active or teach_active,
+            "recording_name": (
+                self.recorder.name
+                if self.recorder.active
+                else (self.teach_name if teach_active else None)
+            ),
             "schedules_count": len(self.schedules),
             # M4: Protocol adapter fields (M1-M3). Both keys are added
             # alongside the existing 'capabilities' key (legacy in-file
@@ -532,6 +543,52 @@ class BrowserRuntimeManager:
 
     def save_recording(self) -> Dict[str, Any]:
         workflow = self.recorder.stop()
+        validation = validate_workflow(workflow)
+        if not validation.valid:
+            raise ValueError("; ".join(validation.errors))
+        path = self.workflow_root / f"{safe_name(workflow.name)}.yaml"
+        path.write_text(workflow_to_yaml_str(workflow), encoding="utf-8")
+        self.activity.append(
+            "system",
+            "workflow_saved",
+            f"Saved workflow {workflow.name}",
+            path=str(path),
+            steps=len(workflow.steps),
+        )
+        return {
+            "workflow": workflow.name,
+            "path": str(path),
+            "steps": len(workflow.steps),
+        }
+
+    async def start_teach_recording(
+        self, name: str, description: str = ""
+    ) -> Dict[str, Any]:
+        page = self.current_page()
+        if page is None:
+            raise RuntimeError("No current page available for teach recording")
+        if self.teach_session is not None:
+            await self.teach_session.stop("replaced")
+            self.teach_session = None
+        self.teach_name = name
+        self.teach_description = description
+        session = TeachSession()
+        self.teach_session = session
+        await session.start(page, capture_seconds=None)
+        self.activity.append(
+            "system", "recording_started", f"Recording {name}", workflow=name
+        )
+        return {"recording": True, "workflow": name}
+
+    async def save_teach_recording(self) -> Dict[str, Any]:
+        session = self.teach_session
+        if session is None:
+            raise RuntimeError("No teach recording in progress")
+        await session.stop("completed")
+        self.teach_session = None
+        workflow = session.recorder.to_workflow(
+            self.teach_name or "dashboard-demo", self.teach_description
+        )
         validation = validate_workflow(workflow)
         if not validation.valid:
             raise ValueError("; ".join(validation.errors))
@@ -1097,16 +1154,25 @@ def create_app(
         session = current_session(request)
         require_operator(session)
         data = await require_csrf(request, session)
-        return manager.start_recording(
-            str(data.get("name") or "dashboard-demo"),
-            str(data.get("description") or ""),
-        )
+        name = str(data.get("name") or "dashboard-demo")
+        description = str(data.get("description") or "")
+        has_page = False
+        if manager.browser is not None:
+            try:
+                has_page = manager.current_page() is not None
+            except Exception:
+                has_page = False
+        if has_page:
+            return await manager.start_teach_recording(name, description)
+        return manager.start_recording(name, description)
 
     @app.post("/api/workflows/record/save")
     async def api_record_save(request: Request):
         session = current_session(request)
         require_operator(session)
         await require_csrf(request, session)
+        if manager.teach_session is not None:
+            return await manager.save_teach_recording()
         return manager.save_recording()
 
     @app.get("/api/workflows")
