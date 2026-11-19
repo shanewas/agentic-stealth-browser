@@ -7,7 +7,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sessions.validation import resolve_contained_path
 from workflows.action_interpreter import normalize_step_params, validate_step_params
@@ -118,8 +118,14 @@ class WorkflowPlayer:
         variable_resolver: Optional[VariableResolver] = None,
         workflows_root: Optional[Any] = None,
         screenshots_dir: Optional[Any] = None,
+        control_gate: Optional[Any] = None,
+        on_gate_blocked: Optional[Callable[[Any], None]] = None,
     ):
         self.browser = browser
+        # #446 A2: optional ControlGate checked cooperatively at step
+        # boundaries. None (CLI/MCP replay) = zero behavior change.
+        self.control_gate = control_gate
+        self.on_gate_blocked = on_gate_blocked
         self.resolver = variable_resolver or VariableResolver()
         # Explicit containment root for nested run_workflow refs. When unset,
         # the directory of the workflow file that references the nested
@@ -330,6 +336,20 @@ class WorkflowPlayer:
             if i in completed:
                 steps_executed += 1
                 continue
+
+            if (
+                self.control_gate is not None
+                and not self.control_gate.is_agent_allowed()
+            ):
+                # Cooperative pause at the step boundary (spike #446
+                # section 2): persist what is done so far, notify once
+                # per block episode, then wait for the gate to open.
+                # Completed steps stay in the frame, so resume continues
+                # at this step without replaying them.
+                self._persist_checkpoint()
+                if self.on_gate_blocked is not None:
+                    self.on_gate_blocked(self.control_gate)
+                await self.control_gate.wait_until_agent_allowed()
 
             errors = validate_step_params(step_type, params)
             if errors:
